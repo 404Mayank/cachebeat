@@ -33,7 +33,12 @@ Transient errors (overloaded, 5xx, network) are retried a minute later. With **S
 
 `/cachebeat settings` opens a pane with five tabs: Beating, Heart, Look, Status and Alerts. Each tab is short enough to fit without scrolling.
 
-- **Keyboard:** ↑↓ move the highlight, and the pane scrolls to follow it in a short window. Enter on an on/off row flips it. Enter on a row marked `›` opens a picker. 1–5 switch tabs, and so does Enter on the open tab. Esc goes back from a picker and closes the pane from a tab.
+- **Keyboard:** the pane has three levels.
+  - **Tab bar:** ↑↓ switch tabs and the page follows. Enter goes into the tab's settings. 1–5 jump to a tab. Esc closes the pane.
+  - **A tab's settings:** ↑↓ move the highlight and stop at the first and last rows; the pane scrolls to follow in a short window. Enter on an on/off row flips it, and Enter on a row marked `›` opens a picker. Esc goes back to the tab bar.
+  - **Picker:** ↑↓ move and Enter picks. Esc goes back to the row.
+
+  Left and Right aren't used. The engine keeps Left for its agents view, and never passes Right to the pane.
 - **Mouse:** a click does what Enter does on that row or tab. The wheel scrolls.
 - **Preview:** the Heart, Look and Status tabs show a live preview of the heart and the status line. In a picker, the preview shows the highlighted option before you pick it. The Animation picker plays every variant at once, the way the bash previews did: five loops, then the blast a beat sets off.
 - **Rows that don't apply are hidden:** the skip-small threshold when skipping is off, speed, timing and effect when animation is off, and the countdown and tokens rows when the status line is off.

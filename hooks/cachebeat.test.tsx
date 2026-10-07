@@ -448,12 +448,36 @@ test('the settings pane: tabs, toggles in place, pickers for the rest', async ($
   await ui.press({ key: 'session' })
   expect(await cmd($, '')).toContain('on, every 5m idle')
 
-  await ui.press({ key: 'tab:beating' }) // Enter on the open tab moves on to the next
+  await ui.press({ key: 'tab:beating' }) // Enter on the open tab goes into it: the page stays
+  expect(await ui.find({ key: 'row:interval' })).toBeDefined()
+  await ui.press({ key: 'tab:heart' }) // another tab shows that one
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
   await ui.press({ key: 'row:variant' })
   expect(await buttons(ui, 'opt:')).toHaveLength(19)
   await ui.press({ key: 'opt:13' })
   expect(stored(store).variant).toBe('orbit')
+  await ui.unmount()
+})
+
+const move = ($: Engine, element: string) => $.ui.focus({ component: 'Pane', requestId: PANE, element, origin: { kind: 'person' } })
+
+test('on the tab bar the arrows switch tabs, and do not go down into one', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect(await move($, 'tab:heart')).toEqual({})
+  expect(await ui.find({ key: 'row:variant' })).toBeDefined() // the page follows
+  expect((await move($, 'row:variant')).deny).toBeDefined() // Enter goes in, not ↓
+  await ui.unmount()
+})
+
+test('in a tab\'s settings the arrows do not climb out to the tab bar', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect(await move($, 'row:interval')).toEqual({})
+  expect((await move($, 'tab:alerts')).deny).toBeDefined() // Esc does
+  expect(await move($, 'row:defaultOn')).toEqual({})
   await ui.unmount()
 })
 

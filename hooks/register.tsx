@@ -405,7 +405,9 @@ export const register: Register = on => {
     const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, notice, isResetArmed }
     const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
-      tab: id => void goTo($, { tab: id, picker: null }, `tab:${id}`),
+      // Enter on the open tab goes into its settings; on another (1-5, a click), shows that one
+      tab: id => void (id === page.tab && !page.picker ? focusOn($, ring[0]!) : goTo($, { tab: id, picker: null }, `tab:${id}`)),
+      at: key => void focusOn($, key),
       open: key => void goTo($, { ...page, picker: key }, `opt:${Math.max(0, rowOf(key)!.row.values.indexOf(c[key]))}`),
       pick: (key, value) => void setSettings($, { [key]: value }).then(() => goTo($, { ...page, picker: null }, `row:${key}`)),
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
@@ -425,13 +427,13 @@ export const register: Register = on => {
   })
 
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
-    // the arrows step over the other tabs: ring[0] is the open one
-    if (e.origin.kind === 'person' && e.element?.startsWith('tab:') && !ring.includes(e.element)) {
-      const tabAt = (key: string | undefined) => TABS.findIndex(t => `tab:${t.id}` === key)
-      const isFromTab = (await read($, focusAtom)) === ring[0]
-      const isForward = tabAt(e.element) > tabAt(ring[0])
-      // off the open tab: on into its rows, or back round to the bottom; from anywhere else: to the open tab
-      e = { ...e, element: !isFromTab ? ring[0]! : isForward ? ring[1]! : ring.at(-1)! }
+    // the tab bar and a tab's settings are two levels: the arrows never cross between them
+    if (e.origin.kind === 'person' && e.element) {
+      const from = await read($, focusAtom)
+      const isToTab = e.element.startsWith('tab:')
+      // with nothing focused yet, the first move goes anywhere
+      if (from && from.startsWith('tab:') !== isToTab) return { deny: 'Enter goes into a tab, Esc back out' }
+      if (isToTab) await update($, pageAtom, () => ({ tab: e.element!.slice(4), picker: null })) // the page follows the tabs
     }
     const r = await next(e)
     if (!r.deny) await update($, focusAtom, () => e.element ?? '')
@@ -442,6 +444,11 @@ export const register: Register = on => {
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
     if (e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
     const focus = await read($, focusAtom)
+    if (focus.startsWith('tab:')) {
+      const t = TABS[TABS.findIndex(x => `tab:${x.id}` === focus) + e.by]
+      if (t) await goTo($, { tab: t.id, picker: null }, `tab:${t.id}`)
+      return {}
+    }
     const i = ring.indexOf(focus)
     const j = i < 0 ? (e.by > 0 ? 0 : ring.length - 1) : i + e.by
     if (j < 0 || j >= ring.length) return next(e) // past either end, the window scrolls on to its edge
@@ -451,11 +458,12 @@ export const register: Register = on => {
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const page = await read($, pageAtom)
-    // Esc in a picker goes back to its tab; anywhere else it closes
-    if (e.origin.kind === 'person' && page.picker) {
+    // Esc steps back a level: a picker to its row, a tab's settings to the tab bar; the tab bar closes
+    const focus = await read($, focusAtom)
+    if (e.origin.kind === 'person' && (page.picker || !focus.startsWith('tab:'))) {
       // Esc has handed the keys back to the prompt: open asks for them again
       await $.ui.open(PANE_OPEN)
-      await goTo($, { ...page, picker: null }, `row:${page.picker}`)
+      await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`)
       return { value: undefined }
     }
     stopPaneTicker()

@@ -10,6 +10,7 @@ type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Input'>
 export type Actions = {
   set: (patch: Partial<BeatSettings>) => void
   tab: (id: string) => void
+  at: (key: string) => void // a press lands the focus on what was pressed (a click on a row from the tabs)
   open: (key: keyof BeatSettings) => void
   pick: (key: keyof BeatSettings, value: Value) => void
   back: () => void
@@ -127,8 +128,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
 
   const tab = TABS.find(t => t.id === v.page.tab) ?? TABS[0]!
   const rows = tab.rows.filter(r => !r.show || r.show(s))
-  // the arrows reach the open tab alone; Enter there moves on to the next, 1-5 and a click to any
-  ring.push(`tab:${tab.id}`)
+  // the tab's own ring: the tab bar above it is a level of its own, reached by Esc
   if (tab.id === 'beating') ring.push('session')
   for (const r of rows) {
     ring.push(`row:${r.key}`)
@@ -146,7 +146,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
             hotkey={`${i + 1}`}
             key={`tab:${t.id}`}
             dimColor={t.id !== tab.id}
-            onPress={() => act.tab(t.id === tab.id ? TABS[(i + 1) % TABS.length]!.id : t.id)}
+            onPress={() => act.tab(t.id)}
           >
             {t.title}
           </Button>
@@ -154,14 +154,14 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       </Box>
       {rule}
       {tab.id === 'beating' && (
-        <Button plain key="session" onPress={() => act.toggleSession()}>{line('This session', v.isOn ? 'on' : 'off')}</Button>
+        <Button plain key="session" onPress={() => (act.at('session'), act.toggleSession())}>{line('This session', v.isOn ? 'on' : 'off')}</Button>
       )}
       {rows.map(r => (
         <Box flexDirection="column">
           <Button
             plain
             key={`row:${r.key}`}
-            onPress={() => (isPicker(r) ? act.open(r.key) : act.set({ [r.key]: r.values[r.values.indexOf(s[r.key]) === 0 ? 1 : 0] }))}
+            onPress={() => (isPicker(r) ? act.open(r.key) : (act.at(`row:${r.key}`), act.set({ [r.key]: r.values[r.values.indexOf(s[r.key]) === 0 ? 1 : 0] })))}
           >
             {line(r.label, shown(r, s[r.key], s), isPicker(r) ? ' ›' : '')}
           </Button>
@@ -182,11 +182,13 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       {tab.preview && preview(els, s, tab.preview, v.tick)}
       {rule}
       <Box gap={1}>
-        <Button key="beatNow" onPress={() => act.beatNow()}>Beat now</Button>
-        <Button key="reset" onPress={() => act.reset()}>{v.isResetArmed ? 'Press again to reset' : 'Reset'}</Button>
+        <Button key="beatNow" onPress={() => (act.at('beatNow'), act.beatNow())}>Beat now</Button>
+        <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset' : 'Reset'}</Button>
       </Box>
       {v.notice && <Text dimColor>{v.notice}</Text>}
-      <Text dimColor>↑↓ move · enter changes · 1-5 or enter on the tab switches tabs · esc closes</Text>
+      <Text dimColor>
+        {v.focus.startsWith('tab:') ? '↑↓ tabs · enter opens · 1-5 jump · esc closes' : '↑↓ move · enter changes · esc back to the tabs'}
+      </Text>
     </Box>
   )
   return { tree, ring }
