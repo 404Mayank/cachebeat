@@ -52,6 +52,8 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     return <Text>engine</Text>
   })
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
+  on('ui.focus', () => ({})) // the engine's ring; a move the test raises lands
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return { clock, forks, logs, toasts, tails, store }
@@ -110,7 +112,7 @@ test('the preview plays five loops, then the blast', () => {
 })
 
 test('settings from an older store fall back to the defaults one by one', () => {
-  expect(normalize({ interval: 5, variant: 'gone', speed: 3, extra: 1 })).toEqual({ ...DEFAULTS, interval: 5 })
+  expect(normalize({ interval: 5, variant: 'gone', speed: 3, extra: 1, statusLine: 'inline' })).toEqual({ ...DEFAULTS, interval: 5 })
   expect(normalize(undefined)).toEqual(DEFAULTS)
 })
 
@@ -247,17 +249,13 @@ test('the beat line sits under the last turn\'s closing row, counts beats and do
   expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×2']) // frozen
 })
 
-test('the beat line goes inline, after a blank line, or nowhere; with the tokens kept', async ($: Engine, on: On) => {
-  const { clock, store } = await setup($, on, { settings: { statusLine: 'inline', showTokens: true } })
+test('the beat line goes after a blank line, or nowhere; with the tokens kept', async ($: Engine, on: On) => {
+  const { clock, store } = await setup($, on, { settings: { statusLine: 'spaced', showTokens: true } })
   await cmd($, '3')
   await $.turn.complete(turn)
   await draw($, row('r1'))
   await clock.advance(3 * M)
-  expect(await draw($, row('r1'))).toEqual(['engine', ' · ', '♥ cache kept warm ×1 · 90k cached · next in 3m'])
-
-  store.set('settings', { ...DEFAULTS, statusLine: 'spaced' })
-  await $.turn.start({ text: 'hi', turnId: 't2' })
-  await $.turn.complete(turn)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×1 · 90k cached · next in 3m'])
   const ui = await $.ui.mount(row('r1'))
   expect((await ui.findAll({ type: 'Box' })).some(b => b.props?.marginTop === 1 && b.text?.includes('kept warm'))).toBe(true)
   await ui.unmount()
@@ -426,25 +424,64 @@ test('on its own line the heart takes the color', async ($: Engine, on: On) => {
   expect(texts[2]?.text).toBe('0')
 })
 
-test('the settings pane: a press changes the global setting; the gallery picks a variant', async ($: Engine, on: On) => {
+const buttons = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
+  (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith(prefix))
+
+test('the settings pane: tabs, toggles in place, pickers for the rest', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await cmd($, 'settings')).toBe('settings opened')
   const ui = await $.ui.mount(SETTINGS_PANE)
-  await ui.press({ key: 'row:defaultOn' })
-  await ui.press({ key: 'row:interval' })
-  expect(stored(store)).toMatchObject({ defaultOn: true, interval: 55 })
-  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeUndefined()
+  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:heart', 'tab:look', 'tab:status', 'tab:alerts'])
+
+  await ui.press({ key: 'row:defaultOn' }) // two values: toggles
+  expect(stored(store).defaultOn).toBe(true)
+  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeUndefined() // shows only once skipping
   await ui.press({ key: 'row:skipSmall' })
   expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeDefined()
 
-  await ui.press({ key: 'animations' })
-  expect((await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('variant:'))).toHaveLength(19)
-  await ui.press({ key: 'variant:orbit' })
+  await ui.press({ key: 'row:interval' }) // more: a picker
+  expect(await buttons(ui, 'opt:')).toHaveLength(13)
+  await ui.press({ key: 'opt:3' })
+  expect(stored(store).interval).toBe(5)
+  expect(await ui.find({ key: 'row:interval' })).toBeDefined() // back on the tab
+
+  await ui.press({ key: 'session' })
+  expect(await cmd($, '')).toContain('on, every 5m idle')
+
+  await ui.press({ key: 'tab:beating' }) // Enter on the open tab moves on to the next
+  expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  await ui.press({ key: 'row:variant' })
+  expect(await buttons(ui, 'opt:')).toHaveLength(19)
+  await ui.press({ key: 'opt:13' })
   expect(stored(store).variant).toBe('orbit')
-  await ui.press({ key: 'back' })
+  await ui.unmount()
+})
+
+test('the focused option of a picker shows in the preview before it is picked', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'tab:look' })
+  await ui.press({ key: 'row:color' })
+  await $.ui.focus({ component: 'Pane', requestId: PANE, element: 'opt:2', origin: { kind: 'person' } }) // permission
+  const line = (await ui.findAll({ type: 'Text' })).find(t => t.text?.includes('cache kept warm'))
+  expect(line?.props).toMatchObject({ color: 'permission' })
+  expect(stored(store).color).toBe('dim')
+  await ui.unmount()
+})
+
+test('settings changes keep another session\'s; reset asks twice', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:defaultOn' })
   store.set('settings', { ...stored(store), interval: 10 }) // another session's change
-  await ui.press({ key: 'row:effect' })
-  expect(stored(store)).toMatchObject({ interval: 10, effect: 'flash', variant: 'orbit' })
+  await ui.press({ key: 'row:stopAtUsage' })
+  await ui.press({ key: 'opt:4' })
+  expect(stored(store)).toMatchObject({ interval: 10, stopAtUsage: 90, defaultOn: true })
+  await ui.press({ key: 'reset' })
+  expect(stored(store).interval).toBe(10)
+  expect((await ui.find({ key: 'reset' }))?.text).toBe('Press again to reset')
   await ui.press({ key: 'reset' })
   expect(stored(store)).toEqual(DEFAULTS)
   await ui.unmount()

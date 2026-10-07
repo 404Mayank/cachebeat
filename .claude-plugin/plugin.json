@@ -1,6 +1,6 @@
 {
   "name": "cachebeat",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Keeps the prompt cache warm while the session sits idle, via a side fork that never touches the transcript",
   "types": "./types/index.d.ts"
 }

@@ -22,7 +22,6 @@ export const DEFAULTS: BeatSettings = {
   showCountdown: true,
   showTokens: false,
   onBeat: 'none',
-  sound: 'off',
   onStop: 'log',
 }
 
@@ -36,6 +35,7 @@ export function normalize(stored: unknown): BeatSettings {
   }
   const out = s as BeatSettings
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
+  if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
   return out
 }
 
@@ -108,8 +108,11 @@ export function spans(text: string, s: BeatSettings, tick: number, lit: boolean)
 export const tokens = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`
 
-type Value = string | number | boolean
-/** One row of the settings pane: pressing it moves to the next of `values`. */
+export type Value = string | number | boolean
+/**
+ * One row of the settings pane. Two values toggle in place on Enter; more open a picker, whose
+ * focused option the preview shows before it is picked.
+ */
 export type Row = {
   key: keyof BeatSettings
   label: string
@@ -118,18 +121,20 @@ export type Row = {
   fmt?: (v: Value, s: BeatSettings) => string
 }
 
-const onOff = (v: Value) => (v ? 'on' : 'off')
-const SOUNDS = ['off', 'message', 'bell', 'complete', 'dialog-information'] as const
+export type Preview = 'heart' | 'status' | 'both'
+export type Tab = { id: string; title: string; rows: readonly Row[]; preview?: Preview }
 
-export const SECTIONS: readonly { title: string; rows: readonly Row[] }[] = [
+const onOff = (v: Value) => (v ? 'on' : 'off')
+
+export const TABS: readonly Tab[] = [
   {
-    title: 'Beating',
+    id: 'beating', title: 'Beating',
     rows: [
       { key: 'defaultOn', label: 'New sessions start', values: [false, true], fmt: onOff },
       { key: 'interval', label: 'Beat after idle', values: [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 50, 55], fmt: v => `${v}m` },
       {
         key: 'intervalScope', label: '/cachebeat <min> sets', values: ['session', 'global'],
-        fmt: v => (v === 'session' ? 'this session only' : 'the global default'),
+        fmt: v => (v === 'session' ? 'this session' : 'the default'),
       },
       { key: 'stopAfterHours', label: 'Stop after idle', values: [1, 2, 4, 6, 8, 12, 24], fmt: v => `${v}h` },
       { key: 'stopAtUsage', label: 'Stop at usage', values: [50, 60, 70, 80, 90, 95, 100], fmt: v => `${v}%` },
@@ -141,47 +146,48 @@ export const SECTIONS: readonly { title: string; rows: readonly Row[] }[] = [
     ],
   },
   {
-    title: 'Heart',
+    id: 'heart', title: 'Heart', preview: 'heart',
     rows: [
+      { key: 'variant', label: 'Animation', values: VARIANTS.map(v => v.id), fmt: v => VARIANTS.find(x => x.id === v)?.name ?? `${v}` },
       { key: 'animate', label: 'Animate', values: [true, false], fmt: onOff },
-      { key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], fmt: v => `${v} (${FRAME_MS[v as BeatSettings['speed']]}ms)` },
-      { key: 'timing', label: 'Timing', values: ['linear', 'lubdub'], fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear') },
-      {
-        key: 'heartPlacement', label: 'Placement', values: ['tail', 'line'],
-        fmt: v => (v === 'tail' ? 'end of the hint line (always dim)' : 'own line under the hint'),
-      },
+      { key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], show: s => s.animate, fmt: v => `${v} · ${FRAME_MS[v as BeatSettings['speed']]}ms` },
+      { key: 'timing', label: 'Timing', values: ['linear', 'lubdub'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear') },
+      { key: 'heartPlacement', label: 'Placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line') },
       { key: 'showCount', label: 'Beat count', values: [true, false], fmt: onOff },
     ],
   },
   {
-    title: 'Look',
+    id: 'look', title: 'Look', preview: 'both',
     rows: [
       { key: 'color', label: 'Color', values: COLORS, fmt: (v, s) => (v === 'custom' ? `custom ${s.customColor}` : `${v}`) },
-      { key: 'effect', label: 'Effect', values: ['steady', 'flash', 'flow'] },
+      { key: 'effect', label: 'Effect', values: ['steady', 'flash', 'flow'], show: s => s.animate },
     ],
   },
   {
-    title: 'Status line',
+    id: 'status', title: 'Status', preview: 'status',
     rows: [
       {
-        key: 'statusLine', label: 'Placement', values: ['below', 'spaced', 'inline', 'off'],
-        fmt: v => ({ below: 'below the turn row', spaced: 'below, after a blank line', inline: 'on the turn row', off: 'off' })[v as string]!,
+        key: 'statusLine', label: 'Placement', values: ['below', 'spaced', 'off'],
+        fmt: v => ({ below: 'below the turn row', spaced: 'below, after a blank line', off: 'off' })[v as string]!,
       },
-      { key: 'showCountdown', label: 'Countdown', values: [true, false], fmt: onOff },
-      { key: 'showTokens', label: 'Tokens kept', values: [false, true], fmt: onOff },
+      { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff },
+      { key: 'showTokens', label: 'Tokens kept', values: [false, true], show: s => s.statusLine !== 'off', fmt: onOff },
     ],
   },
   {
-    title: 'Notify',
+    id: 'alerts', title: 'Alerts',
     rows: [
       { key: 'onBeat', label: 'On a beat', values: ['none', 'toast'] },
-      { key: 'sound', label: 'Sound on a beat', values: SOUNDS },
       { key: 'onStop', label: 'On stop', values: ['log', 'toast', 'none'] },
     ],
   },
 ]
 
-export const cycle = (row: Row, s: BeatSettings): Value => {
-  const i = row.values.indexOf(s[row.key])
-  return row.values[(i + 1) % row.values.length]!
+export const rowOf = (key: keyof BeatSettings) => {
+  for (const tab of TABS) for (const row of tab.rows) if (row.key === key) return { tab, row }
+  return undefined
 }
+
+export const isPicker = (row: Row) => row.values.length > 2
+
+export const toggled = (row: Row, s: BeatSettings): Value => row.values[row.values.indexOf(s[row.key]) === 0 ? 1 : 0]!

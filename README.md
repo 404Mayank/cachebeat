@@ -31,13 +31,19 @@ Transient errors (overloaded, 5xx, network) are retried a minute later. With **S
 
 ## Settings
 
-`/cachebeat settings` opens a pane. Tab moves between rows, Enter steps a row to its next value, and Esc closes the pane. The top of the pane previews the heart and the status line live, with your current animation, speed, timing, color and effect. **Animation ›** opens a gallery where every variant plays at once, the way the bash previews did: five loops, then the blast a beat sets off. Enter picks one.
+`/cachebeat settings` opens a pane with five tabs: Beating, Heart, Look, Status and Alerts. Each tab is short enough to fit without scrolling.
+
+- **Keyboard:** ↑↓ move the highlight, and the pane scrolls to follow it in a short window. Enter on an on/off row flips it. Enter on a row marked `›` opens a picker. 1–5 switch tabs, and so does Enter on the open tab. Esc goes back from a picker and closes the pane from a tab.
+- **Mouse:** a click does what Enter does on that row or tab. The wheel scrolls.
+- **Preview:** the Heart, Look and Status tabs show a live preview of the heart and the status line. In a picker, the preview shows the highlighted option before you pick it. The Animation picker plays every variant at once, the way the bash previews did: five loops, then the blast a beat sets off.
+- **Rows that don't apply are hidden:** the skip-small threshold when skipping is off, speed, timing and effect when animation is off, and the countdown and tokens rows when the status line is off.
 
 Settings are global. They're kept in the plugin's store, so every session uses them. A session that's already running picks up changes at its next turn.
 
-| Section | Setting | Values | Default |
+| Tab | Setting | Values | Default |
 | --- | --- | --- | --- |
-| Beating | New sessions start | on / off | off |
+| Beating | This session | on / off (this session only, not saved) | off |
+| | New sessions start | on / off | off |
 | | Beat after idle | 1–55 min | 50m |
 | | `/cachebeat <min>` sets | this session only / the global default | this session |
 | | Stop after idle | 1–24 h | 8h |
@@ -51,18 +57,19 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | | Beat count | on / off | on |
 | Look | Color | dim; theme: claude, permission, warning, fastMode, inactive; presets red, magenta, yellow, green, cyan, white (drawn as hex); custom `#hex` | dim |
 | | Effect | steady / flash (lights up on each full heart) / flow (a shimmer sweeping across, like the thinking text) | steady |
-| Status line | Placement | below the turn row / below after a blank line / on the turn row / off | below |
+| Status | Placement | below the turn row / below after a blank line / off | below |
 | | Countdown | on / off | on |
 | | Tokens kept | on / off (`· 184k cached`) | off |
-| Notify | On a beat | none / toast | none |
-| | Sound on a beat | off / message / bell / complete / dialog-information | off |
+| Alerts | On a beat | none / toast | none |
 | | On stop | log / toast / none | log |
 
 The theme colors are theme keys, so they follow your active theme, and their highlight is the theme's own shimmer color. A preset or custom color is drawn as hex, and its highlight is a lighter shade of it.
 
 The hint line only takes plain text, which it draws dim. A heart there can't take a color or an effect; give it its own line for those. The status line takes the color and effect wherever it's placed.
 
-Sounds are freedesktop sound-theme ids, played with `canberra-gtk-play` (libcanberra). Where that isn't installed, nothing plays.
+The status line can't share a line with the turn row ("✻ Cooked for 2s · done 3:10 AM"). The engine hands that row to plugins whole and full width, with no text to measure, so anything put beside it lands at the far edge.
+
+There's no sound option. The harness's only audio API, `$.audio.play`, plays nothing on Linux or Windows.
 
 ### Animations
 

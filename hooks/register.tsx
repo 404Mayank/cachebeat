@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { PanePage, Pulse, Saved, BeatSettings } from '../types'
 import { loopIndex, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
-import { DEFAULTS, FRAME_MS, isLit, normalize, spans, tokens } from './settings'
+import { DEFAULTS, FRAME_MS, TABS, isLit, normalize, rowOf, spans, tokens } from './settings'
 
 const MIN = 60_000
 export const IDLE = DEFAULTS.interval * MIN // default silence before a beat; must stay under the cache TTL
@@ -17,7 +17,8 @@ const frameAtom = atom({ plugin: 'cachebeat', key: 'frame' } as const, 0)
 const lineAtom = atom({ plugin: 'cachebeat', key: 'line' } as const, '')
 const settingsAtom = atom({ plugin: 'cachebeat', key: 'settings' } as const, DEFAULTS)
 const tickAtom = atom({ plugin: 'cachebeat', key: 'tick' } as const, 0)
-const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, 'main' as PanePage)
+const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'beating', picker: null } as PanePage)
+const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, stretch: 0, row: null, rowsDone: {},
@@ -28,6 +29,9 @@ let timer: { cancel: () => void } | undefined
 let ticker: { cancel: () => void } | undefined
 let paneTicker: { cancel: () => void } | undefined
 let paneTick = 0
+let ring: string[] = [] // the pane's focusable keys as last drawn, in order
+let notice = '' // the pane's footer line
+let isResetArmed = false
 let frame = 0
 let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
@@ -186,10 +190,6 @@ async function beat($: EngineInterface): Promise<string> {
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
   if (s.row === null) $.ui.log(renewed)
   if (cfg.onBeat === 'toast') $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
-  if (cfg.sound !== 'off') {
-    // Linux's sound theme; a host without libcanberra plays nothing
-    void $.process.run(['canberra-gtk-play', '-i', cfg.sound]).catch(err => $.ui.log(`sound: ${err}`, { to: 'debug' }))
-  }
   await schedule($)
   return renewed
 }
@@ -225,10 +225,42 @@ async function turnOn($: EngineInterface, minutes: number | undefined) {
   return { text: `on, ${every()} · ${when(ms)}` }
 }
 
+const PANE_OPEN = { id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, holdToasts: true, rows: 24 } as const
+
 async function openSettings($: EngineInterface) {
   await syncSettings($)
-  await update($, pageAtom, () => 'main')
-  await $.ui.open({ id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, rows: 40 })
+  notice = ''
+  isResetArmed = false
+  await update($, pageAtom, () => ({ tab: 'beating', picker: null }))
+  await $.ui.open(PANE_OPEN)
+  await focusOn($, 'tab:beating')
+}
+
+/** Moves the pane's focus; a move this plugin makes skips its own ui.focus hook, so it notes it here. */
+async function focusOn($: EngineInterface, key: string) {
+  // a focus that cannot move leaves the page as it is (`claude plugin test` has no focus to move)
+  const { deny } = await $.ui.focus({ requestId: PANE, key }).catch((err: unknown) => ({ deny: String(err) }))
+  if (deny) return $.ui.log(`focus ${key}: ${deny}`, { to: 'debug' })
+  await update($, focusAtom, () => key)
+  await $.ui.scroll({ to: { key }, in: PANE }).catch((err: unknown) => $.ui.log(`scroll to ${key}: ${err}`, { to: 'debug' }))
+}
+
+function stopPaneTicker() {
+  paneTicker?.cancel()
+  paneTicker = undefined
+}
+
+/** Shows a page of the pane and puts the focus on `key` there. */
+async function goTo($: EngineInterface, page: PanePage, key: string) {
+  isResetArmed = false
+  await update($, pageAtom, () => page)
+  await focusOn($, key)
+}
+
+/** Puts a line in the pane's footer. */
+function say($: EngineInterface, text: string) {
+  notice = text
+  void update($, tickAtom, t => t + 1)
 }
 
 const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|global on|off|settings]'
@@ -304,7 +336,8 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // the beat line, by the closing row of the last turn ("✻ Cogitated for 2s"), counting down
+  // the beat line, under the closing row of the last turn. The engine hands that row over whole
+  // and full width, so nothing can sit beside it on its line ("✻ Cogitated for 2s"), counting down
   on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
     if (!rowsSeen.has(e.requestId)) {
       rowsSeen.add(e.requestId)
@@ -323,15 +356,6 @@ export const register: Register = on => {
     const p = moving ? await read($, pulse) : 'hidden'
     const { Box, Text } = $.ui.resolve(e)
     const painted = paint(Text, spans(line, moving ? c : { ...c, effect: 'steady' }, f, isLit(heartFrame(c, p, f))))
-    if (c.statusLine === 'inline') {
-      return (
-        <Box>
-          {await next(e)}
-          <Text dimColor> · </Text>
-          {painted}
-        </Box>
-      )
-    }
     return (
       <Box flexDirection="column">
         {await next(e)}
@@ -368,21 +392,72 @@ export const register: Register = on => {
     const c = await read($, settingsAtom)
     const page = await read($, pageAtom)
     const tick = await read($, tickAtom)
-    paneTicker ??= $.clock.every(FRAME_MS[c.speed], () => void update($, tickAtom, () => ++paneTick))
+    const focus = await read($, focusAtom)
+    await read($, pulse) // redraws "This session" as it turns on or off
+    // the preview's clock runs only while there is a preview to move
+    const picked = page.picker ? rowOf(page.picker) : undefined
+    const isMoving = picked ? picked.row.key === 'variant' || !!picked.tab.preview : !!TABS.find(t => t.id === page.tab)?.preview
+    if (isMoving) paneTicker ??= $.clock.every(FRAME_MS[c.speed], () => void update($, tickAtom, () => ++paneTick))
+    else stopPaneTicker()
     const els = $.ui.resolve(e)
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
-    return settingsPane(els, c, page, tick, {
+    const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, notice, isResetArmed }
+    const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
-      page: p => void update($, pageAtom, () => p),
-      beatNow: () => void beatNow($).then(text => $.ui.toast(text)),
-      reset: () => void setSettings($, DEFAULTS),
-      close: () => void $.ui.close({ id: PANE }),
+      tab: id => void goTo($, { tab: id, picker: null }, `tab:${id}`),
+      open: key => void goTo($, { ...page, picker: key }, `opt:${Math.max(0, rowOf(key)!.row.values.indexOf(c[key]))}`),
+      pick: (key, value) => void setSettings($, { [key]: value }).then(() => goTo($, { ...page, picker: null }, `row:${key}`)),
+      back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
+      toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($, undefined).then(r => r.text)).then(t => say($, `this session: ${t}`)),
+      beatNow: () => void beatNow($).then(t => say($, t)),
+      reset: () => {
+        if (!isResetArmed) {
+          isResetArmed = true
+          return say($, '')
+        }
+        isResetArmed = false
+        void setSettings($, DEFAULTS).then(() => say($, 'settings reset to the defaults'))
+      },
     })
+    ring = walk
+    return tree
   })
 
-  on('ui.close', { id: PANE }, ($, e, next) => {
-    paneTicker?.cancel()
-    paneTicker = undefined
+  on('ui.focus', { requestId: PANE }, async ($, e, next) => {
+    // the arrows step over the other tabs: ring[0] is the open one
+    if (e.origin.kind === 'person' && e.element?.startsWith('tab:') && !ring.includes(e.element)) {
+      const tabAt = (key: string | undefined) => TABS.findIndex(t => `tab:${t.id}` === key)
+      const isFromTab = (await read($, focusAtom)) === ring[0]
+      const isForward = tabAt(e.element) > tabAt(ring[0])
+      // off the open tab: on into its rows, or back round to the bottom; from anywhere else: to the open tab
+      e = { ...e, element: !isFromTab ? ring[0]! : isForward ? ring[1]! : ring.at(-1)! }
+    }
+    const r = await next(e)
+    if (!r.deny) await update($, focusAtom, () => e.element ?? '')
+    return r
+  })
+
+  // the arrows walk the focus ring, and the window follows it; the wheel and page keys scroll
+  on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
+    if (e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
+    const focus = await read($, focusAtom)
+    const i = ring.indexOf(focus)
+    const j = i < 0 ? (e.by > 0 ? 0 : ring.length - 1) : i + e.by
+    if (j < 0 || j >= ring.length) return next(e) // past either end, the window scrolls on to its edge
+    await focusOn($, ring[j]!)
+    return {}
+  })
+
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    const page = await read($, pageAtom)
+    // Esc in a picker goes back to its tab; anywhere else it closes
+    if (e.origin.kind === 'person' && page.picker) {
+      // Esc has handed the keys back to the prompt: open asks for them again
+      await $.ui.open(PANE_OPEN)
+      await goTo($, { ...page, picker: null }, `row:${page.picker}`)
+      return { value: undefined }
+    }
+    stopPaneTicker()
     return next(e)
   })
 }

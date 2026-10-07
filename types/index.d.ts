@@ -32,15 +32,15 @@ export type BeatSettings = {
   color: string // 'dim', a theme key, a preset, or 'custom'
   customColor: string // #rrggbb
   effect: 'steady' | 'flash' | 'flow'
-  statusLine: 'below' | 'spaced' | 'inline' | 'off'
+  statusLine: 'below' | 'spaced' | 'off'
   showCountdown: boolean
   showTokens: boolean
   onBeat: 'none' | 'toast'
-  sound: string // 'off' or a freedesktop sound id
   onStop: 'log' | 'toast' | 'none'
 }
 
-export type PanePage = 'main' | 'animations'
+/** Where the settings pane is: a tab, and the row whose picker is open over it. */
+export type PanePage = { tab: string; picker: keyof BeatSettings | null }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -52,6 +52,7 @@ declare module 'claude-code' {
       settings: BeatSettings
       tick: number // the settings pane's preview clock
       page: PanePage
+      focus: string // the key of the pane's focused element, or ''
     }
   }
 }
