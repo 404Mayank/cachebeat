@@ -36,11 +36,16 @@ export function paint(Text: Els['Text'], list: Span[]) {
   return list.map(sp => (sp.color ? <Text color={sp.color} dimColor={sp.dim}>{sp.text}</Text> : <Text dimColor={sp.dim}>{sp.text}</Text>))
 }
 
-/** The beat line as the status line draws it, from this session's figures. */
-export function statusText(s: BeatSettings, stretch: number, read: number | null, next: string | null) {
-  let text = `♥ cache kept warm ×${stretch}`
+/**
+ * The status line from the session's figures: its beats, what the last one read, the time to the
+ * next; before the first beat, the time to it alone. '' when there is nothing to say.
+ */
+export function statusText(s: BeatSettings, beats: number, read: number | null, next: string | null) {
+  const countdown = s.showCountdown && next
+  if (beats === 0) return countdown ? `♡ next beat in ${next}` : ''
+  let text = `♥ cache kept warm ×${beats}`
   if (s.showTokens && read) text += ` · ${tokens(read)} cached`
-  if (s.showCountdown && next) text += ` · next in ${next}`
+  if (countdown) text += ` · next in ${next}`
   return text
 }
 

@@ -292,11 +292,11 @@ test('off, a new turn and a subagent turn each keep it from beating', async ($: 
   expect(forks.length).toBe(0)
 })
 
-test('the beat line sits under the last turn\'s closing row, counts beats and down to the next', async ($: Engine, on: On) => {
+test('one status line, under the latest turn: counts the session\'s beats and down to the next', async ($: Engine, on: On) => {
   const { clock, logs } = await setup($, on)
   await cmd($, '3')
   await $.turn.complete(turn)
-  expect(await draw($, row('r1'))).toEqual(['engine']) // no beat yet
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 3m']) // no beat yet
   await clock.advance(3 * M)
   expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×1 · next in 3m'])
   await clock.advance(3 * M)
@@ -305,8 +305,8 @@ test('the beat line sits under the last turn\'s closing row, counts beats and do
 
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await $.turn.complete(turn)
-  expect(await draw($, row('r2'))).toEqual(['engine'])
-  expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×2']) // frozen
+  expect(await draw($, row('r2'))).toEqual(['engine', '♥ cache kept warm ×2 · next in 3m']) // moved, still counting
+  expect(await draw($, row('r1'))).toEqual(['engine'])
 })
 
 test('the beat line goes after a blank line, or nowhere; with the tokens kept', async ($: Engine, on: On) => {
@@ -439,8 +439,8 @@ test('under the minimum context it says beats will skip, once, and arms when a t
   world.contextTokens = 30_000
   await $.turn.start({ text: 'more', turnId: 't3' })
   await $.turn.complete(turn)
-  expect(await draw($, row('r2'))).toEqual(['engine'])
-  expect(await draw($, row('r1'))).toEqual(['engine', '♡ beats skip · this chat is 8k tokens, under your 20k minimum']) // kept
+  expect(await draw($, row('r2'))).toEqual(['engine', '♡ next beat in 3m'])
+  expect(await draw($, row('r1'))).toEqual(['engine'])
   await clock.advance(3 * M)
   expect(forks).toHaveLength(1)
 })

@@ -21,7 +21,7 @@ const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'bea
 const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
-  enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, stretch: 0, row: null, small: null, rowsDone: {},
+  enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS
@@ -47,7 +47,7 @@ export const fmt = (ms: number) => {
 const idle = () => s.idle ?? cfg.interval * MIN
 
 function save($: EngineInterface) {
-  const copy = { ...s, rowsDone: { ...s.rowsDone } }
+  const copy = { ...s }
   void update($, saved, () => copy)
 }
 
@@ -84,12 +84,13 @@ function restartClocks($: EngineInterface) {
   void update($, tickAtom, t => t + 1)
 }
 
-/** The beat line under the last turn's closing row, or '' while there is none. */
+/** The status line under the latest turn's closing row, or '' while there is nothing to say. */
 async function refreshLine($: EngineInterface) {
-  let text = s.small && s.enabled ? `♡ beats skip · ${s.small}` : ''
-  if (s.stretch > 0) {
+  let text = ''
+  if (s.enabled && s.small) text = `♡ beats skip · ${s.small}`
+  else if (s.enabled || s.beats > 0) {
     const next = s.enabled && s.nextAt !== null ? fmt(s.nextAt - (await $.clock.now())) : null
-    text = statusText(cfg, s.stretch, s.lastRead, next)
+    text = statusText(cfg, s.beats, s.lastRead, next)
   }
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
 }
@@ -222,7 +223,6 @@ async function beat($: EngineInterface): Promise<string> {
   s.lastWarm = await $.clock.now()
   s.lastRead = got
   s.beats++
-  s.stretch++
   if (cfg.animate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
   if (logs(cfg.onBeat) || s.row === null) $.ui.log(renewed) // with no closing row, no status line says it
@@ -365,15 +365,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (!beating) {
       busy = true
-      const line = await read($, lineAtom)
-      if (s.row !== null && line) {
-        // the row keeps its final count, or why it was not kept warm
-        s.rowsDone[s.row] = s.stretch > 0 ? statusText({ ...cfg, showCountdown: false }, s.stretch, s.lastRead, null) : line
-        const ids = Object.keys(s.rowsDone)
-        for (const id of ids.slice(0, Math.max(0, ids.length - 50))) delete s.rowsDone[id]
-      }
-      s.row = null
-      s.stretch = 0
+      s.row = null // the line moves to this turn's row once it ends
       await schedule($)
     }
     return next(e)
@@ -390,8 +382,8 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // the beat line, under the closing row of the last turn. The engine hands that row over whole
-  // and full width, so nothing can sit beside it on its line ("✻ Cogitated for 2s"), counting down
+  // the status line, under the closing row of the latest turn ("✻ Cogitated for 2s"), counting down.
+  // The engine hands that row over whole and full width, so nothing can sit beside it on its line
   on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
     if (!rowsSeen.has(e.requestId)) {
       rowsSeen.add(e.requestId)
@@ -401,10 +393,9 @@ export const register: Register = on => {
       }
     }
     const isLive = e.requestId === s.row
-    const line = isLive ? await read($, lineAtom) : s.rowsDone[e.requestId]
+    const line = isLive ? await read($, lineAtom) : '' // one line, under the latest turn alone
     const c = await read($, settingsAtom)
     if (!line || c.statusLine === 'off') return next(e)
-    // only the live row moves with the heart; finished rows hold still
     const moving = isLive && c.animate && c.effect !== 'steady'
     const f = moving ? await read($, frameAtom) : 0
     const p = moving ? await read($, pulse) : 'hidden'

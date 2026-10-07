@@ -9,10 +9,8 @@ export type Saved = {
   lastRead: number | null // tokens the last beat read from the cache
   nextAt: number | null
   beats: number // in this session
-  stretch: number // since the last turn
-  row: string | null // the last turn's closing row, which carries the beat line
+  row: string | null // the latest turn's closing row, which carries the status line
   small: string | null // why the context is not kept warm, while it is under the minimum
-  rowsDone: Record<string, string> // earlier closing rows and the line each kept
 }
 
 /** How an event is told: a line in the transcript, a toast, both, or not at all. */
