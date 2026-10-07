@@ -54,6 +54,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
   on('ui.focus', () => ({})) // the engine's ring; a move the test raises lands
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return { clock, forks, logs, toasts, tails, store }
@@ -323,6 +324,21 @@ test('the beat line goes after a blank line, or nowhere; with the tokens kept', 
   await $.turn.start({ text: 'hi', turnId: 't3' })
   await $.turn.complete(turn)
   expect(await draw($, row('r1'))).toEqual(['engine'])
+})
+
+test('a /clear starts the count afresh, still on at the same interval', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(await cmd($, '')).toBe('on, every 3m idle · 1 beats · next beat in 3m')
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect(await cmd($, '')).toBe('on, every 3m idle · 0 beats · starts after your next turn')
+  await clock.advance(10 * M)
+  expect(forks).toHaveLength(1) // nothing to fork until the new conversation has a turn
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(forks).toHaveLength(2)
 })
 
 test('with no closing row seen, a beat logs a line instead', async ($: Engine, on: On) => {

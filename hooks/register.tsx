@@ -62,10 +62,14 @@ async function setSettings($: EngineInterface, patch: Partial<BeatSettings>) {
   else await refreshLine($)
 }
 
-/** Picks up settings another session changed since this one last looked. */
+/**
+ * Picks up settings another session changed since this one last looked, and publishes them where
+ * the drawings read them, which a /clear empties.
+ */
 async function syncSettings($: EngineInterface) {
   const now = normalize(await $.store.get('settings'))
-  if (JSON.stringify(now) === JSON.stringify(cfg)) return
+  const same = (x: unknown) => JSON.stringify(x) === JSON.stringify(now)
+  if (same(cfg) && same(await read($, settingsAtom))) return
   cfg = now
   await update($, settingsAtom, () => now)
   restartClocks($)
@@ -310,6 +314,16 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // a /clear goes on under a new session, with no session.start and its state empty: a new
+  // conversation, so it starts its count afresh, keeping whether this session beats and how often
+  on('session.end', { reason: 'clear' }, async ($, e, next) => {
+    const r = await next(e)
+    s = { ...fresh, enabled: s.enabled, idle: s.idle }
+    await syncSettings($)
+    await schedule($)
+    return r
+  })
+
   on('command.run', { command: 'cachebeat' }, async ($, e) => {
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const minutes = words.find(w => /^\d+$/.test(w))
@@ -431,7 +445,7 @@ export const register: Register = on => {
     else stopPaneTicker()
     const els = $.ui.resolve(e)
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
-    const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, notice, isResetArmed }
+    const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN, notice, isResetArmed }
     const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
       // a press on a tab (Enter, 1-5, a click) shows it and goes into its settings

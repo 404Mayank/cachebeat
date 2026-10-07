@@ -25,6 +25,7 @@ export type View = {
   focus: string
   columns: number
   isOn: boolean // this session beats
+  sessionMinutes: number | null // this session's own interval, set by /cachebeat <minutes>
   notice: string // the last action's outcome, shown in the footer
   isResetArmed: boolean
 }
@@ -179,7 +180,11 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
             key={`row:${r.key}`}
             onPress={() => (isPicker(r) ? act.open(r.key) : (act.at(`row:${r.key}`), act.set({ [r.key]: r.values[r.values.indexOf(s[r.key]) === 0 ? 1 : 0] })))}
           >
-            {line(r.label, shown(r, s[r.key], s), isPicker(r) ? ' ›' : '')}
+            {line(
+              r.label,
+              shown(r, s[r.key], s) + (r.key === 'interval' && v.sessionMinutes !== null ? ` · this session ${v.sessionMinutes}m` : ''),
+              isPicker(r) ? ' ›' : '',
+            )}
           </Button>
           {r.key === 'color' && s.color === 'custom' && (
             <Input
