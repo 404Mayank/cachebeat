@@ -87,20 +87,43 @@ const glyphs = (text: string) => [...text].reduce<string[]>((out, ch) => {
   return out
 }, [])
 
+type Mode = 'flash' | 'flow' | 'both'
+const MODES: readonly Mode[] = ['flash', 'flow', 'both']
+export const EPISODE = 40 // ticks one mixed mode lasts: 3.2s at normal speed
+
+/**
+ * The mode `mixed` plays at `tick`: drawn at random for each episode, never twice in a row. A hash of
+ * the episode's number, not a stored roll, so every drawing at one tick agrees.
+ */
+export function mixedMode(tick: number): Mode {
+  const roll = (n: number) => {
+    let h = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b)
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+    return ((h ^ (h >>> 16)) >>> 0) % 2
+  }
+  // each episode steps one or two modes on from the last, so it always changes
+  let i = 0
+  for (let n = 1; n <= Math.floor(tick / EPISODE); n++) i = (i + 1 + roll(n)) % 3
+  return MODES[i]!
+}
+
 /**
  * Styles `text` by the color and effect: steady holds the resting tone, flash lights the whole
  * text while `lit`, flow sweeps a three-glyph highlight across it with `tick`, as the spinner's
- * shimmer does.
+ * shimmer does. Both does the two at once, the sweep dipping to the resting tone while lit;
+ * mixed plays flash, flow or both, a few seconds of each.
  */
 export function spans(text: string, s: BeatSettings, tick: number, lit: boolean): Span[] {
   const { base, hi } = tones(s)
   if (s.effect === 'steady' || !s.animate) return [{ text, ...base }]
-  if (s.effect === 'flash') return [{ text, ...(lit ? hi : base) }]
+  const mode = s.effect === 'mixed' ? mixedMode(tick) : s.effect
+  if (mode === 'flash') return [{ text, ...(lit ? hi : base) }]
+  const [rest, sweep] = mode === 'both' && lit ? [hi, base] : [base, hi]
   const g = glyphs(text)
   const at = (tick % (g.length + 6)) - 3
   const out: Span[] = []
   g.forEach((ch, i) => {
-    const tone = Math.abs(i - at) <= 1 ? hi : base
+    const tone = Math.abs(i - at) <= 1 ? sweep : rest
     const last = out.at(-1)
     if (last && last.color === tone.color && last.dim === tone.dim) last.text += ch
     else out.push({ text: ch, ...tone })
@@ -164,7 +187,7 @@ export const TABS: readonly Tab[] = [
     id: 'look', title: 'Look', preview: 'both',
     rows: [
       { key: 'color', label: 'Color', values: COLORS, fmt: (v, s) => (v === 'custom' ? `custom ${s.customColor}` : `${v}`) },
-      { key: 'effect', label: 'Effect', values: ['steady', 'flash', 'flow'], show: s => s.animate },
+      { key: 'effect', label: 'Effect', values: ['steady', 'flash', 'flow', 'mixed'], show: s => s.animate },
     ],
   },
   {

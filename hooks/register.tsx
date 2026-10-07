@@ -257,6 +257,10 @@ async function goTo($: EngineInterface, page: PanePage, key: string) {
   await focusOn($, key)
 }
 
+/** The first element of a tab's settings, where going into it lands. */
+const firstOf = (id: string, c: BeatSettings) =>
+  id === 'beating' ? 'session' : `row:${TABS.find(t => t.id === id)!.rows.find(r => !r.show || r.show(c))!.key}`
+
 /** Puts a line in the pane's footer. */
 function say($: EngineInterface, text: string) {
   notice = text
@@ -405,8 +409,8 @@ export const register: Register = on => {
     const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, notice, isResetArmed }
     const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
-      // Enter on the open tab goes into its settings; on another (1-5, a click), shows that one
-      tab: id => void (id === page.tab && !page.picker ? focusOn($, ring[0]!) : goTo($, { tab: id, picker: null }, `tab:${id}`)),
+      // a press on a tab (Enter, 1-5, a click) shows it and goes into its settings
+      tab: id => void goTo($, { tab: id, picker: null }, firstOf(id, c)),
       at: key => void focusOn($, key),
       open: key => void goTo($, { ...page, picker: key }, `opt:${Math.max(0, rowOf(key)!.row.values.indexOf(c[key]))}`),
       pick: (key, value) => void setSettings($, { [key]: value }).then(() => goTo($, { ...page, picker: null }, `row:${key}`)),

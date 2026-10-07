@@ -34,9 +34,11 @@ Transient errors (overloaded, 5xx, network) are retried a minute later. With **S
 `/cachebeat settings` opens a pane with five tabs: Beating, Heart, Look, Status and Alerts. Each tab is short enough to fit without scrolling.
 
 - **Keyboard:** the pane has three levels.
-  - **Tab bar:** ↑↓ switch tabs and the page follows. Enter goes into the tab's settings. 1–5 jump to a tab. Esc closes the pane.
+  - **Tab bar:** ↑↓ switch tabs and the page follows. Enter goes into the tab's settings. Esc closes the pane.
   - **A tab's settings:** ↑↓ move the highlight and stop at the first and last rows; the pane scrolls to follow in a short window. Enter on an on/off row flips it, and Enter on a row marked `›` opens a picker. Esc goes back to the tab bar.
   - **Picker:** ↑↓ move and Enter picks. Esc goes back to the row.
+
+  From anywhere, 1–5 open a tab and go straight into its settings, and so does a click on a tab.
 
   Left and Right aren't used. The engine keeps Left for its agents view, and never passes Right to the pane.
 - **Mouse:** a click does what Enter does on that row or tab. The wheel scrolls.
@@ -61,7 +63,7 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | | Placement | end of the hint line / its own line | hint line |
 | | Beat count | on / off | on |
 | Look | Color | dim; theme: claude, permission, warning, fastMode, inactive; presets red, magenta, yellow, green, cyan, white (drawn as hex); custom `#hex` | dim |
-| | Effect | steady / flash (lights up on each full heart) / flow (a shimmer sweeping across, like the thinking text) | steady |
+| | Effect | steady / flash (lights up on each full heart) / flow (a shimmer sweeping across, like the thinking text) / mixed (flash, flow, or both at once, picked at random every few seconds) | steady |
 | Status | Placement | below after a blank line / directly below the turn row / off | after a blank line |
 | | Countdown | on / off | on |
 | | Tokens kept | on / off (`· 184k cached`) | off |

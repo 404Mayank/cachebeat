@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
-import { DEFAULTS, normalize, spans } from './settings'
+import { DEFAULTS, EPISODE, mixedMode, normalize, spans } from './settings'
 
 const M = 60_000
 const TICK = 80 // a frame at normal speed
@@ -127,6 +127,24 @@ test('flow sweeps a highlight across the text; flash lights it on a full heart',
   expect(spans('x', flash, 0, true)).toEqual([{ text: 'x', color: 'claudeShimmer', dim: false }])
   expect(spans('x', flash, 0, false)).toEqual([{ text: 'x', color: 'claude', dim: false }])
   expect(spans('x', { ...flash, color: 'custom', customColor: '#000000' }, 0, true)).toEqual([{ text: 'x', color: '#737373', dim: false }])
+})
+
+test('mixed holds a mode for an episode, never repeats one, and plays all three', () => {
+  const modes = Array.from({ length: 30 }, (_, n) => mixedMode(n * EPISODE))
+  expect(new Set(modes)).toEqual(new Set(['flash', 'flow', 'both']))
+  modes.slice(1).forEach((m, n) => expect(m).not.toBe(modes[n]))
+  expect(mixedMode(EPISODE + 1)).toBe(mixedMode(2 * EPISODE - 1))
+})
+
+test('both flashes and flows at once: lit, the sweep dips to the resting tone', () => {
+  const s = { ...DEFAULTS, color: 'claude', effect: 'mixed' as const }
+  const start = Array.from({ length: 30 }, (_, n) => n * EPISODE).find(k => mixedMode(k) === 'both')!
+  const t = start + ((5 - (start % 14)) + 14) % 14 // the sweep centred on 'c', as at tick 5 in an 8-glyph text
+  expect(spans('abcdefgh', s, t, true)).toEqual([
+    { text: 'a', color: 'claudeShimmer', dim: false },
+    { text: 'bcd', color: 'claude', dim: false },
+    { text: 'efgh', color: 'claudeShimmer', dim: false },
+  ])
 })
 
 test('off by default: no beats', async ($: Engine, on: On) => {

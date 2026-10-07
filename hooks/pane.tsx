@@ -187,7 +187,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       </Box>
       {v.notice && <Text dimColor>{v.notice}</Text>}
       <Text dimColor>
-        {v.focus.startsWith('tab:') ? '↑↓ tabs · enter opens · 1-5 jump · esc closes' : '↑↓ move · enter changes · esc back to the tabs'}
+        {v.focus.startsWith('tab:') ? '↑↓ tabs · enter or 1-5 opens · esc closes' : '↑↓ move · enter changes · 1-5 tabs · esc back to the tabs'}
       </Text>
     </Box>
   )

@@ -31,7 +31,7 @@ export type BeatSettings = {
   showCount: boolean
   color: string // 'dim', a theme key, a preset, or 'custom'
   customColor: string // #rrggbb
-  effect: 'steady' | 'flash' | 'flow'
+  effect: 'steady' | 'flash' | 'flow' | 'mixed'
   statusLine: 'below' | 'spaced' | 'off'
   showCountdown: boolean
   showTokens: boolean
