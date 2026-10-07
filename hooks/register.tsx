@@ -126,9 +126,20 @@ function setPulse($: EngineInterface, p: Pulse) {
 /** With Skip small contexts on, why this context is under the minimum; null when it is not. */
 async function smallContext($: EngineInterface) {
   if (!cfg.skipSmall) return null
-  const { context } = await $.session.usage()
-  if (context.tokens === undefined || context.tokens >= cfg.skipSmallTokens) return null
-  return `this chat is ${tokens(context.tokens)} tokens, under your ${tokens(cfg.skipSmallTokens)} minimum`
+  const size = await chatSize($)
+  if (size === undefined || size >= cfg.skipSmallTokens) return null
+  return `this chat is ${tokens(size)} tokens, under your ${tokens(cfg.skipSmallTokens)} minimum`
+}
+
+/**
+ * What a beat would read: the last response's whole prompt and its reply, which the next request
+ * carries too. The window's own figure counts the prompt alone, short by a long last answer.
+ */
+async function chatSize($: EngineInterface) {
+  const { context } = await $.session.usage({ breakdown: 'summary' }) // estimated here, no request sent
+  const u = context.breakdown?.apiUsage
+  if (!u) return context.tokens
+  return u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens + u.output_tokens
 }
 
 /** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
@@ -186,13 +197,13 @@ async function beat($: EngineInterface): Promise<string> {
   const now = await $.clock.now()
   if (now - (s.lastReal ?? now) >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
   if (now - (s.lastWarm ?? now) >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
-  const { rateLimits, context } = await $.session.usage()
+  const { rateLimits } = await $.session.usage()
   const full = rateLimits.find(l => l.percentUsed >= cfg.stopAtUsage)
   if (full) {
     const kind = full.kind.replace('_', '-')
     return stop($, cfg.stopAtUsage >= 100 ? `${kind} usage limit reached` : `${kind} usage at ${full.percentUsed}%, past ${cfg.stopAtUsage}%`)
   }
-  if (cfg.skipSmall && context.tokens !== undefined && context.tokens < cfg.skipSmallTokens) {
+  if (await smallContext($)) {
     await schedule($) // says so, and waits for a turn to grow it
     return `beats skip: ${s.small}`
   }

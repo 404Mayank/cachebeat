@@ -15,7 +15,7 @@ const usage = (read: number, wrote: number) => ({
 })
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
-type World = { fork?: unknown[]; percentUsed?: number; contextTokens?: number; settings?: Partial<typeof DEFAULTS> }
+type World = { fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS> }
 
 const setup = async ($: Engine, on: On, world: World = {}) => {
   const clock = mock.clock(on)
@@ -33,7 +33,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.usage', () => ({
     value: {
       startedAt: 0,
-      context: { tokens: world.contextTokens, window: 200_000 },
+      context: { tokens: world.contextTokens, window: 200_000, ...(world.lastUsage ? { breakdown: { apiUsage: world.lastUsage } } : {}) },
       rateLimits: [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
     },
   }) as never)
@@ -443,6 +443,19 @@ test('under the minimum context it says beats will skip, once, and arms when a t
   expect(await draw($, row('r1'))).toEqual(['engine', '♡ beats skip · this chat is 8k tokens, under your 20k minimum']) // kept
   await clock.advance(3 * M)
   expect(forks).toHaveLength(1)
+})
+
+test('the chat\'s size counts the last reply, which a beat reads too', async ($: Engine, on: On) => {
+  // the window counts the last prompt: 45k; with its 6k answer the chat is 51k, over a 50k minimum
+  const reply = (output: number) => ({ input_tokens: 1_000, output_tokens: output, cache_read_input_tokens: 44_000, cache_creation_input_tokens: 0 })
+  const world = { contextTokens: 45_000, lastUsage: reply(6_000), settings: { skipSmall: true, skipSmallTokens: 50_000 } }
+  const { logs } = await setup($, on, world)
+  await $.turn.complete(turn)
+  expect(await cmd($, 'on')).toBe('on, every 50m idle · next beat in 50m')
+  world.lastUsage = reply(4_000) // 49k
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.turn.complete(turn)
+  expect(logs).toEqual(['beats will skip: this chat is 49k tokens, under your 50k minimum'])
 })
 
 test('stops on a rate limit', async ($: Engine, on: On) => {
