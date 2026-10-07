@@ -18,12 +18,16 @@ export const DEFAULTS: BeatSettings = {
   color: 'dim',
   customColor: '#e6a8b9',
   effect: 'steady',
-  statusLine: 'below',
+  statusLine: 'spaced',
   showCountdown: true,
   showTokens: false,
   onBeat: 'none',
   onStop: 'log',
 }
+
+/** What the store keeps: the settings that differ from the defaults, so a new default reaches the rest. */
+export const changed = (s: BeatSettings): Partial<BeatSettings> =>
+  Object.fromEntries(Object.entries(s).filter(([k, v]) => v !== DEFAULTS[k as keyof BeatSettings]))
 
 /** Store values from an older or hand-edited store fall back to the default one by one. */
 export function normalize(stored: unknown): BeatSettings {
@@ -167,8 +171,8 @@ export const TABS: readonly Tab[] = [
     id: 'status', title: 'Status', preview: 'status',
     rows: [
       {
-        key: 'statusLine', label: 'Placement', values: ['below', 'spaced', 'off'],
-        fmt: v => ({ below: 'below the turn row', spaced: 'below, after a blank line', off: 'off' })[v as string]!,
+        key: 'statusLine', label: 'Placement', values: ['spaced', 'below', 'off'],
+        fmt: v => ({ spaced: 'after a blank line', below: 'right below the turn row', off: 'off' })[v as string]!,
       },
       { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff },
       { key: 'showTokens', label: 'Tokens kept', values: [false, true], show: s => s.statusLine !== 'off', fmt: onOff },

@@ -17,7 +17,7 @@ When you step away from a session, its prompt cache expires (at most an hour aft
 
 It's off by default. `/cachebeat global on` makes every new session start beating. Each idle session will then fork every interval until it stops by itself.
 
-While it's armed, an animated heart sits under the prompt, followed by the beat count (` ×3`). After each beat, a status line by the last turn's closing row ("✻ Cogitated for 2s") shows `♥ cache kept warm ×N · next in 42m`.
+While it's armed, an animated heart sits under the prompt, followed by the beat count (` ×3`). After each beat, a status line appears under the last turn's closing row ("✻ Cogitated for 2s"), after a blank line. It shows `♥ cache kept warm ×N · next in 42m`.
 
 ### When it stops by itself
 
@@ -38,7 +38,7 @@ Transient errors (overloaded, 5xx, network) are retried a minute later. With **S
 - **Preview:** the Heart, Look and Status tabs show a live preview of the heart and the status line. In a picker, the preview shows the highlighted option before you pick it. The Animation picker plays every variant at once, the way the bash previews did: five loops, then the blast a beat sets off.
 - **Rows that don't apply are hidden:** the skip-small threshold when skipping is off, speed, timing and effect when animation is off, and the countdown and tokens rows when the status line is off.
 
-Settings are global. They're kept in the plugin's store, so every session uses them. A session that's already running picks up changes at its next turn.
+Settings are global. They're kept in the plugin's store, so every session uses them. The store keeps only the settings you've changed, so a new default in a later version still reaches you. A session that's already running picks up changes at its next turn.
 
 | Tab | Setting | Values | Default |
 | --- | --- | --- | --- |
@@ -57,7 +57,7 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | | Beat count | on / off | on |
 | Look | Color | dim; theme: claude, permission, warning, fastMode, inactive; presets red, magenta, yellow, green, cyan, white (drawn as hex); custom `#hex` | dim |
 | | Effect | steady / flash (lights up on each full heart) / flow (a shimmer sweeping across, like the thinking text) | steady |
-| Status | Placement | below the turn row / below after a blank line / off | below |
+| Status | Placement | below after a blank line / directly below the turn row / off | after a blank line |
 | | Countdown | on / off | on |
 | | Tokens kept | on / off (`· 184k cached`) | off |
 | Alerts | On a beat | none / toast | none |

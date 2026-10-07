@@ -470,6 +470,23 @@ test('the focused option of a picker shows in the preview before it is picked', 
   await ui.unmount()
 })
 
+test('the store keeps only what differs from the defaults', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, 'global on')
+  expect(store.get('settings')).toEqual({ defaultOn: true })
+})
+
+test('by default the beat line keeps a blank line from the turn row', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await draw($, row('r1'))
+  await clock.advance(3 * M)
+  const ui = await $.ui.mount(row('r1'))
+  expect((await ui.findAll({ type: 'Box' })).some(b => b.props?.marginTop === 1 && b.text?.includes('kept warm'))).toBe(true)
+  await ui.unmount()
+})
+
 test('settings changes keep another session\'s; reset asks twice', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   await cmd($, 'settings')

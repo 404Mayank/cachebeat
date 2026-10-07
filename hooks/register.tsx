@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { PanePage, Pulse, Saved, BeatSettings } from '../types'
 import { loopIndex, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
-import { DEFAULTS, FRAME_MS, TABS, isLit, normalize, rowOf, spans, tokens } from './settings'
+import { DEFAULTS, FRAME_MS, TABS, changed, isLit, normalize, rowOf, spans, tokens } from './settings'
 
 const MIN = 60_000
 export const IDLE = DEFAULTS.interval * MIN // default silence before a beat; must stay under the cache TTL
@@ -55,7 +55,7 @@ async function setSettings($: EngineInterface, patch: Partial<BeatSettings>) {
   // from the store, not this session's copy: another session may have changed it since
   cfg = { ...normalize(await $.store.get('settings')), ...patch }
   const copy = { ...cfg }
-  await $.store.set('settings', copy)
+  await $.store.set('settings', changed(copy))
   await update($, settingsAtom, () => copy)
   // the clocks restart at the new speed, or stay stopped, as the next drawing finds them
   ticker?.cancel()
