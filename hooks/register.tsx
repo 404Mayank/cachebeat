@@ -48,7 +48,8 @@ function save($: EngineInterface) {
 }
 
 async function setSettings($: EngineInterface, patch: Partial<BeatSettings>) {
-  cfg = { ...cfg, ...patch }
+  // from the store, not this session's copy: another session may have changed it since
+  cfg = { ...normalize(await $.store.get('settings')), ...patch }
   const copy = { ...cfg }
   await $.store.set('settings', copy)
   await update($, settingsAtom, () => copy)
@@ -225,6 +226,7 @@ async function turnOn($: EngineInterface, minutes: number | undefined) {
 }
 
 async function openSettings($: EngineInterface) {
+  await syncSettings($)
   await update($, pageAtom, () => 'main')
   await $.ui.open({ id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, rows: 40 })
 }

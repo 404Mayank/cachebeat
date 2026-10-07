@@ -43,8 +43,12 @@ export const FRAME_MS = { slow: 120, normal: 80, fast: 50 } as const
 
 // theme keys with a shimmer pair in Claude Code's themes, so they follow the active theme
 export const THEME_COLORS = ['claude', 'permission', 'warning', 'fastMode', 'inactive'] as const
-export const PRESET_COLORS = ['red', 'magenta', 'yellow', 'green', 'cyan', 'white'] as const
-export const COLORS = ['dim', ...THEME_COLORS, ...PRESET_COLORS, 'custom'] as const
+// drawn as hex, a raw color every surface takes; the highlight is a lighter shade
+const PRESETS: Record<string, string> = {
+  red: '#e5534b', magenta: '#c678dd', yellow: '#e5c07b', green: '#98c379', cyan: '#56b6c2', white: '#d7d7d7',
+}
+export const PRESET_COLORS = Object.keys(PRESETS)
+export const COLORS = ['dim', ...THEME_COLORS, ...PRESET_COLORS, 'custom']
 
 const lighten = (hex: string) => {
   const n = parseInt(hex.slice(1), 16)
@@ -65,11 +69,8 @@ export function tones(s: BeatSettings): { base: Tone; hi: Tone } {
   const c = s.color
   if (c === 'dim') return { base: { dim: true }, hi: { dim: false } }
   if ((THEME_COLORS as readonly string[]).includes(c)) return { base: { color: c, dim: false }, hi: { color: `${c}Shimmer`, dim: false } }
-  if (c === 'custom') {
-    const hex = isHex(s.customColor) ? s.customColor : DEFAULTS.customColor
-    return { base: { color: hex, dim: false }, hi: { color: lighten(hex), dim: false } }
-  }
-  return { base: { color: c, dim: false }, hi: { color: `${c}Bright`, dim: false } }
+  const hex = c === 'custom' ? (isHex(s.customColor) ? s.customColor : DEFAULTS.customColor) : (PRESETS[c] ?? PRESETS.red!)
+  return { base: { color: hex, dim: false }, hi: { color: lighten(hex), dim: false } }
 }
 
 /** A frame with a filled heart in it: the beat of the animation, where `flash` lights up. */

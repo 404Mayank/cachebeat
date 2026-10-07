@@ -58,7 +58,7 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | | Sound on a beat | off / message / bell / complete / dialog-information | off |
 | | On stop | log / toast / none | log |
 
-The theme colors are theme keys, so they follow your active theme, and their highlight is the theme's own shimmer color. A preset's highlight is its bright variant, and a custom color's is a lighter shade of it.
+The theme colors are theme keys, so they follow your active theme, and their highlight is the theme's own shimmer color. A preset or custom color is drawn as hex, and its highlight is a lighter shade of it.
 
 The hint line only takes plain text, which it draws dim. A heart there can't take a color or an effect; give it its own line for those. The status line takes the color and effect wherever it's placed.
 

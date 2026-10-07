@@ -409,6 +409,10 @@ test('the variant picks the frames; the count can hide; still when not animated'
   expect(tails.at(-1)).toBe(`${variant('ecg').loop[0]}0`)
 })
 
+test('a preset is drawn as hex, lit a lighter shade', () => {
+  expect(spans('x', { ...DEFAULTS, color: 'red', effect: 'flash' }, 0, true)).toEqual([{ text: 'x', color: '#f1a09c', dim: false }])
+})
+
 test('on its own line the heart takes the color', async ($: Engine, on: On) => {
   await setup($, on, { settings: { heartPlacement: 'line', color: 'claude' } })
   await cmd($, 'on')
@@ -438,6 +442,9 @@ test('the settings pane: a press changes the global setting; the gallery picks a
   await ui.press({ key: 'variant:orbit' })
   expect(stored(store).variant).toBe('orbit')
   await ui.press({ key: 'back' })
+  store.set('settings', { ...stored(store), interval: 10 }) // another session's change
+  await ui.press({ key: 'row:effect' })
+  expect(stored(store)).toMatchObject({ interval: 10, effect: 'flash', variant: 'orbit' })
   await ui.press({ key: 'reset' })
   expect(stored(store)).toEqual(DEFAULTS)
   await ui.unmount()
