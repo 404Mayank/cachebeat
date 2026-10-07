@@ -95,11 +95,13 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
     const focused = /^opt:(\d+)$/.exec(v.focus)
     const trial = focused ? { ...s, [key]: row.values[Number(focused[1])] } : s
     ring.push('back', ...row.values.map((_, i) => `opt:${i}`))
+    if (row.custom) ring.push('custom')
+    const isCustom = !row.values.includes(s[key])
     const tree = (
       <Box flexDirection="column">
         <Box gap={1}>
           <Button plain key="back" onPress={() => act.back()}>‹</Button>
-          <Text bold>{row.label}</Text>
+          <Text bold>{row.label.trim()}</Text>
         </Box>
         {rule}
         {row.values.map((val, i) => {
@@ -118,6 +120,19 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
             </Box>
           )
         })}
+        {row.custom && (
+          <Input
+            key="custom"
+            label={`${isCustom ? '●' : ' '} ${'custom'.padEnd(LABEL)}`}
+            placeholder={row.custom.placeholder}
+            value={isCustom ? shown(row, s[key], s) : ''}
+            submitLabel="set"
+            onSubmit={text => {
+              const val = row.custom!.parse(text)
+              if (val !== undefined) act.pick(key, val)
+            }}
+          />
+        )}
         {tab.preview && !isVariant && rule}
         {tab.preview && !isVariant && preview(els, trial, tab.preview, v.tick)}
         {row.note && <Text dimColor>{row.note}</Text>}

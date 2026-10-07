@@ -131,6 +131,15 @@ export function spans(text: string, s: BeatSettings, tick: number, lit: boolean)
   return out
 }
 
+/** '35k' → 35000, '1.5m' → 1500000, '40000' → 40000; from 1k to 1M, else undefined. */
+export function parseTokens(text: string) {
+  const m = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(text.trim().replaceAll(',', ''))
+  if (!m) return undefined
+  const unit = m[2]!.toLowerCase()
+  const n = Math.round(Number(m[1]) * (unit === 'k' ? 1e3 : unit === 'm' ? 1e6 : 1))
+  return n >= 1_000 && n <= 1_000_000 ? n : undefined
+}
+
 /** 184000 → 184k, 1250000 → 1.3M. */
 export const tokens = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`
@@ -147,6 +156,7 @@ export type Row = {
   show?: (s: BeatSettings) => boolean
   fmt?: (v: Value, s: BeatSettings) => string
   note?: string // a dim hint under the picker's choices
+  custom?: { placeholder: string; parse: (text: string) => Value | undefined } // a typed value besides the choices
 }
 
 export type Preview = 'heart' | 'status' | 'both'
@@ -172,6 +182,7 @@ export const TABS: readonly Tab[] = [
       {
         key: 'skipSmallTokens', label: '  smaller than', values: [5_000, 10_000, 20_000, 30_000, 50_000, 100_000],
         show: s => s.skipSmall, fmt: v => `${tokens(Number(v))} tokens`,
+        custom: { placeholder: 'e.g. 35k, 0.5m or 40000', parse: parseTokens },
       },
     ],
   },

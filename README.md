@@ -12,7 +12,7 @@ When you step away from a session, its prompt cache expires (at most an hour aft
 /cachebeat <minutes>       turn on with a different interval (1–55)
 /cachebeat now             beat right away
 /cachebeat global on|off   whether new sessions start beating (also applies to this one)
-/cachebeat settings        open the settings pane
+/cachebeat settings        open the settings pane (also /cachebeat config)
 ```
 
 It's off by default. `/cachebeat global on` makes every new session start beating. Each idle session will then fork every interval until it stops by itself.
@@ -55,7 +55,7 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | | `/cachebeat <min>` sets | this session only / the global default | this session |
 | | Stop after idle | 1–24 h | 8h |
 | | Stop at usage | 50–100% | 100% |
-| | Skip small contexts | on / off; threshold 5k–100k tokens (shown when on) | off; 20k |
+| | Skip small contexts | on / off; threshold 5k–100k tokens or a custom count like `35k` (shown when on) | off; 20k |
 | Heart | Animation | 19 variants (see below) | Classic |
 | | Animate | on / off | on |
 | | Speed | slow 120ms / normal 80ms / fast 50ms per frame | normal |

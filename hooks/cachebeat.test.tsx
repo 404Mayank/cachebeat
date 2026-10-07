@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
-import { DEFAULTS, EPISODE, mixedMode, normalize, spans } from './settings'
+import { DEFAULTS, EPISODE, mixedMode, normalize, parseTokens, spans } from './settings'
 
 const M = 60_000
 const TICK = 80 // a frame at normal speed
@@ -113,6 +113,23 @@ test('the preview plays five loops, then the blast', () => {
   expect(previewFrame(x, 5 * x.loop.length - 1, 'linear')).toBe(x.loop.at(-1))
   expect(previewFrame(x, 5 * x.loop.length, 'linear')).toBe(x.blast[0])
   expect(previewFrame(x, 5 * x.loop.length + x.blast.length, 'linear')).toBe(x.loop[0])
+})
+
+test('a custom token count reads k and m, from 1k to 1M', () => {
+  expect(['35k', '0.5m', '40,000', ' 2K ', '500', '1.5m', 'lots'].map(parseTokens)).toEqual([35_000, 500_000, 40_000, 2_000, undefined, undefined, undefined])
+})
+
+test('smaller than takes a custom count', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { settings: { skipSmall: true } })
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:skipSmallTokens' })
+  await ui.input({ key: 'custom', text: 'lots' })
+  expect(stored(store).skipSmallTokens).toBe(20_000)
+  await ui.input({ key: 'custom', text: '35k' })
+  expect(stored(store).skipSmallTokens).toBe(35_000)
+  expect((await ui.find({ key: 'row:skipSmallTokens' }))?.text).toContain('35k tokens')
+  await ui.unmount()
 })
 
 test('settings from an older store fall back to the defaults one by one', () => {
@@ -471,6 +488,7 @@ const buttons = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: s
 test('the settings pane: tabs, toggles in place, pickers for the rest', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await cmd($, 'settings')).toBe('settings opened')
+  expect(await cmd($, 'config')).toBe('settings opened') // unlisted, for the hand that types it
   const ui = await $.ui.mount(SETTINGS_PANE)
   expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:heart', 'tab:look', 'tab:status', 'tab:alerts'])
 
