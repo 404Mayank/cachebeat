@@ -373,7 +373,8 @@ export const register: Register = on => {
     if (p === 'armed' && c.animate) animate($)
     const f = await read($, frameAtom)
     const heart = heartFrame(c, p, f)
-    const count = c.showCount ? `${s.beats}` : ''
+    // a space past the frame's own blank edge: the heart sits as far from the count as from the ' · ' before it
+    const count = c.showCount ? ` ×${s.beats}` : ''
     if (c.heartPlacement === 'tail') return next({ ...e, props: { ...e.props, tail: `${heart}${count}` } })
     const { Box, Text } = $.ui.resolve(e)
     const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, c, f, isLit(heart))

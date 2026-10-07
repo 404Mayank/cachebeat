@@ -66,7 +66,7 @@ function preview(els: Els, s: BeatSettings, kind: Preview, tick: number) {
         <Box>
           <Text dimColor>{'heart'.padEnd(8)}</Text>
           {paint(Text, heart)}
-          {s.showCount && <Text dimColor>3</Text>}
+          {s.showCount && <Text dimColor> ×3</Text>}
         </Box>
       )}
       {kind !== 'heart' && (

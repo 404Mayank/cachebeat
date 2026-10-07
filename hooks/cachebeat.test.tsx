@@ -373,11 +373,11 @@ test('the heart rides the hint row as its dim tail: still while waiting, beating
   expect(tails.at(-1)).toBeUndefined()
   await cmd($, 'on')
   await draw($, HINT)
-  expect(tails.at(-1)).toBe(`${BEAT[0]}0`)
+  expect(tails.at(-1)).toBe(`${BEAT[0]} ×0`)
   await $.turn.complete(turn)
   await clock.advance(5 * TICK)
   await draw($, HINT)
-  expect(BEAT.map(f => `${f}0`)).toContain(tails.at(-1))
+  expect(BEAT.map(f => `${f} ×0`)).toContain(tails.at(-1))
 })
 
 test('a beat plays the blast in place of the heartbeat', async ($: Engine, on: On) => {
@@ -386,10 +386,10 @@ test('a beat plays the blast in place of the heartbeat', async ($: Engine, on: O
   await $.turn.complete(turn)
   await clock.advance(3 * M + 3 * TICK + TICK / 2)
   await draw($, HINT)
-  expect(BLAST.map(f => `${f}1`)).toContain(tails.at(-1))
+  expect(BLAST.map(f => `${f} ×1`)).toContain(tails.at(-1))
   await clock.advance(2000)
   await draw($, HINT)
-  expect(BEAT.map(f => `${f}1`)).toContain(tails.at(-1))
+  expect(BEAT.map(f => `${f} ×1`)).toContain(tails.at(-1))
 })
 
 test('the variant picks the frames; the count can hide; still when not animated', async ($: Engine, on: On) => {
@@ -404,7 +404,7 @@ test('the variant picks the frames; the count can hide; still when not animated'
   await $.turn.complete(turn)
   await clock.advance(7 * TICK)
   await draw($, HINT)
-  expect(tails.at(-1)).toBe(`${variant('ecg').loop[0]}0`)
+  expect(tails.at(-1)).toBe(`${variant('ecg').loop[0]} ×0`)
 })
 
 test('a preset is drawn as hex, lit a lighter shade', () => {
@@ -421,7 +421,7 @@ test('on its own line the heart takes the color', async ($: Engine, on: On) => {
   expect(texts[0]?.text).toBe('engine')
   expect(BEAT).toContain(texts[1]?.text)
   expect(texts[1]?.props).toMatchObject({ color: 'claude' })
-  expect(texts[2]?.text).toBe('0')
+  expect(texts[2]?.text).toBe(' ×0')
 })
 
 const buttons = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>

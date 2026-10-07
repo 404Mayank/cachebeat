@@ -17,7 +17,7 @@ When you step away from a session, its prompt cache expires (at most an hour aft
 
 It's off by default. `/cachebeat global on` makes every new session start beating. Each idle session will then fork every interval until it stops by itself.
 
-While it's armed, an animated heart sits under the prompt, followed by the beat count. After each beat, a status line by the last turn's closing row ("✻ Cogitated for 2s") shows `♥ cache kept warm ×N · next in 42m`.
+While it's armed, an animated heart sits under the prompt, followed by the beat count (` ×3`). After each beat, a status line by the last turn's closing row ("✻ Cogitated for 2s") shows `♥ cache kept warm ×N · next in 42m`.
 
 ### When it stops by itself
 
