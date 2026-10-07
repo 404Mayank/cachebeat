@@ -196,3 +196,7 @@ tsc -p .                   # type-checks (once Claude Code has loaded the plugin
 | `hooks/cachebeat.test.tsx` | Tests |
 
 A new animation is a single entry in `hooks/animations.ts`: a loop and a burst, each written as frames separated by `|`.
+
+## License
+
+[MIT](LICENSE)
