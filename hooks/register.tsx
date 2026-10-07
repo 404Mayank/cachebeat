@@ -103,7 +103,7 @@ function heartFrame(c: BeatSettings, p: Pulse, f: number) {
   const x = variant(c.variant)
   if (!c.animate) return x.loop[0]!
   if (blast >= 0) return x.blast[blast]!
-  return p === 'armed' ? x.loop[loopIndex(x.loop.length, f, c.timing)]! : x.loop[0]!
+  return p === 'armed' ? x.loop[loopIndex(x, f, c.timing)]! : x.loop[0]!
 }
 
 function setPulse($: EngineInterface, p: Pulse) {

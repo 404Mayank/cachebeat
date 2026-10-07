@@ -1,12 +1,15 @@
 // The heart's animations: each a loop it plays while armed and a blast it plays once a beat lands.
 // Frames are written as '|'-joined strings, as the bash previews they came from had them.
 
-export type Variant = { id: string; name: string; loop: string[]; blast: string[] }
+/** `isEndless`: a loop with no resting frame, its motion running round (a scrolling line, an orbit). */
+export type Variant = { id: string; name: string; loop: string[]; blast: string[]; isEndless: boolean }
 export type Timing = 'linear' | 'lubdub'
 
 // padded with U+2800 (blank, but not whitespace a surface could collapse) so a frame keeps its width
 const pad = (frames: string) => frames.split('|').map(f => f.replaceAll(' ', '\u2800'))
-const v = (id: string, name: string, loop: string, blast: string): Variant => ({ id, name, loop: pad(loop), blast: pad(blast) })
+const ENDLESS = ['ecg', 'beam', 'dash', 'sine', 'orbit', 'garland', 'bounce']
+const v = (id: string, name: string, loop: string, blast: string): Variant =>
+  ({ id, name, loop: pad(loop), blast: pad(blast), isEndless: ENDLESS.includes(id) })
 
 export const VARIANTS: readonly Variant[] = [
   v("classic", "Classic",
@@ -74,20 +77,23 @@ export const variant = (id: string) => VARIANTS.find(x => x.id === id) ?? VARIAN
 export const cells = (frame: string) => [...frame.replaceAll('\ufe0e', '')].length
 
 /**
- * The loop's frame index at `tick`. Linear plays the loop evenly; lub-dub plays it twice back to
- * back, then rests on the first frame for as long as one pass took.
+ * The loop's frame index at `tick`. Linear plays the loop evenly. Lub-dub plays it twice back to
+ * back, then rests as long as one pass took: on the first frame, a heart at rest, or for an endless
+ * loop, which has none and would only freeze, by a third pass at half speed.
  */
-export function loopIndex(n: number, tick: number, timing: Timing) {
+export function loopIndex(x: Variant, tick: number, timing: Timing) {
+  const n = x.loop.length
   if (timing === 'linear') return tick % n
-  const k = tick % (3 * n)
-  return k < 2 * n ? k % n : 0
+  const k = tick % loopTicks(x, timing)
+  if (k < 2 * n) return k % n
+  return x.isEndless ? Math.floor((k - 2 * n) / 2) : 0
 }
 
-const loopTicks = (n: number, timing: Timing) => (timing === 'linear' ? n : 3 * n)
+const loopTicks = (x: Variant, timing: Timing) => (timing === 'linear' ? 1 : x.isEndless ? 4 : 3) * x.loop.length
 
 /** The settings preview, as the bash previews ran: five rounds of the loop, then the blast. */
 export function previewFrame(x: Variant, tick: number, timing: Timing) {
-  const span = 5 * loopTicks(x.loop.length, timing)
+  const span = 5 * loopTicks(x, timing)
   const k = tick % (span + x.blast.length)
-  return k < span ? x.loop[loopIndex(x.loop.length, k, timing)]! : x.blast[k - span]!
+  return k < span ? x.loop[loopIndex(x, k, timing)]! : x.blast[k - span]!
 }

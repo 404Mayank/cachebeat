@@ -99,9 +99,13 @@ test('every frame of a variant is as wide as the rest of it', () => {
   }
 })
 
-test('lub-dub plays the loop twice, then rests as long as one pass', () => {
-  expect([0, 1, 2, 3, 4, 5, 6, 7, 8].map(t => loopIndex(3, t, 'lubdub'))).toEqual([0, 1, 2, 0, 1, 2, 0, 0, 0])
-  expect([0, 1, 2, 3].map(t => loopIndex(3, t, 'linear'))).toEqual([0, 1, 2, 0])
+test('lub-dub plays the loop twice, then rests as long as one pass; an endless loop slows, never stops', () => {
+  const heart = { id: 'h', name: 'h', loop: ['a', 'b', 'c'], blast: [], isEndless: false }
+  const line = { ...heart, isEndless: true }
+  expect([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(t => loopIndex(heart, t, 'lubdub'))).toEqual([0, 1, 2, 0, 1, 2, 0, 0, 0, 0])
+  expect([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(t => loopIndex(line, t, 'lubdub'))).toEqual([0, 1, 2, 0, 1, 2, 0, 0, 1, 1, 2, 2, 0])
+  expect([0, 1, 2, 3].map(t => loopIndex(heart, t, 'linear'))).toEqual([0, 1, 2, 0])
+  expect(VARIANTS.filter(x => x.isEndless).map(x => x.id)).toEqual(['ecg', 'beam', 'dash', 'sine', 'orbit', 'garland', 'bounce'])
 })
 
 test('the preview plays five loops, then the blast', () => {

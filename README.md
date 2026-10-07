@@ -59,7 +59,7 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | Heart | Animation | 19 variants (see below) | Classic |
 | | Animate | on / off | on |
 | | Speed | slow 120ms / normal 80ms / fast 50ms per frame | normal |
-| | Timing | linear / lub-dub (the loop twice, then a rest as long as one pass) | linear |
+| | Timing | linear / lub-dub: the loop twice, then a rest as long as one pass. Heart animations rest on their resting frame. Endless ones (ECG, Beam, Dash, Sine, Orbit, Garland, Bounce) have no resting frame, so they play a third pass at half speed instead of freezing. | linear |
 | | Placement | end of the hint line / its own line | hint line |
 | | Beat count | on / off | on |
 | Look | Color | dim; theme: claude, permission, warning, fastMode, inactive; presets red, magenta, yellow, green, cyan, white (drawn as hex); custom `#hex` | dim |
