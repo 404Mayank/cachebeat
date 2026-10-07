@@ -137,8 +137,8 @@ export const tokens = (n: number) =>
 
 export type Value = string | number | boolean
 /**
- * One row of the settings pane. Two values toggle in place on Enter; more open a picker, whose
- * focused option the preview shows before it is picked.
+ * One row of the settings pane. An on/off row toggles in place on Enter; one of named choices opens
+ * a picker, whose focused option the preview shows before it is picked.
  */
 export type Row = {
   key: keyof BeatSettings
@@ -152,6 +152,8 @@ export type Preview = 'heart' | 'status' | 'both'
 export type Tab = { id: string; title: string; rows: readonly Row[]; preview?: Preview }
 
 const onOff = (v: Value) => (v ? 'on' : 'off')
+const ALERTS = ['none', 'log', 'toast', 'both']
+const alert = (v: Value) => (v === 'both' ? 'log + toast' : `${v}`)
 
 export const TABS: readonly Tab[] = [
   {
@@ -204,8 +206,8 @@ export const TABS: readonly Tab[] = [
   {
     id: 'alerts', title: 'Alerts',
     rows: [
-      { key: 'onBeat', label: 'On a beat', values: ['none', 'toast'] },
-      { key: 'onStop', label: 'On stop', values: ['log', 'toast', 'none'] },
+      { key: 'onBeat', label: 'On a beat', values: ALERTS, fmt: alert },
+      { key: 'onStop', label: 'On stop', values: ALERTS, fmt: alert },
     ],
   },
 ]
@@ -215,6 +217,5 @@ export const rowOf = (key: keyof BeatSettings) => {
   return undefined
 }
 
-export const isPicker = (row: Row) => row.values.length > 2
+export const isPicker = (row: Row) => typeof row.values[0] !== 'boolean'
 
-export const toggled = (row: Row, s: BeatSettings): Value => row.values[row.values.indexOf(s[row.key]) === 0 ? 1 : 0]!

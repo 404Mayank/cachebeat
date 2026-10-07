@@ -292,6 +292,25 @@ test('with no closing row seen, a beat logs a line instead', async ($: Engine, o
   expect(logs).toEqual(['♥ cache renewed (90,000 read, 0 written)'])
 })
 
+test('a beat can log and toast both, closing row or not', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { settings: { onBeat: 'both' } })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await draw($, row('r1'))
+  await clock.advance(3 * M)
+  expect(logs).toEqual(['♥ cache renewed (90,000 read, 0 written)'])
+  expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
+})
+
+test('a stop can log and toast both', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { percentUsed: 100, settings: { onStop: 'both' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(logs).toEqual(['stopped: five-hour usage limit reached'])
+  expect(toasts).toEqual(['cachebeat stopped: five-hour usage limit reached'])
+})
+
 test('a beat can toast', async ($: Engine, on: On) => {
   const { clock, toasts } = await setup($, on, { settings: { onBeat: 'toast' } })
   await cmd($, '3')
@@ -472,6 +491,11 @@ test('the settings pane: tabs, toggles in place, pickers for the rest', async ($
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
   await ui.press({ key: 'row:variant' })
   expect(await buttons(ui, 'opt:')).toHaveLength(19)
+  await ui.press({ key: 'back' })
+  await ui.press({ key: 'row:timing' }) // named choices open a picker, even two of them
+  expect(await buttons(ui, 'opt:')).toHaveLength(2)
+  await ui.press({ key: 'back' })
+  await ui.press({ key: 'row:variant' })
   await ui.press({ key: 'opt:13' })
   expect(stored(store).variant).toBe('orbit')
   await ui.unmount()

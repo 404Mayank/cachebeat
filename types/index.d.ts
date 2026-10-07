@@ -14,6 +14,9 @@ export type Saved = {
   rowsDone: Record<string, string> // earlier closing rows and the line each kept
 }
 
+/** How an event is told: a line in the transcript, a toast, both, or not at all. */
+export type Alert = 'none' | 'log' | 'toast' | 'both'
+
 /** The settings, global: kept in the plugin's store, shared by every session. */
 export type BeatSettings = {
   defaultOn: boolean // new sessions start beating
@@ -35,8 +38,8 @@ export type BeatSettings = {
   statusLine: 'below' | 'spaced' | 'off'
   showCountdown: boolean
   showTokens: boolean
-  onBeat: 'none' | 'toast'
-  onStop: 'log' | 'toast' | 'none'
+  onBeat: Alert
+  onStop: Alert
 }
 
 /** Where the settings pane is: a tab, and the row whose picker is open over it. */

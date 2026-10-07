@@ -35,7 +35,7 @@ Transient errors (overloaded, 5xx, network) are retried a minute later. With **S
 
 - **Keyboard:** the pane has three levels.
   - **Tab bar:** ↑↓ switch tabs and the page follows. Enter goes into the tab's settings. Esc closes the pane.
-  - **A tab's settings:** ↑↓ move the highlight and stop at the first and last rows; the pane scrolls to follow in a short window. Enter on an on/off row flips it, and Enter on a row marked `›` opens a picker. Esc goes back to the tab bar.
+  - **A tab's settings:** ↑↓ move the highlight and stop at the first and last rows; the pane scrolls to follow in a short window. Enter on an on/off row flips it. Every other row is marked `›`, and Enter on it opens a picker of its choices. Esc goes back to the tab bar.
   - **Picker:** ↑↓ move and Enter picks. Esc goes back to the row.
 
   From anywhere, 1–5 open a tab and go straight into its settings, and so does a click on a tab.
@@ -67,8 +67,8 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | Status | Placement | below after a blank line / directly below the turn row / off | after a blank line |
 | | Countdown | on / off | on |
 | | Tokens kept | on / off (`· 184k cached`) | off |
-| Alerts | On a beat | none / toast | none |
-| | On stop | log / toast / none | log |
+| Alerts | On a beat | none / log / toast / both (log + toast) | none |
+| | On stop | none / log / toast / both (log + toast) | log |
 
 The theme colors are theme keys, so they follow your active theme, and their highlight is the theme's own shimmer color. A preset or custom color is drawn as hex, and its highlight is a lighter shade of it.
 

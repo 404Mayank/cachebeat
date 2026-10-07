@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { PanePage, Pulse, Saved, BeatSettings } from '../types'
+import type { Alert, BeatSettings, PanePage, Pulse, Saved } from '../types'
 import { loopIndex, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
 import { DEFAULTS, FRAME_MS, TABS, changed, isLit, normalize, rowOf, spans, tokens } from './settings'
@@ -138,9 +138,12 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   return ms
 }
 
+const logs = (how: Alert) => how === 'log' || how === 'both'
+const toasts = (how: Alert) => how === 'toast' || how === 'both'
+
 function announce($: EngineInterface, text: string) {
-  if (cfg.onStop === 'log') $.ui.log(text)
-  else if (cfg.onStop === 'toast') $.ui.toast(`cachebeat ${text}`)
+  if (logs(cfg.onStop)) $.ui.log(text)
+  if (toasts(cfg.onStop)) $.ui.toast(`cachebeat ${text}`)
 }
 
 function stop($: EngineInterface, why?: string) {
@@ -188,8 +191,8 @@ async function beat($: EngineInterface): Promise<string> {
   s.stretch++
   if (cfg.animate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
-  if (s.row === null) $.ui.log(renewed)
-  if (cfg.onBeat === 'toast') $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
+  if (logs(cfg.onBeat) || s.row === null) $.ui.log(renewed) // with no closing row, no status line says it
+  if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
   await schedule($)
   return renewed
 }
