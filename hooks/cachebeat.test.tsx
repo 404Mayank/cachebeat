@@ -498,6 +498,7 @@ test('the settings pane: tabs, toggles in place, pickers for the rest', async ($
   await ui.press({ key: 'back' })
   await ui.press({ key: 'row:timing' }) // named choices open a picker, even two of them
   expect(await buttons(ui, 'opt:')).toHaveLength(2)
+  expect(await ui.find({ type: 'Text', text: /^Linear suits the line animations \(ECG, Beam/ })).toBeDefined()
   await ui.press({ key: 'back' })
   await ui.press({ key: 'row:variant' })
   await ui.press({ key: 'opt:13' })

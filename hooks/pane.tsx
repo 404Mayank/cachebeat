@@ -120,6 +120,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
         })}
         {tab.preview && !isVariant && rule}
         {tab.preview && !isVariant && preview(els, trial, tab.preview, v.tick)}
+        {row.note && <Text dimColor>{row.note}</Text>}
         <Text dimColor>↑↓ move · enter picks · esc back</Text>
       </Box>
     )

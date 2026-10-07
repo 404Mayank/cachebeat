@@ -146,6 +146,7 @@ export type Row = {
   values: readonly Value[]
   show?: (s: BeatSettings) => boolean
   fmt?: (v: Value, s: BeatSettings) => string
+  note?: string // a dim hint under the picker's choices
 }
 
 export type Preview = 'heart' | 'status' | 'both'
@@ -180,7 +181,10 @@ export const TABS: readonly Tab[] = [
       { key: 'variant', label: 'Animation', values: VARIANTS.map(v => v.id), fmt: v => VARIANTS.find(x => x.id === v)?.name ?? `${v}` },
       { key: 'animate', label: 'Animate', values: [true, false], fmt: onOff },
       { key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], show: s => s.animate, fmt: v => `${v} · ${FRAME_MS[v as BeatSettings['speed']]}ms` },
-      { key: 'timing', label: 'Timing', values: ['linear', 'lubdub'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear') },
+      {
+        key: 'timing', label: 'Timing', values: ['linear', 'lubdub'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear'),
+        note: `Linear suits the line animations (${VARIANTS.filter(x => x.isEndless).map(x => x.name).join(', ')}); lub-dub, the hearts.`,
+      },
       { key: 'heartPlacement', label: 'Placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line') },
       { key: 'showCount', label: 'Beat count', values: [true, false], fmt: onOff },
     ],
