@@ -49,7 +49,7 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | | Timing | linear / lub-dub (the loop twice, then a rest as long as one pass) | linear |
 | | Placement | end of the hint line / its own line | hint line |
 | | Beat count | on / off | on |
-| Look | Color | dim; theme: claude, permission, warning, fastMode, inactive; red, magenta, yellow, green, cyan, white; custom `#hex` | dim |
+| Look | Color | dim; theme: claude, permission, warning, fastMode, inactive; presets red, magenta, yellow, green, cyan, white (drawn as hex); custom `#hex` | dim |
 | | Effect | steady / flash (lights up on each full heart) / flow (a shimmer sweeping across, like the thinking text) | steady |
 | Status line | Placement | below the turn row / below after a blank line / on the turn row / off | below |
 | | Countdown | on / off | on |
