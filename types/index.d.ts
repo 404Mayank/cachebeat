@@ -11,6 +11,7 @@ export type Saved = {
   beats: number // in this session
   stretch: number // since the last turn
   row: string | null // the last turn's closing row, which carries the beat line
+  small: string | null // why the context is not kept warm, while it is under the minimum
   rowsDone: Record<string, string> // earlier closing rows and the line each kept
 }
 
@@ -28,7 +29,7 @@ export type BeatSettings = {
   skipSmallTokens: number
   animate: boolean
   variant: string
-  speed: 'slow' | 'normal' | 'fast'
+  speed: 'slow' | 'normal' | 'fast' | number // a number: ms a frame
   timing: 'linear' | 'lubdub'
   heartPlacement: 'tail' | 'line'
   showCount: boolean

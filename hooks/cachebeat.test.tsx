@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
-import { DEFAULTS, EPISODE, mixedMode, normalize, parseTokens, spans } from './settings'
+import { DEFAULTS, EPISODE, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 
 const M = 60_000
 const TICK = 80 // a frame at normal speed
@@ -115,8 +115,28 @@ test('the preview plays five loops, then the blast', () => {
   expect(previewFrame(x, 5 * x.loop.length + x.blast.length, 'linear')).toBe(x.loop[0])
 })
 
-test('a custom token count reads k and m, from 1k to 1M', () => {
+test('custom values read their units and keep to their ranges', () => {
   expect(['35k', '0.5m', '40,000', ' 2K ', '500', '1.5m', 'lots'].map(parseTokens)).toEqual([35_000, 500_000, 40_000, 2_000, undefined, undefined, undefined])
+  expect(['35', '12m', '56', '0'].map(parseMinutes)).toEqual([35, 12, undefined, undefined])
+  expect(['10', '90m', '1.5h', '49', '0.25'].map(parseHours)).toEqual([10, 1.5, 1.5, undefined, undefined])
+  expect(['85', '85%', '101', '5'].map(parsePercent)).toEqual([85, 85, undefined, undefined])
+  expect(['65', '65ms', '10', '600'].map(parseFrameMs)).toEqual([65, 65, undefined, undefined])
+})
+
+test('custom numbers through the pane: an interval, a frame time', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:interval' })
+  await ui.input({ key: 'custom', text: '35' })
+  expect(stored(store).interval).toBe(35)
+  expect(await cmd($, 'on')).toBe('on, every 35m idle · starts after your next turn')
+  await ui.press({ key: 'tab:heart' })
+  await ui.press({ key: 'row:speed' })
+  await ui.input({ key: 'custom', text: '65ms' })
+  expect(stored(store).speed).toBe(65)
+  expect((await ui.find({ key: 'row:speed' }))?.text).toContain('65ms a frame')
+  await ui.unmount()
 })
 
 test('smaller than takes a custom count', async ($: Engine, on: On) => {
@@ -387,14 +407,26 @@ test('stops at the usage threshold set', async ($: Engine, on: On) => {
   expect(logs.at(-1)).toBe('stopped: five-hour usage at 92%, past 90%')
 })
 
-test('skips a small context and stays on for the next turn', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { contextTokens: 8_000, settings: { skipSmall: true } })
-  await cmd($, 'on')
+test('under the minimum context it says beats will skip, once, and arms when a turn grows it', async ($: Engine, on: On) => {
+  const world = { contextTokens: 8_000, settings: { skipSmall: true } }
+  const { clock, forks, logs } = await setup($, on, world)
   await $.turn.complete(turn)
-  await clock.advance(IDLE * 2)
-  expect(forks.length).toBe(0)
-  expect(logs).toEqual(['skipped: the context is 8k tokens, under 20k'])
-  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · starts after your next turn')
+  expect(await cmd($, '3')).toBe('on, every 3m idle · beats skip: this chat is 8k tokens, under your 20k minimum')
+  expect(logs).toEqual(['beats will skip: this chat is 8k tokens, under your 20k minimum'])
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await $.turn.complete(turn)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ beats skip · this chat is 8k tokens, under your 20k minimum'])
+  expect(logs).toHaveLength(1) // said once, not every turn
+  await clock.advance(10 * M)
+  expect(forks).toEqual([])
+
+  world.contextTokens = 30_000
+  await $.turn.start({ text: 'more', turnId: 't3' })
+  await $.turn.complete(turn)
+  expect(await draw($, row('r2'))).toEqual(['engine'])
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ beats skip · this chat is 8k tokens, under your 20k minimum']) // kept
+  await clock.advance(3 * M)
+  expect(forks).toHaveLength(1)
 })
 
 test('stops on a rate limit', async ($: Engine, on: On) => {
@@ -533,6 +565,9 @@ test('on the tab bar the arrows switch tabs, and do not go down into one', async
   expect(await move($, 'tab:heart')).toEqual({})
   expect(await ui.find({ key: 'row:variant' })).toBeDefined() // the page follows
   expect((await move($, 'row:variant')).deny).toBeDefined() // Enter goes in, not ↓
+  await move($, 'tab:alerts')
+  expect(await move($, 'row:onBeat')).toEqual({}) // off the last tab: round to the first
+  expect(await ui.find({ key: 'session' })).toBeDefined()
   await ui.unmount()
 })
 

@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Alert, BeatSettings, PanePage, Pulse, Saved } from '../types'
 import { loopIndex, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
-import { DEFAULTS, FRAME_MS, TABS, changed, isLit, normalize, rowOf, spans, tokens } from './settings'
+import { DEFAULTS, TABS, changed, frameMs, isLit, normalize, rowOf, spans, tokens } from './settings'
 
 const MIN = 60_000
 export const IDLE = DEFAULTS.interval * MIN // default silence before a beat; must stay under the cache TTL
@@ -21,7 +21,7 @@ const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'bea
 const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
-  enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, stretch: 0, row: null, rowsDone: {},
+  enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, stretch: 0, row: null, small: null, rowsDone: {},
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS
@@ -78,7 +78,7 @@ async function syncSettings($: EngineInterface) {
 
 /** The beat line under the last turn's closing row, or '' while there is none. */
 async function refreshLine($: EngineInterface) {
-  let text = ''
+  let text = s.small && s.enabled ? `♡ beats skip · ${s.small}` : ''
   if (s.stretch > 0) {
     const next = s.enabled && s.nextAt !== null ? fmt(s.nextAt - (await $.clock.now())) : null
     text = statusText(cfg, s.stretch, s.lastRead, next)
@@ -88,7 +88,7 @@ async function refreshLine($: EngineInterface) {
 
 /** The animation clock: runs while the heart is drawn beating (the hint row draws it). */
 function animate($: EngineInterface) {
-  const ms = FRAME_MS[cfg.speed]
+  const ms = frameMs(cfg)
   const perSecond = Math.round(1000 / ms)
   ticker ??= $.clock.every(ms, () => {
     frame++
@@ -116,12 +116,30 @@ function setPulse($: EngineInterface, p: Pulse) {
 }
 
 /** Sets the next beat from the last cache read; resolves its delay, or undefined when none is set. */
+/** With Skip small contexts on, why this context is under the minimum; null when it is not. */
+async function smallContext($: EngineInterface) {
+  if (!cfg.skipSmall) return null
+  const { context } = await $.session.usage()
+  if (context.tokens === undefined || context.tokens >= cfg.skipSmallTokens) return null
+  return `this chat is ${tokens(context.tokens)} tokens, under your ${tokens(cfg.skipSmallTokens)} minimum`
+}
+
+/** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
+async function checkSmall($: EngineInterface) {
+  const small = await smallContext($)
+  if (small && !s.small) $.ui.log(`beats will skip: ${small}`)
+  s.small = small
+  return small !== null
+}
+
 async function schedule($: EngineInterface): Promise<number | undefined> {
   timer?.cancel()
   timer = undefined
   s.nextAt = null
   let ms: number | undefined
-  if (!s.enabled || busy) setPulse($, 'hidden')
+  if (!s.enabled) s.small = null
+  if (!s.enabled || busy) setPulse($, 'hidden') // a turn keeps the last word on the context; its end checks again
+  else if (await checkSmall($)) setPulse($, 'waiting') // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
@@ -167,11 +185,8 @@ async function beat($: EngineInterface): Promise<string> {
     return stop($, cfg.stopAtUsage >= 100 ? `${kind} usage limit reached` : `${kind} usage at ${full.percentUsed}%, past ${cfg.stopAtUsage}%`)
   }
   if (cfg.skipSmall && context.tokens !== undefined && context.tokens < cfg.skipSmallTokens) {
-    s.lastWarm = null // not worth keeping; the next turn arms it again
-    await schedule($)
-    const why = `skipped: the context is ${tokens(context.tokens)} tokens, under ${tokens(cfg.skipSmallTokens)}`
-    announce($, why)
-    return why
+    await schedule($) // says so, and waits for a turn to grow it
+    return `beats skip: ${s.small}`
   }
 
   beating = true
@@ -202,7 +217,8 @@ const beatNow = ($: EngineInterface) => (s.lastReal === null ? Promise.resolve('
 
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
-  ms === undefined ? 'starts after your next turn' : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
+  s.small ? `beats skip: ${s.small}`
+  : ms === undefined ? 'starts after your next turn' : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
 
 async function turnOn($: EngineInterface, minutes: number | undefined) {
   const wasOn = s.enabled
@@ -320,8 +336,10 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (!beating) {
       busy = true
-      if (s.row !== null && s.stretch > 0) {
-        s.rowsDone[s.row] = statusText({ ...cfg, showCountdown: false }, s.stretch, s.lastRead, null) // the row keeps its final count
+      const line = await read($, lineAtom)
+      if (s.row !== null && line) {
+        // the row keeps its final count, or why it was not kept warm
+        s.rowsDone[s.row] = s.stretch > 0 ? statusText({ ...cfg, showCountdown: false }, s.stretch, s.lastRead, null) : line
         const ids = Object.keys(s.rowsDone)
         for (const id of ids.slice(0, Math.max(0, ids.length - 50))) delete s.rowsDone[id]
       }
@@ -405,7 +423,7 @@ export const register: Register = on => {
     // the preview's clock runs only while there is a preview to move
     const picked = page.picker ? rowOf(page.picker) : undefined
     const isMoving = picked ? picked.row.key === 'variant' || !!picked.tab.preview : !!TABS.find(t => t.id === page.tab)?.preview
-    if (isMoving) paneTicker ??= $.clock.every(FRAME_MS[c.speed], () => void update($, tickAtom, () => ++paneTick))
+    if (isMoving) paneTicker ??= $.clock.every(frameMs(c), () => void update($, tickAtom, () => ++paneTick))
     else stopPaneTicker()
     const els = $.ui.resolve(e)
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
@@ -439,8 +457,14 @@ export const register: Register = on => {
       const from = await read($, focusAtom)
       const isToTab = e.element.startsWith('tab:')
       // with nothing focused yet, the first move goes anywhere
-      if (from && from.startsWith('tab:') !== isToTab) return { deny: 'Enter goes into a tab, Esc back out' }
-      if (isToTab) await update($, pageAtom, () => ({ tab: e.element!.slice(4), picker: null })) // the page follows the tabs
+      if (from && from.startsWith('tab:') !== isToTab) {
+        // off either end of the tab bar, round to the other end; between the levels, Enter and Esc
+        const at = TABS.findIndex(t => `tab:${t.id}` === from)
+        const end = !isToTab && at === TABS.length - 1 ? TABS[0] : !isToTab && at === 0 ? TABS.at(-1) : undefined
+        if (!end) return { deny: 'Enter goes into a tab, Esc back out' }
+        e = { ...e, element: `tab:${end.id}` }
+      }
+      if (e.element!.startsWith('tab:')) await update($, pageAtom, () => ({ tab: e.element!.slice(4), picker: null })) // the page follows the tabs
     }
     const r = await next(e)
     if (!r.deny) await update($, focusAtom, () => e.element ?? '')
@@ -452,8 +476,8 @@ export const register: Register = on => {
     if (e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
     const focus = await read($, focusAtom)
     if (focus.startsWith('tab:')) {
-      const t = TABS[TABS.findIndex(x => `tab:${x.id}` === focus) + e.by]
-      if (t) await goTo($, { tab: t.id, picker: null }, `tab:${t.id}`)
+      const t = TABS[(TABS.findIndex(x => `tab:${x.id}` === focus) + e.by + TABS.length) % TABS.length]!
+      await goTo($, { tab: t.id, picker: null }, `tab:${t.id}`)
       return {}
     }
     const i = ring.indexOf(focus)

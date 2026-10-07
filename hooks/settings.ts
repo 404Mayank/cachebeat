@@ -34,16 +34,19 @@ export function normalize(stored: unknown): BeatSettings {
   const s: Record<string, unknown> = { ...DEFAULTS }
   if (stored && typeof stored === 'object') {
     for (const [k, v] of Object.entries(stored)) {
-      if (k in DEFAULTS && typeof v === typeof DEFAULTS[k as keyof BeatSettings]) s[k] = v
+      if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || (k === 'speed' && typeof v === 'number'))) s[k] = v
     }
   }
   const out = s as BeatSettings
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
+  if (typeof out.speed === 'number' && parseFrameMs(`${out.speed}`) === undefined) out.speed = DEFAULTS.speed
   return out
 }
 
 export const FRAME_MS = { slow: 120, normal: 80, fast: 50 } as const
+/** A frame's time: a named speed's, or the milliseconds typed in. */
+export const frameMs = (s: BeatSettings) => (typeof s.speed === 'number' ? s.speed : FRAME_MS[s.speed])
 
 // theme keys with a shimmer pair in Claude Code's themes, so they follow the active theme
 export const THEME_COLORS = ['claude', 'permission', 'warning', 'fastMode', 'inactive'] as const
@@ -131,14 +134,26 @@ export function spans(text: string, s: BeatSettings, tick: number, lit: boolean)
   return out
 }
 
-/** '35k' → 35000, '1.5m' → 1500000, '40000' → 40000; from 1k to 1M, else undefined. */
-export function parseTokens(text: string) {
-  const m = /^(\d+(?:\.\d+)?)\s*([km]?)$/i.exec(text.trim().replaceAll(',', ''))
-  if (!m) return undefined
-  const unit = m[2]!.toLowerCase()
-  const n = Math.round(Number(m[1]) * (unit === 'k' ? 1e3 : unit === 'm' ? 1e6 : 1))
-  return n >= 1_000 && n <= 1_000_000 ? n : undefined
+/**
+ * Reads a typed number with an optional unit (`units` maps each to its scale; '' is none), kept
+ * when it lands within [min, max]: '35k' → 35000 tokens, '90m' → 1.5 hours.
+ */
+function reader(units: Record<string, number>, min: number, max: number, isWhole: boolean) {
+  return (text: string): number | undefined => {
+    const m = /^(\d+(?:\.\d+)?)\s*([a-z%]*)$/i.exec(text.trim().replaceAll(',', ''))
+    const scale = m ? units[m[2]!.toLowerCase()] : undefined
+    if (scale === undefined) return undefined
+    const n = Number(m![1]) * scale
+    const v = isWhole ? Math.round(n) : Math.round(n * 100) / 100
+    return v >= min && v <= max ? v : undefined
+  }
 }
+
+export const parseTokens = reader({ '': 1, k: 1e3, m: 1e6 }, 1_000, 1_000_000, true)
+export const parseMinutes = reader({ '': 1, m: 1, min: 1 }, 1, 55, true) // under the hour the cache lives
+export const parseHours = reader({ '': 1, h: 1, m: 1 / 60, min: 1 / 60 }, 0.5, 48, false)
+export const parsePercent = reader({ '': 1, '%': 1 }, 10, 100, true)
+export const parseFrameMs = reader({ '': 1, ms: 1 }, 20, 500, true)
 
 /** 184000 → 184k, 1250000 → 1.3M. */
 export const tokens = (n: number) =>
@@ -171,18 +186,27 @@ export const TABS: readonly Tab[] = [
     id: 'beating', title: 'Beating',
     rows: [
       { key: 'defaultOn', label: 'New sessions start', values: [false, true], fmt: onOff },
-      { key: 'interval', label: 'Beat after idle', values: [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 50, 55], fmt: v => `${v}m` },
+      {
+        key: 'interval', label: 'Beat after idle', values: [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 50, 55], fmt: v => `${v}m`,
+        custom: { placeholder: 'minutes, 1 to 55: e.g. 35', parse: parseMinutes },
+      },
       {
         key: 'intervalScope', label: '/cachebeat <min> sets', values: ['session', 'global'],
         fmt: v => (v === 'session' ? 'this session' : 'the default'),
       },
-      { key: 'stopAfterHours', label: 'Stop after idle', values: [1, 2, 4, 6, 8, 12, 24], fmt: v => `${v}h` },
-      { key: 'stopAtUsage', label: 'Stop at usage', values: [50, 60, 70, 80, 90, 95, 100], fmt: v => `${v}%` },
+      {
+        key: 'stopAfterHours', label: 'Stop after idle', values: [1, 2, 4, 6, 8, 12, 24], fmt: v => `${v}h`,
+        custom: { placeholder: 'hours, up to 48: e.g. 10 or 90m', parse: parseHours },
+      },
+      {
+        key: 'stopAtUsage', label: 'Stop at usage', values: [50, 60, 70, 80, 90, 95, 100], fmt: v => `${v}%`,
+        custom: { placeholder: 'percent, 10 to 100: e.g. 85', parse: parsePercent },
+      },
       { key: 'skipSmall', label: 'Skip small contexts', values: [false, true], fmt: onOff },
       {
         key: 'skipSmallTokens', label: '  smaller than', values: [5_000, 10_000, 20_000, 30_000, 50_000, 100_000],
         show: s => s.skipSmall, fmt: v => `${tokens(Number(v))} tokens`,
-        custom: { placeholder: 'e.g. 35k, 0.5m or 40000', parse: parseTokens },
+        custom: { placeholder: 'tokens, 1k to 1M: e.g. 35k', parse: parseTokens },
       },
     ],
   },
@@ -191,7 +215,11 @@ export const TABS: readonly Tab[] = [
     rows: [
       { key: 'variant', label: 'Animation', values: VARIANTS.map(v => v.id), fmt: v => VARIANTS.find(x => x.id === v)?.name ?? `${v}` },
       { key: 'animate', label: 'Animate', values: [true, false], fmt: onOff },
-      { key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], show: s => s.animate, fmt: v => `${v} · ${FRAME_MS[v as BeatSettings['speed']]}ms` },
+      {
+        key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], show: s => s.animate,
+        fmt: v => (typeof v === 'number' ? `${v}ms a frame` : `${v} · ${FRAME_MS[v as keyof typeof FRAME_MS]}ms`),
+        custom: { placeholder: 'ms a frame, 20 to 500: e.g. 65', parse: parseFrameMs },
+      },
       {
         key: 'timing', label: 'Timing', values: ['linear', 'lubdub'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear'),
         note: `Linear suits the line animations (${VARIANTS.filter(x => x.isEndless).map(x => x.name).join(', ')}); lub-dub, the hearts.`,

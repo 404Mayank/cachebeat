@@ -27,15 +27,17 @@ While it's armed, an animated heart sits under the prompt, followed by the beat 
 - on a rate limit or non-transient API error
 - when a beat's request wasn't served from the cache
 
-Transient errors (overloaded, 5xx, network) are retried a minute later. With **Skip small contexts** on, a beat is skipped when the context is under the threshold, and the next turn arms it again.
+Transient errors (overloaded, 5xx, network) are retried a minute later.
+
+With **Skip small contexts** on, cachebeat checks the chat's size when you turn it on and after every turn. If it's under your minimum, the log says `beats will skip: this chat is 38k tokens, under your 50k minimum` (once, not every turn), the status line under the turn row says `♡ beats skip · …`, and the heart holds still. The first turn that grows the chat past the minimum arms it again.
 
 ## Settings
 
 `/cachebeat settings` opens a pane with five tabs: Beating, Heart, Look, Status and Alerts. Each tab is short enough to fit without scrolling.
 
 - **Keyboard:** the pane has three levels.
-  - **Tab bar:** ↑↓ switch tabs and the page follows. Enter goes into the tab's settings. Esc closes the pane.
-  - **A tab's settings:** ↑↓ move the highlight and stop at the first and last rows; the pane scrolls to follow in a short window. Enter on an on/off row flips it. Every other row is marked `›`, and Enter on it opens a picker of its choices. Esc goes back to the tab bar.
+  - **Tab bar:** ↑↓ and Tab switch tabs, wrapping from the last tab to the first, and the page follows. Enter goes into the tab's settings. Esc closes the pane.
+  - **A tab's settings:** ↑↓ move the highlight and stop at the first and last rows; the pane scrolls to follow in a short window. Enter on an on/off row flips it. Every other row is marked `›`, and Enter on it opens a picker of its choices. Number settings also have a **custom** field at the bottom of their picker. Esc goes back to the tab bar.
   - **Picker:** ↑↓ move and Enter picks. Esc goes back to the row.
 
   From anywhere, 1–5 open a tab and go straight into its settings, and so does a click on a tab.
@@ -51,14 +53,14 @@ Settings are global. They're kept in the plugin's store, so every session uses t
 | --- | --- | --- | --- |
 | Beating | This session | on / off (this session only, not saved) | off |
 | | New sessions start | on / off | off |
-| | Beat after idle | 1–55 min | 50m |
+| | Beat after idle | 1–55 min, or a custom value | 50m |
 | | `/cachebeat <min>` sets | this session only / the global default | this session |
-| | Stop after idle | 1–24 h | 8h |
-| | Stop at usage | 50–100% | 100% |
+| | Stop after idle | 1–24 h, or a custom value up to 48h (`10`, `90m`) | 8h |
+| | Stop at usage | 50–100%, or a custom value from 10% | 100% |
 | | Skip small contexts | on / off; threshold 5k–100k tokens or a custom count like `35k` (shown when on) | off; 20k |
 | Heart | Animation | 19 variants (see below) | Classic |
 | | Animate | on / off | on |
-| | Speed | slow 120ms / normal 80ms / fast 50ms per frame | normal |
+| | Speed | slow 120ms / normal 80ms / fast 50ms per frame, or a custom frame time of 20–500ms | normal |
 | | Timing | linear / lub-dub: the loop twice, then a rest as long as one pass. Heart animations rest on their resting frame. Endless ones (ECG, Beam, Dash, Sine, Orbit, Garland, Bounce) have no resting frame, so they play a third pass at half speed instead of freezing. | linear |
 | | Placement | end of the hint line / its own line | hint line |
 | | Beat count | on / off | on |
