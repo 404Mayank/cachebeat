@@ -1,23 +1,6 @@
 {
   "name": "cachebeat",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Keeps the prompt cache warm while the session sits idle, via a side fork that never touches the transcript",
-  "types": "./types/index.d.ts",
-  "userConfig": {
-    "heartColor": {
-      "type": "string",
-      "title": "Heart color",
-      "description": "Color of the heart, on its own line under the mode line; dim puts it at the end of the mode line instead",
-      "default": "dim",
-      "options": [
-        "dim",
-        "red",
-        "magenta",
-        "yellow",
-        "green",
-        "cyan",
-        "white"
-      ]
-    }
-  }
+  "types": "./types/index.d.ts"
 }
