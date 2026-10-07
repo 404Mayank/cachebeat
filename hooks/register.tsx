@@ -57,13 +57,7 @@ async function setSettings($: EngineInterface, patch: Partial<BeatSettings>) {
   const copy = { ...cfg }
   await $.store.set('settings', changed(copy))
   await update($, settingsAtom, () => copy)
-  // the clocks restart at the new speed, or stay stopped, as the next drawing finds them
-  ticker?.cancel()
-  ticker = undefined
-  paneTicker?.cancel()
-  paneTicker = undefined
-  void update($, frameAtom, f => f + 1)
-  void update($, tickAtom, t => t + 1)
+  restartClocks($)
   if (s.enabled && !busy && !beating) await schedule($)
   else await refreshLine($)
 }
@@ -74,6 +68,16 @@ async function syncSettings($: EngineInterface) {
   if (JSON.stringify(now) === JSON.stringify(cfg)) return
   cfg = now
   await update($, settingsAtom, () => now)
+  restartClocks($)
+}
+
+/** The animation clocks restart at the settings' speed, or stay stopped, as the next drawing finds them. */
+function restartClocks($: EngineInterface) {
+  ticker?.cancel()
+  ticker = undefined
+  stopPaneTicker()
+  void update($, frameAtom, f => f + 1)
+  void update($, tickAtom, t => t + 1)
 }
 
 /** The beat line under the last turn's closing row, or '' while there is none. */
@@ -115,7 +119,6 @@ function setPulse($: EngineInterface, p: Pulse) {
   void update($, pulse, () => p)
 }
 
-/** Sets the next beat from the last cache read; resolves its delay, or undefined when none is set. */
 /** With Skip small contexts on, why this context is under the minimum; null when it is not. */
 async function smallContext($: EngineInterface) {
   if (!cfg.skipSmall) return null
@@ -132,6 +135,7 @@ async function checkSmall($: EngineInterface) {
   return small !== null
 }
 
+/** Sets the next beat from the last cache read; resolves its delay, or undefined when none is set. */
 async function schedule($: EngineInterface): Promise<number | undefined> {
   timer?.cancel()
   timer = undefined
@@ -433,7 +437,12 @@ export const register: Register = on => {
       // a press on a tab (Enter, 1-5, a click) shows it and goes into its settings
       tab: id => void goTo($, { tab: id, picker: null }, firstOf(id, c)),
       at: key => void focusOn($, key),
-      open: key => void goTo($, { ...page, picker: key }, `opt:${Math.max(0, rowOf(key)!.row.values.indexOf(c[key]))}`),
+      open: key => {
+        // the focus starts on the value set: one of the choices, or the custom field
+        const { row } = rowOf(key)!
+        const i = row.values.indexOf(c[key])
+        void goTo($, { ...page, picker: key }, i >= 0 ? `opt:${i}` : row.custom ? 'custom' : 'opt:0')
+      },
       pick: (key, value) => void setSettings($, { [key]: value }).then(() => goTo($, { ...page, picker: null }, `row:${key}`)),
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
       toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($, undefined).then(r => r.text)).then(t => say($, `this session: ${t}`)),
