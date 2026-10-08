@@ -224,7 +224,7 @@ claude plugin test .                # runs the test suite
 npx -p typescript tsc -p .          # type-checks, once Claude Code has loaded the plugin
 ```
 
-CI runs the same checks on Claude Code 2.1.287 and the latest release. Raising `version` in `.claude-plugin/plugin.json` and merging to `main` publishes a new release.
+CI validates and tests on Claude Code 2.1.287 and the latest release. The type-check runs locally, since Claude Code writes the types when a session loads the plugin. Raising `version` in `.claude-plugin/plugin.json` and merging to `main` publishes a new release.
 
 | File | What's in it |
 | --- | --- |
