@@ -18,6 +18,7 @@ from pathlib import Path
 
 
 RAW = Path('assets/demo-raw.mp4')
+SETTINGS_RAW = Path('assets/demo-raw-settings.mp4')  # the settings menu, recorded larger and scaled to RAW's size
 GIF = Path('assets/demo.gif')
 FONT = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Bold'], capture_output=True, text=True).stdout
 BOTTOM = 100  # px at the bottom, the hint line, left out of what is read
@@ -67,6 +68,7 @@ def record() -> None:
             (Path(mod) / name).parent.mkdir(parents=True, exist_ok=True)
             (Path(mod) / name).write_text(text)
         subprocess.run(['vhs', 'assets/demo.tape'], check=True, env={**os.environ, 'CACHEBEAT_DEMO_CLOCK': mod})
+    subprocess.run(['vhs', 'assets/demo-settings.tape'], check=True)
 
 
 def status() -> list[tuple[float, int | None]]:
@@ -107,10 +109,21 @@ def render(parts: list[tuple[float, float | None, float, bool]]) -> None:
     for i, (a, b, speed, is_glitch) in enumerate(parts):
         end = '' if b is None else f':end={b}'
         graph.append(f'[s{i}]trim=start={a}{end},setpts=(PTS-STARTPTS)/{speed}' + (f',{glitch}' if is_glitch else '') + f'[p{i}]')
-    graph.append(''.join(f'[p{i}]' for i in range(len(parts))) + f'concat=n={len(parts)}:v=1:a=0,fps=15,split[x][y]')
-    graph.append('[x]palettegen=stats_mode=diff[pal]')
+    graph.append(''.join(f'[p{i}]' for i in range(len(parts))) + f'concat=n={len(parts)}:v=1:a=0,fps=12,format=yuv420p[main]')
+    w, h = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=width,height', '-of', 'csv=p=0',
+                           str(RAW)], capture_output=True, text=True, check=True).stdout.strip().split(',')
+    graph.append(f'[1:v]scale={w}:{h}:flags=lanczos,setsar=1,fps=12,format=yuv420p[menu]')
+    graph.append('[main][menu]xfade=transition=fade:duration=0.4:offset=' + str(round(length(parts) - 0.4, 2)) + ',split[x][y]')
+    graph.append('[x]palettegen=max_colors=128:stats_mode=diff[pal]')
     graph.append('[y][pal]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle')
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(RAW), '-filter_complex', ';'.join(graph), str(GIF)], check=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(RAW), '-i', str(SETTINGS_RAW), '-filter_complex', ';'.join(graph), str(GIF)], check=True)
+
+
+def length(parts: list[tuple[float, float | None, float, bool]]) -> float:
+    """How long the main recording runs once its parts are sped up."""
+    end = float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(RAW)],
+                               capture_output=True, text=True, check=True).stdout)
+    return sum(((end if b is None else b) - a) / speed for a, b, speed, _ in parts)
 
 
 if __name__ == '__main__':

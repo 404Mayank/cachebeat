@@ -231,7 +231,7 @@ CI runs the same checks on Claude Code 2.1.287 and the latest release. Raising `
 | `hooks/settings.ts` | Settings, defaults, colors and effects |
 | `hooks/pane.tsx` | The settings menu |
 | `hooks/cachebeat.test.tsx` | Tests |
-| `assets/demo.tape`, `assets/demo.py` | Record the demo GIF with [VHS](https://github.com/charmbracelet/vhs) and fast-forward its idle stretches |
+| `assets/demo.py`, `assets/demo*.tape` | Record the demo GIF with [VHS](https://github.com/charmbracelet/vhs) and fast-forward its idle stretches |
 
 A new animation is a single entry in `hooks/animations.ts`: a loop and a burst, each written as frames separated by `|`.
 
