@@ -105,7 +105,9 @@ def plan(seen: list[tuple[float, int | None]]) -> list[tuple[float, float | None
 def render(parts: list[tuple[float, float | None, float, bool]]) -> None:
     glitch = (f"rgbashift=rh=-6:bh=6:rv=2,drawgrid=w=iw:h=4:t=1:c=black@0.35"
               f",drawtext=fontfile='{FONT}':fontsize=44:fontcolor=0x1e1e2e:box=1:boxcolor=0xf5c2e7:boxborderw=14"
-              f":x=(w-tw)/2:y=h*0.18:text='▶▶ FAST-FORWARD'")
+              f":x=(w-tw)/2:y=h*0.18:text='▶▶ FAST-FORWARD'"
+              f",drawtext=fontfile='{FONT}':fontsize=24:fontcolor=0xf5c2e7:box=1:boxcolor=0x1e1e2e@0.9:boxborderw=8"
+              f":x=(w-tw)/2:y=h*0.18+88:text='~50 MIN LATER'")
     graph = [f'[0:v]split={len(parts)}' + ''.join(f'[s{i}]' for i in range(len(parts)))]
     for i, (a, b, speed, is_glitch) in enumerate(parts):
         end = '' if b is None else f':end={b}'

@@ -1,6 +1,7 @@
 # Recorded by assets/demo.py, which turns this into assets/demo.gif.
 # It forks the session it is pointed at, so the original transcript is left as it was,
-# and hides your status line and the advisor so the frame shows Claude Code and cachebeat alone.
+# and hides your status line and the advisor so the frame shows Claude Code and cachebeat alone;
+# verbose mode stays on for the token count above the prompt.
 Output assets/demo-raw.mp4
 
 Set Shell "bash"
@@ -13,7 +14,7 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 90ms
 
 Hide
-Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --plugin-dir "$CACHEBEAT_DEMO_CLOCK" --permission-mode default --settings '{"verbose":false,"advisorModel":"","statusLine":{"type":"command","command":"true"}}'` Enter
+Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --plugin-dir "$CACHEBEAT_DEMO_CLOCK" --permission-mode default --settings '{"verbose":true,"advisorModel":"","statusLine":{"type":"command","command":"true"}}'` Enter
 Sleep 9s
 Show
 

@@ -12,7 +12,7 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 90ms
 
 Hide
-Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --permission-mode default --settings '{"verbose":false,"advisorModel":"","statusLine":{"type":"command","command":"true"}}'` Enter
+Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --permission-mode default --settings '{"verbose":true,"advisorModel":"","statusLine":{"type":"command","command":"true"}}'` Enter
 Sleep 9s
 Type "/cachebeat on" Enter
 Sleep 2s
