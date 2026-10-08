@@ -22,6 +22,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 - **A live heart** under the prompt, with 19 animations to choose from
 - **A status line** under your latest turn shows the beats so far and the time until the next one
 - **A settings menu** with live previews, driven by keyboard or mouse
+- **Ask Claude** to turn it on, change the interval, or change any setting, in your own words
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
 - **Per session or everywhere**: turn it on for one session, or have every new session start with it
 
@@ -79,6 +80,8 @@ The heart appears under the prompt, and after your next turn it starts beating. 
 /cachebeat global on
 ```
 
+Or ask Claude: "keep the cache warm in this session", "make 30 minutes the default beat time".
+
 Beats come every 50 minutes, to fit the one-hour cache of a Claude subscription. With an API key, a cloud provider, or usage credits, the cache lasts five minutes, so beat under that: `/cachebeat 4` for this session, or set **Beat after idle** to 4 in `/cachebeat settings` to make it the default.
 
 ## What it sends, and what it costs
@@ -118,7 +121,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 ## Settings
 
-Open the menu with `/cachebeat settings`. Settings are saved once and apply to every session.
+Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings are saved once and apply to every session.
 
 - On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
 - Inside a tab, ↑↓ move between settings, and Enter changes one or opens its list of choices.
@@ -246,6 +249,7 @@ npx -p typescript tsc -p .          # type-checks, once Claude Code has loaded t
 | `hooks/animations.ts` | The animations and their timing |
 | `hooks/settings.ts` | Settings, defaults, colors and effects |
 | `hooks/pane.tsx` | The settings menu |
+| `hooks/tools.ts` | The tools Claude uses to read and change cachebeat |
 | `hooks/cachebeat.test.tsx` | Tests |
 
 A new animation is a single entry in `hooks/animations.ts`: a loop and a burst, each written as frames separated by `|`.

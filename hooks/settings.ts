@@ -134,12 +134,15 @@ export function spans(text: string, s: BeatSettings, tick: number, lit: boolean)
   return out
 }
 
+/** Reads a typed number into a setting's unit, undefined outside its range; it carries that unit and range. */
+export type Reader = ((text: string) => number | undefined) & { unit: string; min: number; max: number }
+
 /**
  * Reads a typed number with an optional unit (`units` maps each to its scale; '' is none), kept
  * when it lands within [min, max]: '35k' → 35000 tokens, '90m' → 1.5 hours.
  */
-function reader(units: Record<string, number>, min: number, max: number, isWhole: boolean) {
-  return (text: string): number | undefined => {
+function reader(unit: string, units: Record<string, number>, min: number, max: number, isWhole: boolean): Reader {
+  const read = (text: string): number | undefined => {
     const m = /^(\d+(?:\.\d+)?)\s*([a-z%]*)$/i.exec(text.trim().replaceAll(',', ''))
     const scale = m ? units[m[2]!.toLowerCase()] : undefined
     if (scale === undefined) return undefined
@@ -147,13 +150,14 @@ function reader(units: Record<string, number>, min: number, max: number, isWhole
     const v = isWhole ? Math.round(n) : Math.round(n * 100) / 100
     return v >= min && v <= max ? v : undefined
   }
+  return Object.assign(read, { unit, min, max })
 }
 
-export const parseTokens = reader({ '': 1, k: 1e3, m: 1e6 }, 1_000, 1_000_000, true)
-export const parseMinutes = reader({ '': 1, m: 1, min: 1 }, 1, 55, true) // under the hour the cache lives
-export const parseHours = reader({ '': 1, h: 1, m: 1 / 60, min: 1 / 60 }, 0.5, 48, false)
-export const parsePercent = reader({ '': 1, '%': 1 }, 10, 100, true)
-export const parseFrameMs = reader({ '': 1, ms: 1 }, 20, 500, true)
+export const parseTokens = reader('tokens', { '': 1, k: 1e3, m: 1e6 }, 1_000, 1_000_000, true)
+export const parseMinutes = reader('minutes', { '': 1, m: 1, min: 1 }, 1, 55, true) // under the hour the cache lives
+export const parseHours = reader('hours', { '': 1, h: 1, m: 1 / 60, min: 1 / 60 }, 0.5, 48, false)
+export const parsePercent = reader('percent', { '': 1, '%': 1 }, 10, 100, true)
+export const parseFrameMs = reader('ms a frame', { '': 1, ms: 1 }, 20, 500, true)
 
 /** 184000 → 184k, 1250000 → 1.3M. */
 export const tokens = (n: number) =>
@@ -171,7 +175,7 @@ export type Row = {
   show?: (s: BeatSettings) => boolean
   fmt?: (v: Value, s: BeatSettings) => string
   note?: string // a dim hint under the picker's choices
-  custom?: { placeholder: string; parse: (text: string) => Value | undefined } // a typed value besides the choices
+  custom?: { placeholder: string; parse: Reader } // a typed value besides the choices
 }
 
 export type Preview = 'heart' | 'status' | 'both'
@@ -261,4 +265,16 @@ export const rowOf = (key: keyof BeatSettings) => {
 }
 
 export const isPicker = (row: Row) => typeof row.values[0] !== 'boolean'
+
+/**
+ * `value` as `key` takes it, the way the pane does: one of the row's choices, or a custom value its
+ * reader accepts (35000, or '35k'); a hex for the custom color. Undefined when it takes no such value.
+ */
+export function accept(key: string, value: unknown): Value | undefined {
+  if (key === 'customColor') return typeof value === 'string' && isHex(value) ? value.toLowerCase() : undefined
+  const row = rowOf(key as keyof BeatSettings)?.row
+  if (!row) return undefined
+  if (row.values.includes(value as Value)) return value as Value
+  return row.custom && (typeof value === 'number' || typeof value === 'string') ? row.custom.parse(String(value)) : undefined
+}
 

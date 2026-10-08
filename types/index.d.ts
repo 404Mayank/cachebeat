@@ -45,6 +45,14 @@ export type BeatSettings = {
 export type PanePage = { tab: string; picker: keyof BeatSettings | null }
 
 declare module 'claude-code' {
+  /** The tools this plugin registers, as the model calls them; `parseSet` checks every value. */
+  interface McpToolInputs {
+    mcp__cachebeat__state: Record<string, never>
+    mcp__cachebeat__set: {
+      session?: { enabled?: boolean; intervalMinutes?: number | null }
+      settings?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } // null resets to the default
+    }
+  }
   interface PluginState {
     cachebeat: {
       pulse: Pulse

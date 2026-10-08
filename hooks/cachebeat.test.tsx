@@ -4,7 +4,8 @@ import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
-import { DEFAULTS, EPISODE, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
+import { DEFAULTS, EPISODE, accept, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
+import { SET, STATE, TOOL } from './tools'
 
 const M = 60_000
 const TICK = 80 // a frame at normal speed
@@ -53,11 +54,13 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   })
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
+  const specs: unknown[] = []
+  on('tool.register', (_$, e) => (specs.push(e), { value: { tool: `mcp__cachebeat__${e.name}` } }) as never)
   on('ui.focus', () => ({})) // the engine's ring; a move the test raises lands
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  return { clock, forks, logs, toasts, tails, store }
+  return { clock, forks, logs, toasts, tails, store, specs }
 }
 
 const cmd = async ($: Engine, args: string) =>
@@ -655,4 +658,134 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
   await ui.press({ key: 'reset' })
   expect(stored(store)).toEqual(DEFAULTS)
   await ui.unmount()
+})
+
+type Args = Record<string, unknown>
+const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) => $.tool.call({ tool: TOOL[name], ...args } as never)
+const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'default', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null }
+const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
+const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
+  plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
+  props: component === 'ToolUse'
+    ? { tool_use_id: 'u1', tool, input, isRunning: false, isErrored: false, isInterrupted: false }
+    : { tool_use_id: 'u1', tool, output: '{}', isErrored: false },
+}) as never
+
+test('both tools register, every setting in the schema with the pane\'s ranges', async ($: Engine, on: On) => {
+  const { specs } = await setup($, on)
+  expect(specs).toEqual([STATE, SET])
+  const settings = props(props(SET.inputSchema).settings)
+  expect(Object.keys(settings).sort()).toEqual(Object.keys(DEFAULTS).sort())
+  expect((settings.interval as Args).anyOf).toEqual([{ type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }])
+  expect((settings.speed as Args).anyOf).toEqual([{ enum: ['slow', 'normal', 'fast'] }, { type: 'number', minimum: 20, maximum: 500 }, { type: 'null' }])
+})
+
+test('state on a fresh session: off, at the default interval, the settings as they are', async ($: Engine, on: On) => {
+  await setup($, on)
+  expect(await stateNow($)).toEqual({ session: FRESH, settings: DEFAULTS, defaults: {} })
+  await call($, 'set', { settings: { interval: 30, showTokens: true } })
+  expect((await stateNow($)).defaults).toEqual({ interval: 50, showTokens: false })
+})
+
+const set = async ($: Engine, args: Args) => JSON.parse((await call($, 'set', args)).result as string)
+
+test('a session interval turns beating on and leaves the default; null follows it again', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  const on20 = { ...FRESH, enabled: true, intervalMinutes: 20, intervalFrom: 'session', nextBeat: 'after the next turn' }
+  expect(await set($, { session: { intervalMinutes: 20 } })).toEqual({
+    changed: ['session.enabled', 'session.intervalMinutes'], session: on20, settings: {},
+  })
+  expect(stored(store).interval).toBe(50)
+  expect((await set($, { session: { intervalMinutes: null } })).session).toEqual({ ...FRESH, enabled: true, nextBeat: 'after the next turn' })
+  expect((await set($, { session: { intervalMinutes: 30, enabled: false } })).session.enabled).toBe(false)
+})
+
+test('set answers with what changed and those settings alone; null resets a setting', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  expect(await set($, { settings: { skipSmall: true, skipSmallTokens: 35_000, interval: 50 } })).toEqual({
+    changed: ['settings.skipSmall', 'settings.skipSmallTokens'], session: FRESH, settings: { skipSmall: true, skipSmallTokens: 35_000 },
+  })
+  expect(await set($, { settings: { skipSmallTokens: null, customColor: null } })).toEqual({
+    changed: ['settings.skipSmallTokens'], session: FRESH, settings: { skipSmallTokens: 20_000 },
+  })
+  expect(stored(store)).toEqual({ ...DEFAULTS, skipSmall: true })
+  // a session that follows the default moves with it, but the call changed the default alone
+  expect(await set($, { settings: { interval: 30 } })).toEqual({
+    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30 }, settings: { interval: 30 },
+  })
+})
+
+test('a default interval is saved, and a session that follows it beats at it', async ($: Engine, on: On) => {
+  const { clock, forks, store } = await setup($, on)
+  await call($, 'set', { session: { enabled: true }, settings: { interval: 30 } })
+  expect(stored(store).interval).toBe(30)
+  await $.turn.complete(turn)
+  await clock.advance(30 * M)
+  expect(forks).toEqual([30 * M])
+})
+
+test('settings take the pane\'s values: named or custom, with units', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await call($, 'set', { settings: { skipSmall: true, skipSmallTokens: 35_000, speed: 65 } })
+  expect([stored(store).skipSmall, stored(store).skipSmallTokens, stored(store).speed]).toEqual([true, 35_000, 65])
+  await call($, 'set', { settings: { speed: 'fast', skipSmall: false } })
+  expect([stored(store).speed, stored(store).skipSmall]).toEqual(['fast', false])
+  expect([accept('skipSmallTokens', '35k'), accept('skipSmall', false), accept('customColor', '#AABBCC')]).toEqual([35_000, false, '#aabbcc'])
+  expect([accept('customColor', 'red'), accept('interval', 56), accept('timing', 3), accept('nope', 1)]).toEqual([undefined, undefined, undefined, undefined])
+})
+
+test('a call with any bad value is refused whole, saying what each takes', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  const deny = async (args: Args) => (await call($, 'set', args)).deny
+  expect(await deny({ session: { intervalMinutes: 90 } })).toBe('nothing changed: session.intervalMinutes takes 1–55 minutes or null, not 90')
+  expect(await deny({ settings: { variant: 'nope' } })).toStartWith('nothing changed: settings.variant takes one of classic, pulse,')
+  expect(await deny({ settings: { skipSmallTokens: 5 } })).toBe('nothing changed: settings.skipSmallTokens takes 1000–1000000 tokens or null, not 5')
+  expect(await deny({ settings: { bogus: 1 }, session: 'on' })).toBe('nothing changed: session is an object, not "on"; settings has no bogus')
+  expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, timing: 'fast' } }))
+    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.timing takes one of linear, lubdub or null, not "fast"')
+  expect(store.has('settings')).toBe(false)
+  expect((await stateNow($)).session).toEqual(FRESH)
+})
+
+test('turned on mid-turn, it says so, and beats an interval after the turn ends', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  const r = JSON.parse((await call($, 'set', { session: { enabled: true } })).result as string)
+  expect(r.session.nextBeat).toBe('50m after this turn ends')
+  await $.turn.complete(turn)
+  expect((await stateNow($)).session.nextBeat).toBe('in 50m')
+  await clock.advance(IDLE)
+  expect(forks).toEqual([IDLE])
+})
+
+test('turned off with a settings change too, the beat already set does not come', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await call($, 'set', { session: { enabled: true } })
+  await $.turn.complete(turn)
+  await call($, 'set', { session: { enabled: false }, settings: { skipSmall: false } })
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+})
+
+test('the tools answer without the permission path beneath them', async ($: Engine, on: On) => {
+  on('classic.PreToolUse', () => ({ deny: 'no' }))
+  await setup($, on)
+  const bash = await $.tool.call({ tool: 'Bash', command: 'ls' }) // the hook is live for other tools
+  expect([bash.isError, bash.text]).toEqual([true, 'no'])
+  expect((await stateNow($)).session).toEqual(FRESH)
+})
+
+test('a subagent can read, never change', async ($: Engine, on: On) => {
+  await setup($, on)
+  expect((await call($, 'set', { agentId: 'sub', session: { enabled: true } })).deny).toBe('Only the main conversation changes cachebeat.')
+  expect((await stateNow($, { agentId: 'sub' })).session).toEqual(FRESH)
+})
+
+test('a call is one dim line in the transcript, its answer not drawn', async ($: Engine, on: On) => {
+  await setup($, on)
+  const change = { session: { enabled: true, intervalMinutes: 20 }, settings: { interval: 30, heartPlacement: 'line' } }
+  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat: this session on, every 20m · Beat after idle 30m, Heart placement own line'])
+  expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat: read the state'])
+  expect(await draw($, toolRow('ToolResult', TOOL.set, change))).toEqual([''])
 })

@@ -49,7 +49,8 @@ export function statusText(s: BeatSettings, beats: number, read: number | null, 
   return text
 }
 
-const shown = (row: Row, v: Value, s: BeatSettings) => (row.fmt ? row.fmt(v, s) : String(v))
+/** A value as its row shows it. */
+export const shown = (row: Row, v: Value, s: BeatSettings) => (row.fmt ? row.fmt(v, s) : String(v))
 
 function preview(els: Els, s: BeatSettings, kind: Preview, tick: number) {
   const { Box, Text } = els

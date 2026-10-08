@@ -4,6 +4,7 @@ import type { Alert, BeatSettings, PanePage, Pulse, Saved } from '../types'
 import { loopIndex, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
 import { DEFAULTS, TABS, changed, frameMs, isLit, normalize, rowOf, spans, tokens } from './settings'
+import { SET, STATE, TOOL, parseSet, summary } from './tools'
 
 const MIN = 60_000
 export const IDLE = DEFAULTS.interval * MIN // default silence before a beat; must stay under the cache TTL
@@ -263,6 +264,41 @@ async function turnOn($: EngineInterface, minutes: number | undefined) {
   return { text: `on, ${every()} · ${when(ms)}` }
 }
 
+/** What the tools answer: this session's beating, and the settings every session shares. */
+async function stateOf($: EngineInterface) {
+  await syncSettings($)
+  const now = await $.clock.now()
+  const nextBeat = !s.enabled || s.small ? null
+    : s.nextAt !== null ? `in ${fmt(s.nextAt - now)}`
+    : busy ? `${fmt(idle())} after this turn ends`
+    : 'after the next turn'
+  const session = {
+    enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle === null ? 'default' : 'session',
+    beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small,
+  }
+  const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
+  return { session, settings: cfg, defaults }
+}
+
+type Before = { enabled: boolean; idle: number | null; settings: BeatSettings }
+
+/**
+ * `set`'s answer: the fields the call changed (this session's own switch and interval, not what follows
+ * from the settings; its own patch, not what another session saved meanwhile), this session's state,
+ * and the settings it changed.
+ */
+async function answerSet($: EngineInterface, before: Before, patch: Partial<BeatSettings>) {
+  const settings = Object.entries(patch).filter(([k, v]) => before.settings[k as keyof BeatSettings] !== v)
+  const changed = [
+    ...(before.enabled !== s.enabled ? ['session.enabled'] : []),
+    ...(before.idle !== s.idle ? ['session.intervalMinutes'] : []),
+    ...settings.map(([k]) => `settings.${k}`),
+  ]
+  return { changed, session: (await stateOf($)).session, settings: Object.fromEntries(settings) }
+}
+
+const json = (x: unknown) => JSON.stringify(x, null, 2)
+
 const PANE_OPEN = { id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, holdToasts: true, rows: 24 } as const
 
 async function openSettings($: EngineInterface) {
@@ -322,6 +358,8 @@ export const register: Register = on => {
       argumentHint: '[on|off|<minutes>|now|global on|off|settings]',
       immediate: true,
     })
+    await $.tool.register(STATE)
+    await $.tool.register(SET)
     return next(e)
   })
 
@@ -361,6 +399,44 @@ export const register: Register = on => {
     const ms = s.nextAt === null ? undefined : Math.max(0, s.nextAt - (await $.clock.now()))
     return { text: `on, ${every()} · ${s.beats} beats · ${when(ms)}` }
   })
+
+  on('tool.call', { tool: TOOL.state }, async $ => ({ result: json(await stateOf($)) }))
+
+  on('tool.call', { tool: TOOL.set }, async ($, e) => {
+    if (e.agentId) return { deny: 'Only the main conversation changes cachebeat.' }
+    const change = parseSet({ session: e.session, settings: e.settings })
+    if ('error' in change) return { deny: change.error }
+    await syncSettings($)
+    const before: Before = { enabled: s.enabled, idle: s.idle, settings: cfg }
+    if (Object.keys(change.patch).length) await setSettings($, change.patch)
+    if (change.intervalMinutes !== undefined) s.idle = change.intervalMinutes === null ? null : change.intervalMinutes * MIN
+    if (change.enabled !== undefined) s.enabled = change.enabled
+    // always: setSettings reschedules only while on, and this is what cancels a beat when turned off
+    await schedule($)
+    return { result: json(await answerSet($, before, change.patch)) }
+  })
+
+  // a call is one dim line in the transcript, and its answer, for the model alone, is not drawn
+  on('ui.render', { component: 'ToolUse', props: { tool: TOOL.state } }, async ($, e, next) => {
+    if (e.props.isErrored) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return <Text dimColor>cachebeat: read the state</Text>
+  })
+
+  on('ui.render', { component: 'ToolUse', props: { tool: TOOL.set } }, async ($, e, next) => {
+    const change = parseSet((e.props.input ?? {}) as { session?: unknown; settings?: unknown })
+    if (e.props.isErrored || 'error' in change) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return <Text dimColor>{`cachebeat: ${summary(change, await read($, settingsAtom))}`}</Text>
+  })
+
+  for (const tool of [TOOL.state, TOOL.set]) {
+    on('ui.render', { component: 'ToolResult', props: { tool } }, async ($, e, next) => {
+      if (e.props.isErrored) return next(e)
+      const { Text } = $.ui.resolve(e)
+      return <Text>{''}</Text>
+    })
+  }
 
   on('turn.start', async ($, e, next) => {
     if (!beating) {
