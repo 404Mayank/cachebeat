@@ -1,4 +1,8 @@
+<div align="center">
+
 ![cachebeat](assets/logo/logo-wordmark.svg)
+
+</div>
 
 **Keep Claude Code's prompt cache warm while you're away.**
 
