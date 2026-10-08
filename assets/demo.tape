@@ -30,3 +30,20 @@ Sleep 1500ms
 # The clock is back to normal by now: this interval shows, and never beats.
 Type "/cachebeat 5" Sleep 500ms Enter
 Sleep 2500ms
+
+Type "/cachebeat settings" Sleep 500ms Enter
+Sleep 1200ms
+Type "2"
+Sleep 1000ms
+Enter
+Sleep 1500ms
+Down Sleep 600ms
+Down Sleep 600ms
+Down Sleep 600ms
+Down Sleep 600ms
+Down Sleep 600ms
+Sleep 800ms
+Escape Sleep 400ms
+Escape Sleep 300ms
+Escape
+Sleep 1s
