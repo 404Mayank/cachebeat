@@ -1,6 +1,6 @@
 {
   "name": "cachebeat",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Keeps the prompt cache warm while a session sits idle: shortly before the cache would expire, a small background request re-reads it, without touching the transcript. A beating heart under the prompt shows it working. Each beat counts toward your usage.",
   "author": { "name": "Mayank", "url": "https://github.com/404Mayank" },
   "homepage": "https://github.com/404Mayank/cachebeat",

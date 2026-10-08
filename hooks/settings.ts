@@ -188,7 +188,7 @@ export const TABS: readonly Tab[] = [
       { key: 'defaultOn', label: 'New sessions start', values: [false, true], fmt: onOff },
       {
         key: 'interval', label: 'Beat after idle', values: [4, 30, 50, 55], fmt: v => `${v}m`, // 4: under a five-minute cache
-        custom: { placeholder: 'minutes, 1 to 55: e.g. 35', parse: parseMinutes },
+        custom: { placeholder: 'e.g. 35m', parse: parseMinutes },
       },
       {
         key: 'intervalScope', label: '/cachebeat <min> sets', values: ['session', 'global'],
@@ -196,17 +196,17 @@ export const TABS: readonly Tab[] = [
       },
       {
         key: 'stopAfterHours', label: 'Stop after idle', values: [1, 4, 8, 24], fmt: v => `${v}h`,
-        custom: { placeholder: 'hours, up to 48: e.g. 10 or 90m', parse: parseHours },
+        custom: { placeholder: 'e.g. 10h or 90m', parse: parseHours },
       },
       {
         key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,
-        custom: { placeholder: 'percent, 10 to 100: e.g. 85', parse: parsePercent },
+        custom: { placeholder: 'e.g. 85%', parse: parsePercent },
       },
       { key: 'skipSmall', label: 'Skip small contexts', values: [false, true], fmt: onOff },
       {
         key: 'skipSmallTokens', label: '  smaller than', values: [10_000, 20_000, 50_000, 100_000],
         show: s => s.skipSmall, fmt: v => `${tokens(Number(v))} tokens`,
-        custom: { placeholder: 'tokens, 1k to 1M: e.g. 35k', parse: parseTokens },
+        custom: { placeholder: 'e.g. 35k', parse: parseTokens },
       },
     ],
   },
@@ -218,7 +218,7 @@ export const TABS: readonly Tab[] = [
       {
         key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], show: s => s.animate,
         fmt: v => (typeof v === 'number' ? `${v}ms a frame` : `${v} · ${FRAME_MS[v as keyof typeof FRAME_MS]}ms`),
-        custom: { placeholder: 'ms a frame, 20 to 500: e.g. 65', parse: parseFrameMs },
+        custom: { placeholder: 'e.g. 65ms', parse: parseFrameMs },
       },
       {
         key: 'timing', label: 'Timing', values: ['linear', 'lubdub'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear'),
