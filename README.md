@@ -224,8 +224,6 @@ claude plugin test .                # runs the test suite
 npx -p typescript tsc -p .          # type-checks, once Claude Code has loaded the plugin
 ```
 
-CI validates and tests on Claude Code 2.1.287 and the latest release. The type-check runs locally, since Claude Code writes the types when a session loads the plugin. Raising `version` in `.claude-plugin/plugin.json` and merging to `main` publishes a new release.
-
 | File | What's in it |
 | --- | --- |
 | `hooks/register.tsx` | Scheduling, beats, commands, and what's drawn on screen |
@@ -233,7 +231,6 @@ CI validates and tests on Claude Code 2.1.287 and the latest release. The type-c
 | `hooks/settings.ts` | Settings, defaults, colors and effects |
 | `hooks/pane.tsx` | The settings menu |
 | `hooks/cachebeat.test.tsx` | Tests |
-| `assets/demo.py`, `assets/demo.tape` | Record the demo GIF with [VHS](https://github.com/charmbracelet/vhs) and fast-forward its idle stretches |
 
 A new animation is a single entry in `hooks/animations.ts`: a loop and a burst, each written as frames separated by `|`.
 
