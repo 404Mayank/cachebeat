@@ -1,0 +1,17 @@
+{
+  "name": "cachebeat",
+  "owner": { "name": "Mayank", "url": "https://github.com/404Mayank" },
+  "metadata": { "description": "cachebeat: keeps Claude Code's prompt cache warm while you're away" },
+  "plugins": [
+    {
+      "name": "cachebeat",
+      "source": "./",
+      "description": "Keeps the prompt cache warm while a session sits idle, with a beating heart under the prompt and a countdown to the next beat",
+      "homepage": "https://github.com/404Mayank/cachebeat",
+      "repository": "https://github.com/404Mayank/cachebeat",
+      "license": "MIT",
+      "category": "productivity",
+      "tags": ["mod", "prompt-cache", "cache", "usage", "terminal"]
+    }
+  ]
+}
