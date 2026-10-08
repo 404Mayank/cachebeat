@@ -20,18 +20,16 @@ Show
 
 Sleep 500ms
 Type "/cachebeat settings" Sleep 500ms Enter
-Sleep 2s
+Sleep 1200ms
 Type "2"
-Sleep 1500ms
+Sleep 1000ms
 Enter
-Sleep 2500ms
-Down Sleep 900ms
-Down Sleep 900ms
-Down Sleep 900ms
-Down Sleep 900ms
-Down Sleep 900ms
-Sleep 1500ms
-Escape Sleep 600ms
+Sleep 2000ms
+Down Sleep 700ms
+Down Sleep 700ms
+Down Sleep 700ms
+Sleep 800ms
 Escape Sleep 400ms
+Escape Sleep 300ms
 Escape
-Sleep 2s
+Sleep 1s

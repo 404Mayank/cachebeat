@@ -19,15 +19,13 @@ Show
 
 Sleep 1s
 Type "in one line, what's in this folder?" Sleep 500ms Enter
-Sleep 9s
+Sleep 3500ms
 
 # The demo clock runs 50 idle minutes in 10 seconds, so both beats land on their own.
 Type "/cachebeat on" Sleep 500ms Enter
 Wait+Screen@90s /kept warm ×2/
-Sleep 2500ms
+Sleep 1500ms
 
 # The clock is back to normal by now: this interval shows, and never beats.
 Type "/cachebeat 5" Sleep 500ms Enter
-Sleep 3s
-
-Sleep 1s
+Sleep 2500ms

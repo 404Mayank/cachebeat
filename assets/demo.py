@@ -23,7 +23,8 @@ GIF = Path('assets/demo.gif')
 FONT = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Bold'], capture_output=True, text=True).stdout
 BOTTOM = 100  # px at the bottom, the hint line, left out of what is read
 FPS = 2  # how often the status line is read
-LEAD, HOLD = 0.6, 1.6  # seconds each beat plays at full speed, before and after
+LEAD, HOLD = 0.6, 3.0  # seconds each beat plays at full speed, before and after
+SETTLE = 2.5  # seconds the status line shows at full speed before the first fast-forward
 FF = 3  # how much faster the idle stretches play
 
 CLOCK_MOD = {
@@ -90,7 +91,7 @@ def status() -> list[tuple[float, int | None]]:
 def plan(seen: list[tuple[float, int | None]]) -> list[tuple[float, float | None, float, bool]]:
     """(start, end, speed, glitch) on the recording's clock: fast and glitched from the status line's
     first appearance to the last beat, each beat at full speed."""
-    start = next(t for t, n in seen if n is not None) + 0.8
+    start = next(t for t, n in seen if n is not None) + SETTLE
     beats = [t for (_, a), (t, b) in zip(seen, seen[1:]) if a is not None and b is not None and b > a][:2]
     parts, t = [(0.0, start, 1, False)], start
     for x in beats:
