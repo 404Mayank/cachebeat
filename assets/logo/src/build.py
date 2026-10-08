@@ -2,7 +2,7 @@
 
     python3 assets/logo/src/build.py          # the SVGs: needs only Python 3
     python3 assets/logo/src/build.py --png    # and the PNGs: needs Chrome or Chromium (set CHROME to its
-                                              # path if it isn't found)
+                                              # path if it isn't found) and Pillow
 
 The knobs are the constants at the top. Everything is drawn in one set of units (the pixels of the
 image the logo was traced from); each form's viewBox frames the part it shows.
@@ -75,12 +75,13 @@ WORD, WORD_LEFTS = glyphs.word('wordmark', NAME, WORD_LEFT, WORD_RIGHT, WORD_BAS
 
 def prompt():
     """'>_' drawn upright, then laid flat on the top plate: its top recedes, so it's foreshortened like
-    the plate, and centred on it."""
+    the plate. Across, the '_' sits on the plate's centre line, the '>' to its left; down, the pair is
+    centred on the plate."""
     h, tv, f = 31, 16, 2.2  # the chevron's half-height, arm thickness (measured upright), flat tip
     chevron = (f'M0 {num(-h - tv/2)}L{num(h + tv/2 - f)} {num(-f)}L{num(h + tv/2 - f)} {num(f)}L0 {num(h + tv/2)}'
                f'L0 {num(h - tv/2)}L{num(h - tv/2)} 0L0 {num(-h + tv/2)}Z')
     s, ky = PROMPT_SCALE, LID.ky
-    gx, gy = 39, 15  # the centre of the pair's upright extent (x 0..78, y -39..69)
+    gx, gy = 61.5, 15  # the '_'s centre across (x 45..78), and the middle of the pair's extent down (y -39..69)
     return (f'<g transform="translate({num(CX - gx*s)} {num(CY - gy*s*ky)}) scale({s} {num(s*ky)})">'
             f'<path d="{chevron}" stroke-width="2.2" stroke-linejoin="round"/>'
             f'<rect x="45" y="50.5" width="33" height="18.5" rx="5"/></g>')
@@ -263,6 +264,7 @@ FORMS = {
     'logo-wordmark-on-dark.svg': logo_wordmark_on_dark,
     'social-preview.svg': social_preview,
 }
+WINDOW_SPARE = 200  # px of window beyond the image, more than the browser keeps for itself
 PNGS = {'logo.png': ('logo.svg', 512, 512), 'social-preview.png': ('social-preview.svg', 1280, 640)}
 
 
@@ -276,17 +278,27 @@ def chrome():
 
 
 def rasterize(svg_file, png_file, w, h):
-    """Draws the SVG the way a browser does (its filters and masks need one), with a clear background."""
+    """Draws the SVG the way a browser does (its filters and masks need one), with a clear background.
+
+    Headless Chrome draws the page into less than the window it is given, leaving the bottom of a
+    window-sized screenshot blank, so it gets a taller window and the screenshot is cut back to size.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        sys.exit('The PNGs need Pillow: pip install pillow')
     with tempfile.TemporaryDirectory() as tmp:
-        page = Path(tmp)/'page.html'
+        page, shot = Path(tmp)/'page.html', Path(tmp)/'shot.png'
         page.write_text(f'<!doctype html><style>html,body{{margin:0;background:transparent}}'
                         f'img{{display:block;width:{w}px;height:{h}px}}</style><img src="{svg_file.as_uri()}">')
         args = [chrome(), '--headless=new', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=1',
-                f'--window-size={w},{h}', '--default-background-color=00000000', f'--user-data-dir={tmp}/profile',
-                f'--screenshot={png_file}', page.as_uri()]
+                f'--window-size={w},{h + WINDOW_SPARE}', '--default-background-color=00000000',
+                f'--user-data-dir={tmp}/profile', f'--screenshot={shot}', page.as_uri()]
         if hasattr(os, 'geteuid') and os.geteuid() == 0:
             args.insert(1, '--no-sandbox')
         subprocess.run(args, check=True, capture_output=True)
+        with Image.open(shot) as im:
+            im.crop((0, 0, w, h)).save(png_file, optimize=True)
 
 
 def main():

@@ -18,7 +18,7 @@ Every file here is drawn by `src/build.py`, so change the code rather than the S
 
 ```sh
 python3 assets/logo/src/build.py          # the SVGs: needs only Python 3
-python3 assets/logo/src/build.py --png    # and the PNGs: needs Chrome or Chromium
+python3 assets/logo/src/build.py --png    # and the PNGs: needs Chrome or Chromium, and Pillow
 ```
 
 The PNGs are drawn by headless Chrome, since the logo's glow and masks need a browser. If it isn't found, point `CHROME` at it, for example `CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"`.
