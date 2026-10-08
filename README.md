@@ -49,7 +49,7 @@ Or from inside Claude Code:
 
 If `/cachebeat` isn't there afterwards, restart Claude Code.
 
-**Update:** `claude plugin marketplace update cachebeat`, then `claude plugin update cachebeat@cachebeat`, then restart Claude Code.
+**Update:** `claude plugin marketplace update cachebeat`, then `claude plugin update cachebeat@cachebeat`, then restart Claude Code. To get new versions automatically, turn on auto-update under `/plugin` → **Marketplaces** → **cachebeat**.
 
 **Uninstall:** `claude plugin uninstall cachebeat@cachebeat`, then `claude plugin marketplace remove cachebeat`.
 
