@@ -619,7 +619,7 @@ test('the focused option of a picker shows in the preview before it is picked', 
   await $.ui.focus({ component: 'Pane', requestId: PANE, element: 'opt:2', origin: { kind: 'person' } }) // permission
   const line = (await ui.findAll({ type: 'Text' })).find(t => t.text?.includes('cache kept warm'))
   expect(line?.props).toMatchObject({ color: 'permission' })
-  expect(stored(store).color).toBe('dim')
+  expect(stored(store).color).toBe('claude')
   await ui.unmount()
 })
 

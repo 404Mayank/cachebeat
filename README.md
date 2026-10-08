@@ -162,7 +162,7 @@ Orbit       •♥              Cupid       ─➤ ♡
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| Color | Dim, a color from your theme, a preset, or any hex color | dim |
+| Color | Dim, a color from your theme, a preset, or any hex color | claude, your theme's accent |
 | Effect | Steady; flash on each beat; flow, a shimmer sweeping across; or mixed, which switches between them | steady |
 
 Theme colors follow your Claude Code theme, so they change when you switch themes. A heart at the end of the hint line is always dim; put it on its own line to give it color. The status line takes the color either way.

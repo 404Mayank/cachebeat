@@ -15,7 +15,7 @@ export const DEFAULTS: BeatSettings = {
   timing: 'linear',
   heartPlacement: 'tail',
   showCount: true,
-  color: 'dim',
+  color: 'claude',
   customColor: '#e6a8b9',
   effect: 'steady',
   statusLine: 'spaced',
