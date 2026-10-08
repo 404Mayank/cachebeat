@@ -6,11 +6,11 @@
 
 **Keep Claude Code's prompt cache warm while you're away.**
 
+![cachebeat keeping an idle session's cache warm: the countdown runs down and beats land on their own, then the animation picker](assets/demo.gif)
+
 [![CI](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml/badge.svg)](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml)
 [![Claude Code 2.1.287+](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-
-![cachebeat keeping an idle session's cache warm: the countdown runs down and beats land on their own, then the animation picker](assets/demo.gif)
 
 When a Claude Code session sits idle, its prompt cache expires, and your next message has to rebuild it from scratch. That's slower, and it uses more of your usage limits. cachebeat gives the session a heartbeat: shortly before the cache would expire, it sends a tiny background request that reads the conversation and keeps the cache alive. Your transcript never sees it.
 

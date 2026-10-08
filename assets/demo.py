@@ -20,7 +20,7 @@ from pathlib import Path
 RAW = Path('assets/demo-raw.mp4')
 GIF = Path('assets/demo.gif')
 FONT = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Bold'], capture_output=True, text=True).stdout
-BOTTOM = 100  # px at the bottom, the hint line, left out of what is read
+BOTTOM = 0.18  # the share of the frame at the bottom, the hint line, left out of what is read
 FPS = 2  # how often the status line is read
 LEAD, HOLD = 0.6, 3.0  # seconds each beat plays at full speed, before and after
 SETTLE = 2.5  # seconds the status line shows at full speed before the first fast-forward
@@ -73,7 +73,7 @@ def record() -> None:
 def status() -> list[tuple[float, int | None]]:
     """Reads the status line every half second: the beat count it shows, or None while there is no status line."""
     with tempfile.TemporaryDirectory() as d:
-        subprocess.run(['ffmpeg', '-v', 'error', '-i', str(RAW), '-vf', f'fps={FPS},crop=iw:ih-{BOTTOM}:0:0', f'{d}/%05d.png'], check=True)
+        subprocess.run(['ffmpeg', '-v', 'error', '-i', str(RAW), '-vf', f'fps={FPS},crop=iw:ih*{1 - BOTTOM}:0:0', f'{d}/%05d.png'], check=True)
         frames = sorted(Path(d).glob('*.png'))
         env = {**os.environ, 'OMP_THREAD_LIMIT': '1'}  # one thread each, as the pool runs them side by side
         with ThreadPoolExecutor() as pool:
@@ -101,18 +101,22 @@ def plan(seen: list[tuple[float, int | None]]) -> list[tuple[float, float | None
 
 
 def render(parts: list[tuple[float, float | None, float, bool]]) -> None:
-    glitch = (f"rgbashift=rh=-6:bh=6:rv=2,drawgrid=w=iw:h=4:t=1:c=black@0.35"
-              f",drawtext=fontfile='{FONT}':fontsize=44:fontcolor=0x1e1e2e:box=1:boxcolor=0xf5c2e7:boxborderw=14"
+    h = int(subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=height', '-of', 'csv=p=0',
+                            str(RAW)], capture_output=True, text=True, check=True).stdout)
+    k = h / 560  # the badge is sized for a 560-row frame, and scales with it
+    px = lambda n: round(n * k)
+    glitch = (f"rgbashift=rh=-{px(6)}:bh={px(6)}:rv={px(2)},drawgrid=w=iw:h={px(4)}:t={px(1)}:c=black@0.35"
+              f",drawtext=fontfile='{FONT}':fontsize={px(44)}:fontcolor=0x1e1e2e:box=1:boxcolor=0xf5c2e7:boxborderw={px(14)}"
               f":x=(w-tw)/2:y=h*0.18:text='▶▶ FAST-FORWARD'"
-              f",drawtext=fontfile='{FONT}':fontsize=24:fontcolor=0xf5c2e7:box=1:boxcolor=0x1e1e2e@0.9:boxborderw=8"
-              f":x=(w-tw)/2:y=h*0.18+88:text='~50 MIN LATER'")
+              f",drawtext=fontfile='{FONT}':fontsize={px(24)}:fontcolor=0xf5c2e7:box=1:boxcolor=0x1e1e2e@0.9:boxborderw={px(8)}"
+              f":x=(w-tw)/2:y=h*0.18+{px(88)}:text='~50 MIN LATER'")
     graph = [f'[0:v]split={len(parts)}' + ''.join(f'[s{i}]' for i in range(len(parts)))]
     for i, (a, b, speed, is_glitch) in enumerate(parts):
         end = '' if b is None else f':end={b}'
         graph.append(f'[s{i}]trim=start={a}{end},setpts=(PTS-STARTPTS)/{speed}' + (f',{glitch}' if is_glitch else '') + f'[p{i}]')
     graph.append(''.join(f'[p{i}]' for i in range(len(parts))) + f'concat=n={len(parts)}:v=1:a=0,fps=12,split[x][y]')
     graph.append('[x]palettegen=max_colors=128:stats_mode=diff[pal]')
-    graph.append('[y][pal]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle')
+    graph.append('[y][pal]paletteuse=dither=none:diff_mode=rectangle')  # flat terminal colors: no dither keeps text crisp
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(RAW), '-filter_complex', ';'.join(graph), str(GIF)], check=True)
 
 

@@ -6,10 +6,10 @@ Output assets/demo-raw.mp4
 
 Set Shell "bash"
 Set FontFamily "FiraCode Nerd Font Mono"
-Set FontSize 16
-Set Width 940
-Set Height 560
-Set Padding 18
+Set FontSize 20
+Set Width 1176
+Set Height 700
+Set Padding 22
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 90ms
 
@@ -19,7 +19,7 @@ Sleep 9s
 Show
 
 Sleep 1s
-Type "in one line, what's in this folder?" Sleep 500ms Enter
+Type "in one line, which board is this sketch for?" Sleep 500ms Enter
 Sleep 3500ms
 
 # The demo clock runs 50 idle minutes in 10 seconds, so both beats land on their own.
