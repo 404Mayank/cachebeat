@@ -63,6 +63,8 @@ The heart appears under the prompt, and after your next turn it starts beating. 
 /cachebeat global on
 ```
 
+Beats come every 50 minutes, to fit the one-hour cache of a Claude subscription. With an API key, a cloud provider, or usage credits, the cache lasts five minutes, so beat under that: `/cachebeat 4` for this session, or set **Beat after idle** to 4 in `/cachebeat settings` to make it the default.
+
 ## What it sends, and what it costs
 
 Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript.

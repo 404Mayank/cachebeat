@@ -560,13 +560,13 @@ test('the settings pane: tabs, toggles in place, pickers for the rest', async ($
   expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeDefined()
 
   await ui.press({ key: 'row:interval' }) // more: a picker
-  expect(await buttons(ui, 'opt:')).toHaveLength(13)
-  await ui.press({ key: 'opt:3' })
-  expect(stored(store).interval).toBe(5)
+  expect(await buttons(ui, 'opt:')).toHaveLength(4)
+  await ui.press({ key: 'opt:0' })
+  expect(stored(store).interval).toBe(4)
   expect(await ui.find({ key: 'row:interval' })).toBeDefined() // back on the tab
 
   await ui.press({ key: 'session' })
-  expect(await cmd($, '')).toContain('on, every 5m idle')
+  expect(await cmd($, '')).toContain('on, every 4m idle')
 
   await ui.press({ key: 'tab:beating' }) // Enter on the open tab goes into it: the page stays
   expect(await ui.find({ key: 'row:interval' })).toBeDefined()
@@ -647,7 +647,7 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
   await ui.press({ key: 'row:defaultOn' })
   store.set('settings', { ...stored(store), interval: 10 }) // another session's change
   await ui.press({ key: 'row:stopAtUsage' })
-  await ui.press({ key: 'opt:4' })
+  await ui.press({ key: 'opt:1' })
   expect(stored(store)).toMatchObject({ interval: 10, stopAtUsage: 90, defaultOn: true })
   await ui.press({ key: 'reset' })
   expect(stored(store).interval).toBe(10)

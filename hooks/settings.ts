@@ -187,7 +187,7 @@ export const TABS: readonly Tab[] = [
     rows: [
       { key: 'defaultOn', label: 'New sessions start', values: [false, true], fmt: onOff },
       {
-        key: 'interval', label: 'Beat after idle', values: [1, 2, 3, 5, 10, 15, 20, 25, 30, 40, 45, 50, 55], fmt: v => `${v}m`,
+        key: 'interval', label: 'Beat after idle', values: [4, 30, 50, 55], fmt: v => `${v}m`, // 4: under a five-minute cache
         custom: { placeholder: 'minutes, 1 to 55: e.g. 35', parse: parseMinutes },
       },
       {
@@ -195,16 +195,16 @@ export const TABS: readonly Tab[] = [
         fmt: v => (v === 'session' ? 'this session' : 'the default'),
       },
       {
-        key: 'stopAfterHours', label: 'Stop after idle', values: [1, 2, 4, 6, 8, 12, 24], fmt: v => `${v}h`,
+        key: 'stopAfterHours', label: 'Stop after idle', values: [1, 4, 8, 24], fmt: v => `${v}h`,
         custom: { placeholder: 'hours, up to 48: e.g. 10 or 90m', parse: parseHours },
       },
       {
-        key: 'stopAtUsage', label: 'Stop at usage', values: [50, 60, 70, 80, 90, 95, 100], fmt: v => `${v}%`,
+        key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,
         custom: { placeholder: 'percent, 10 to 100: e.g. 85', parse: parsePercent },
       },
       { key: 'skipSmall', label: 'Skip small contexts', values: [false, true], fmt: onOff },
       {
-        key: 'skipSmallTokens', label: '  smaller than', values: [5_000, 10_000, 20_000, 30_000, 50_000, 100_000],
+        key: 'skipSmallTokens', label: '  smaller than', values: [10_000, 20_000, 50_000, 100_000],
         show: s => s.skipSmall, fmt: v => `${tokens(Number(v))} tokens`,
         custom: { placeholder: 'tokens, 1k to 1M: e.g. 35k', parse: parseTokens },
       },
