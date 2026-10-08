@@ -7,38 +7,38 @@ Set Shell "bash"
 Set FontFamily "FiraCode Nerd Font Mono"
 Set FontSize 16
 Set Width 940
-Set Height 820
+Set Height 560
 Set Padding 18
 Set Theme "Catppuccin Mocha"
-Set TypingSpeed 45ms
+Set TypingSpeed 90ms
 
 Hide
-Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --permission-mode default --settings '{"verbose":false,"statusLine":{"type":"command","command":"true"}}'` Enter
+Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --plugin-dir "$CACHEBEAT_DEMO_CLOCK" --permission-mode default --settings '{"verbose":false,"statusLine":{"type":"command","command":"true"}}'` Enter
 Sleep 9s
-# One turn first: beats keep a warm cache warm, and a resumed session starts cold.
-Type "In one short sentence: what is this project?" Enter
-Sleep 30s
 Show
 
-# demo.py fast-forwards the still stretches, so the beats below land on their own.
 Sleep 1s
-Type "/cachebeat 2" Sleep 300ms Enter
-Sleep 2s
-# Two beats land on their own, two minutes apart.
-Sleep 235s
+Type "in one line, what's in this folder?" Sleep 500ms Enter
+Sleep 9s
 
-Type "/cachebeat now" Sleep 300ms Enter
-Sleep 3500ms
+# The demo clock runs 50 idle minutes in 10 seconds, so both beats land on their own.
+Type "/cachebeat on" Sleep 500ms Enter
+Wait+Screen@90s /kept warm ×2/
+Sleep 2500ms
 
-Type "/cachebeat settings" Sleep 300ms Enter
+# The clock is back to normal by now: this interval shows, and never beats.
+Type "/cachebeat 5" Sleep 500ms Enter
+Sleep 3s
+
+Type "/cachebeat settings" Sleep 500ms Enter
 Sleep 1500ms
 Type "2"
 Sleep 1200ms
 Enter
 Sleep 1500ms
-Down Sleep 1000ms
-Down Sleep 1000ms
-Down Sleep 1000ms
+Down Sleep 900ms
+Down Sleep 900ms
+Down Sleep 900ms
 Down Sleep 600ms
 Down Sleep 600ms
 Down Sleep 600ms
