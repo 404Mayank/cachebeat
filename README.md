@@ -1,4 +1,4 @@
-# cachebeat ♥
+![cachebeat](assets/logo/logo-wordmark.svg)
 
 **Keep Claude Code's prompt cache warm while you're away.**
 

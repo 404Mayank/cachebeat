@@ -5,7 +5,10 @@
   "author": { "name": "Mayank", "url": "https://github.com/404Mayank" },
   "homepage": "https://github.com/404Mayank/cachebeat",
   "repository": "https://github.com/404Mayank/cachebeat",
+  "documentationUrl": "https://github.com/404Mayank/cachebeat#readme",
+  "supportUrl": "https://github.com/404Mayank/cachebeat/issues",
   "license": "MIT",
+  "icon": "./assets/logo/logo.png",
   "keywords": ["prompt-cache", "cache", "keepalive", "idle", "usage", "heartbeat", "terminal", "tui", "mod"],
   "types": "./types/index.d.ts"
 }
