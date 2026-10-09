@@ -41,6 +41,7 @@ let busy = false // a main-thread turn is running
 let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
+let paneSurface = 'terminal' // where the settings pane last drew: the terminal's keys are walked here, a desktop's its own
 let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
 let scheduling = 0 // counts schedule() calls: one still awaiting when a newer starts leaves the timer to it
 const rowsSeen = new Set<string>()
@@ -462,6 +463,7 @@ export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
   on('session.start', async ($, e, next) => {
     isStatusOnBand = false // until the band is drawn on a desktop
+    paneSurface = 'terminal' // until the pane draws, on whichever surface
     cfg = normalize(await $.store.get('settings'))
     await update($, settingsAtom, () => cfg)
     const prev = await read($, saved)
@@ -685,7 +687,7 @@ export const register: Register = on => {
     const widths = slotWidths(variant(c.statusHeart)) // a heart's slot is wider, wherever any frame has one
     return (
       <Box flexDirection="row">
-        <Box flexDirection="row" flexShrink={0} marginRight={1}>
+        <Box flexDirection="row" flexShrink={0} marginLeft={1} marginRight={1}>
           {slots.map((sp, i) => (
             <Box width={widths[i] ?? 1} flexShrink={0} justifyContent="center">{paint(Text, [sp])}</Box>
           ))}
@@ -707,10 +709,11 @@ export const register: Register = on => {
     if (!isMoving) stopPaneTicker()
     else if (!paneTicker) paneTicker = $.clock.every(frameMs(c), () => void update($, tickAtom, () => ++paneTick))
     const els = $.ui.resolve(e)
+    paneSurface = e.surface
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
     const view = {
       page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN,
-      autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed,
+      autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal',
     }
     const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
@@ -741,6 +744,12 @@ export const register: Register = on => {
   })
 
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
+    // a desktop moves its own focus (Tab, a click): the pane notes where, and a tab opens when pressed
+    if (paneSurface !== 'terminal') {
+      const r = await next(e)
+      if (!r.deny) await update($, focusAtom, () => e.element ?? '')
+      return r
+    }
     // the tab bar and a tab's settings are two levels: the arrows never cross between them
     let to = e.element
     if (e.origin.kind === 'person' && to) {
@@ -764,7 +773,7 @@ export const register: Register = on => {
 
   // the arrows walk the focus ring, and the window follows it; the wheel and page keys scroll
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
-    if (e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
+    if (paneSurface !== 'terminal' || e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
     const focus = await read($, focusAtom)
     if (focus.startsWith('tab:')) {
       const t = TABS[(TABS.findIndex(x => `tab:${x.id}` === focus) + e.by + TABS.length) % TABS.length]!
@@ -780,9 +789,11 @@ export const register: Register = on => {
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const page = await read($, pageAtom)
-    // Esc steps back a level: a picker to its row, a tab's settings to the tab bar; the tab bar closes
+    // Esc steps back a level: a picker to its row, a tab's settings to the tab bar; the tab bar closes.
+    // A desktop has no levels to its focus: there Esc leaves a picker, and otherwise closes
     const focus = await read($, focusAtom)
-    if (e.origin.kind === 'person' && (page.picker || !focus.startsWith('tab:'))) {
+    const isInTab = paneSurface === 'terminal' && !focus.startsWith('tab:')
+    if (e.origin.kind === 'person' && (page.picker || isInTab)) {
       // Esc has handed the keys back to the prompt: open asks for them again
       await $.ui.open(PANE_OPEN)
       await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`)

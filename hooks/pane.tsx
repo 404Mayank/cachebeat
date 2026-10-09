@@ -27,6 +27,7 @@ export type View = {
   isOn: boolean // this session beats
   sessionMinutes: number | null // this session's own interval, set by /cachebeat <minutes>
   autoMinutes: number // what `auto` beats at for this session's cache
+  isTerminal: boolean // the terminal's keys walk the pane; a desktop's Tab and clicks move its own focus
   notice: string // the last action's outcome, shown in the footer
   isResetArmed: boolean
 }
@@ -155,7 +156,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
         {tab.preview && !isVariant && rule}
         {tab.preview && !isVariant && preview(els, trial, tab.preview, v.tick)}
         {row.note && <Text dimColor>{row.note}</Text>}
-        <Text dimColor>↑↓ move · enter picks · esc back</Text>
+        <Text dimColor>{v.isTerminal ? '↑↓ move · enter picks · esc back' : 'enter or a click picks · esc back'}</Text>
       </Box>
     )
     return { tree, ring }
@@ -226,7 +227,9 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       </Box>
       {v.notice && <Text dimColor>{v.notice}</Text>}
       <Text dimColor>
-        {v.focus.startsWith('tab:') ? '↑↓ tabs · enter or 1-5 opens · esc closes' : '↑↓ move · enter changes · 1-5 tabs · esc back to the tabs'}
+        {!v.isTerminal ? 'tab moves · enter or a click changes · 1-5 tabs · esc closes'
+          : v.focus.startsWith('tab:') ? '↑↓ tabs · enter or 1-5 opens · esc closes'
+          : '↑↓ move · enter changes · 1-5 tabs · esc back to the tabs'}
       </Text>
     </Box>
   )

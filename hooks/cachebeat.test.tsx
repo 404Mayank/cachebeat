@@ -996,3 +996,16 @@ test('on a proportional font a heart\'s slot is half again a cell, wherever any 
   expect(slotWidths(variant('ecg')).at(-1)).toBe(1.5) // the heart at its end
   for (const x of VARIANTS) expect(slotWidths(x).length).toBe(cells(x.loop[0]!))
 })
+
+test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and a tab opens when pressed', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount({ ...SETTINGS_PANE, surface: 'desktop' } as never)
+  expect(await move($, 'tab:heart')).toEqual({})
+  expect(await ui.find({ key: 'row:variant' })).toBe(undefined) // focus alone doesn't open the tab
+  expect(await move($, 'row:interval')).toEqual({}) // Tab crosses from the tabs into the settings
+  await ui.press({ key: 'tab:heart' })
+  expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-5 tabs · esc closes')).toBe(true)
+  await ui.unmount()
+})
