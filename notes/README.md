@@ -35,7 +35,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 - **Bump `version` for every change users should get:**
   - patch (`0.6.1`) for fixes and small changes
   - minor (`0.7.0`) for a new feature
-- **README-only changes don't need a bump.** They show on GitHub at once, and the directory listing takes them with the next version.
+- **Every push to `main` needs a bump, README-only ones included.** The plugin directory follows `main` and scans each new commit as a version, and its docs say to raise `version` with every one. Push README fixes together with the next release, or bump the patch for them.
 - **Push `main` only when the change is ready for users.** With auto-update on, they get it without asking. Push `dev` whenever you like: nothing reads it.
 
 ### Releasing, step by step
