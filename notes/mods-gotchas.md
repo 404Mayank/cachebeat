@@ -68,6 +68,11 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **A space at the start of a `Box`'s text collapses, as in HTML.** A one-cell box was narrower than a ♥ and covered the space after it. So the single beating heart (♥/♡, one width) is drawn as plain text with its line, and a wide animation gets a `marginLeft`/`marginRight` of one cell instead of a space.
 - **Colors draw on desktop:** theme keys and hex alike, as seen in the settings pane.
 - **The settings pane works on desktop, but its keys are the app's own.** Tab and Shift+Tab move native focus, and a click presses. cachebeat's terminal-only two-level walk (`ui.focus` denials, arrow `ui.scroll`) fought that, so on desktop (`paneSurface`, noted when the pane draws) it passes those events through. A tab opens on press, and Esc leaves a picker or closes. Neither focus nor scroll events say which surface they come from, so the pane's own draw records it.
+- **The settings pane's keys on desktop are open too (0.7.0):**
+  - *Native to the app, out of a mod's reach:* Tab moves focus down and Shift+Tab up, and focus can leave the pane for the app's other controls.
+  - *Works:* the 1–5 tab hotkeys.
+  - *Enter was finicky.* The likely cause was cachebeat moving focus itself after every press, which suits the terminal but lands somewhere on desktop the person isn't looking. On desktop it now moves focus only to land somewhere new: the pane opening, or a list of choices opening (`focusOn`'s `isLanding`). Whether that's enough is for the user to judge. If it isn't, the next thing to try is no moves at all on desktop.
+  - *Testing:* the test kit has no focus to move, but each try logs `focus <key>: …` at debug, so a test counts the tries from the log.
 - **Before 0.7.0, a desktop user saw only `♥ cache renewed (…)` per beat:** the fallback log for "no closing row seen".
 
 ## Types
