@@ -4,7 +4,7 @@ import type { Alert, BeatSettings, PanePage, Pulse, Saved } from '../types'
 import { loopIndex, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
 import { DEFAULTS, TABS, changed, frameMs, isLit, normalize, rowOf, spans, tokens } from './settings'
-import { SET, STATE, TOOL, parseSet, summary } from './tools'
+import { SET, STATE, parseSet, summary } from './tools'
 
 const MIN = 60_000
 export const IDLE = DEFAULTS.interval * MIN // default silence before a beat; must stay under the cache TTL
@@ -100,7 +100,8 @@ async function refreshLine($: EngineInterface) {
 function animate($: EngineInterface) {
   const ms = frameMs(cfg)
   const perSecond = Math.round(1000 / ms)
-  ticker ??= $.clock.every(ms, () => {
+  if (ticker) return
+  ticker = $.clock.every(ms, () => {
     frame++
     if (blast >= 0 && ++blast >= variant(cfg.variant).blast.length) blast = -1
     void update($, frameAtom, () => frame)
@@ -313,10 +314,20 @@ async function openSettings($: EngineInterface) {
 /** Moves the pane's focus; a move this plugin makes skips its own ui.focus hook, so it notes it here. */
 async function focusOn($: EngineInterface, key: string) {
   // a focus that cannot move leaves the page as it is (`claude plugin test` has no focus to move)
-  const { deny } = await $.ui.focus({ requestId: PANE, key }).catch((err: unknown) => ({ deny: String(err) }))
+  let deny: string | undefined
+  try {
+    const moved = await $.ui.focus({ requestId: PANE, key })
+    deny = moved.deny
+  } catch (err) {
+    deny = String(err)
+  }
   if (deny) return $.ui.log(`focus ${key}: ${deny}`, { to: 'debug' })
   await update($, focusAtom, () => key)
-  await $.ui.scroll({ to: { key }, in: PANE }).catch((err: unknown) => $.ui.log(`scroll to ${key}: ${err}`, { to: 'debug' }))
+  try {
+    await $.ui.scroll({ to: { key }, in: PANE })
+  } catch (err) {
+    $.ui.log(`scroll to ${key}: ${err}`, { to: 'debug' })
+  }
 }
 
 function stopPaneTicker() {
@@ -400,9 +411,9 @@ export const register: Register = on => {
     return { text: `on, ${every()} · ${s.beats} beats · ${when(ms)}` }
   })
 
-  on('tool.call', { tool: TOOL.state }, async $ => ({ result: json(await stateOf($)) }))
+  on('tool.call', { tool: 'mcp__cachebeat__state' }, async $ => ({ result: json(await stateOf($)) }))
 
-  on('tool.call', { tool: TOOL.set }, async ($, e) => {
+  on('tool.call', { tool: 'mcp__cachebeat__set' }, async ($, e) => {
     if (e.agentId) return { deny: 'Only the main conversation changes cachebeat.' }
     const change = parseSet({ session: e.session, settings: e.settings })
     if ('error' in change) return { deny: change.error }
@@ -417,26 +428,30 @@ export const register: Register = on => {
   })
 
   // a call is one dim line in the transcript, and its answer, for the model alone, is not drawn
-  on('ui.render', { component: 'ToolUse', props: { tool: TOOL.state } }, async ($, e, next) => {
+  on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__cachebeat__state' } }, async ($, e, next) => {
     if (e.props.isErrored) return next(e)
     const { Text } = $.ui.resolve(e)
     return <Text dimColor>cachebeat: read the state</Text>
   })
 
-  on('ui.render', { component: 'ToolUse', props: { tool: TOOL.set } }, async ($, e, next) => {
+  on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__cachebeat__set' } }, async ($, e, next) => {
     const change = parseSet((e.props.input ?? {}) as { session?: unknown; settings?: unknown })
     if (e.props.isErrored || 'error' in change) return next(e)
     const { Text } = $.ui.resolve(e)
     return <Text dimColor>{`cachebeat: ${summary(change, await read($, settingsAtom))}`}</Text>
   })
 
-  for (const tool of [TOOL.state, TOOL.set]) {
-    on('ui.render', { component: 'ToolResult', props: { tool } }, async ($, e, next) => {
-      if (e.props.isErrored) return next(e)
-      const { Text } = $.ui.resolve(e)
-      return <Text>{''}</Text>
-    })
-  }
+  on('ui.render', { component: 'ToolResult', props: { tool: 'mcp__cachebeat__state' } }, async ($, e, next) => {
+    if (e.props.isErrored) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return <Text>{''}</Text>
+  })
+
+  on('ui.render', { component: 'ToolResult', props: { tool: 'mcp__cachebeat__set' } }, async ($, e, next) => {
+    if (e.props.isErrored) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return <Text>{''}</Text>
+  })
 
   on('turn.start', async ($, e, next) => {
     if (!beating) {
@@ -519,8 +534,8 @@ export const register: Register = on => {
     // the preview's clock runs only while there is a preview to move
     const picked = page.picker ? rowOf(page.picker) : undefined
     const isMoving = picked ? picked.row.key === 'variant' || !!picked.tab.preview : !!TABS.find(t => t.id === page.tab)?.preview
-    if (isMoving) paneTicker ??= $.clock.every(frameMs(c), () => void update($, tickAtom, () => ++paneTick))
-    else stopPaneTicker()
+    if (!isMoving) stopPaneTicker()
+    else if (!paneTicker) paneTicker = $.clock.every(frameMs(c), () => void update($, tickAtom, () => ++paneTick))
     const els = $.ui.resolve(e)
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
     const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN, notice, isResetArmed }
@@ -554,21 +569,23 @@ export const register: Register = on => {
 
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
     // the tab bar and a tab's settings are two levels: the arrows never cross between them
-    if (e.origin.kind === 'person' && e.element) {
+    let to = e.element
+    if (e.origin.kind === 'person' && to) {
       const from = await read($, focusAtom)
-      const isToTab = e.element.startsWith('tab:')
+      const isToTab = to.startsWith('tab:')
       // with nothing focused yet, the first move goes anywhere
       if (from && from.startsWith('tab:') !== isToTab) {
         // off either end of the tab bar, round to the other end; between the levels, Enter and Esc
         const at = TABS.findIndex(t => `tab:${t.id}` === from)
         const end = !isToTab && at === TABS.length - 1 ? TABS[0] : !isToTab && at === 0 ? TABS.at(-1) : undefined
         if (!end) return { deny: 'Enter goes into a tab, Esc back out' }
-        e = { ...e, element: `tab:${end.id}` }
+        to = `tab:${end.id}`
       }
-      if (e.element!.startsWith('tab:')) await update($, pageAtom, () => ({ tab: e.element!.slice(4), picker: null })) // the page follows the tabs
+      const tab = to.startsWith('tab:') ? to.slice(4) : undefined
+      if (tab) await update($, pageAtom, () => ({ tab, picker: null })) // the page follows the tabs
     }
-    const r = await next(e)
-    if (!r.deny) await update($, focusAtom, () => e.element ?? '')
+    const r = await next(to === e.element ? e : { ...e, element: to })
+    if (!r.deny) await update($, focusAtom, () => to ?? '')
     return r
   })
 

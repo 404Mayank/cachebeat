@@ -91,6 +91,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 - A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would.
 - Beats happen only while the session is idle, at most once per interval (50 minutes by default).
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
+- `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself and read or change only its own state and settings. Claude calls the tools without a permission prompt, and each call shows as one line in the transcript.
 
 ## Commands
 
