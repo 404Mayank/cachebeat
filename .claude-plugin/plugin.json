@@ -1,6 +1,6 @@
 {
   "name": "cachebeat",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Keeps the prompt cache warm while a session sits idle: shortly before the cache would expire, a small background request re-reads it, without touching the transcript. A beating heart under the prompt shows it working, and Claude can read and change it for you. Each beat counts toward your usage.",
   "author": { "name": "Mayank", "url": "https://github.com/404Mayank" },
   "homepage": "https://github.com/404Mayank/cachebeat",
@@ -8,6 +8,7 @@
   "documentationUrl": "https://github.com/404Mayank/cachebeat#readme",
   "supportUrl": "https://github.com/404Mayank/cachebeat/issues",
   "privacyPolicyUrl": "https://github.com/404Mayank/cachebeat#privacy",
+  "termsOfServiceUrl": "https://github.com/404Mayank/cachebeat#disclaimer",
   "license": "MIT",
   "icon": "./assets/logo/logo.png",
   "keywords": ["prompt-cache", "cache", "keepalive", "idle", "usage", "heartbeat", "terminal", "tui", "mod"],
