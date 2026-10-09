@@ -73,7 +73,14 @@ export const STATE: ToolSpec = {
   name: 'state',
   description: [
     "cachebeat's state in this session and every setting with its value.",
-    "`intervalFrom` is `session` when this session has its own interval, `default` when it follows a settings.interval in minutes, and `auto` when it follows an auto one, which comes to 50 or 4 by the cache's lifetime. `skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum). `lastBeatReadTokens` is how much the last beat read from the cache. `cacheTtl` is how long this session's cache lives, `1h` or `5m`; an auto interval beats within it. `paused`, when set, says why beats wait for the user's next turn (a model switch, a compaction). `defaults` has the default of each setting that differs from it.",
+    [
+      "`nextBeat` is `in 42m`, `50m after this turn ends` (as seen mid-turn), `after the next turn` (nothing cached to keep warm yet), or null when off or skipping.",
+      '`intervalFrom` is `session` when this session has its own interval, `default` when it follows a settings.interval in minutes, and `auto` when it follows an auto one.',
+      "`cacheTtl` is how long this session's cache lives, `1h` or `5m`, worked out on each call from Claude Code's cache settings and whether a subscription is within its usage; an auto interval beats within it (50 or 4 minutes).",
+      '`skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum).',
+      "`paused`, when set, says why beats wait for the user's next turn (a model switch, a compaction); only that turn ends it, not `set`.",
+      '`lastBeatReadTokens` is how much the last beat read from the cache. `defaults` has the default of each setting that differs from it.',
+    ].join(' '),
   ].join('\n\n'),
   inputSchema: object({}),
 }
@@ -86,14 +93,14 @@ export const SET: ToolSpec = {
     'A request that names no scope ("turn it on", "beat every 20 minutes") is for this session. "Default", "new sessions", "every session", "always" or "from now on" mean `settings`. If you can\'t tell which the user means, ask.',
     "Each beat counts toward the user's usage. The first time in a conversation a change starts beating or changes how often a beating session beats, say so once.",
     'Setting `intervalMinutes` turns beating on too, unless `enabled: false` comes with it. A session with its own interval keeps it when the default changes: tell the user, and `intervalMinutes: null` makes it follow the default.',
-    'Nothing changes if any value is invalid. Returns what changed, this session\'s state, and the changed settings.',
+    'Nothing changes if any value is invalid, and the refusal names each one. Subagents can read `state` but not call this. Returns what changed, this session\'s state, and the changed settings.',
   ].join('\n\n'),
   inputSchema: object({
     session: object({
       enabled: { type: 'boolean', description: 'Beat in this session.' },
       intervalMinutes: {
         anyOf: [{ type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }],
-        description: `This session's interval, which turns beating on; null follows settings.interval. (${range(parseMinutes)})`,
+        description: `This session's interval in minutes, which turns beating on; null follows settings.interval, auto included. (${range(parseMinutes)})`,
       },
     }),
     settings: object(Object.fromEntries(KEYS.map(k => [k, field(k)]))),
