@@ -24,6 +24,8 @@ The report named a ref and file paths that didn't match the repo (`main@fb1066c`
 
 ## The second validation (0.7.0)
 
+The full report, with the line behind each finding and how to fix it, is in [directory-report-0.7.0.md](directory-report-0.7.0.md).
+
 The report again named a ref and paths that don't exist (`main 15e2b3b` for `15a263e`, `register.ts` and `cachebeat.test.ts` for the `.tsx` files). Of its line numbers (362, 508, 554, 561, 585, 620), only 554 lands on the hook it names. These are the findings, read against the source:
 
 | Finding | Result | What it is | Status |

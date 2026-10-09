@@ -86,5 +86,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 | [claude-tools.md](claude-tools.md) | The two tools Claude calls: how they're built, and why each choice was made |
 | [mods-gotchas.md](mods-gotchas.md) | Things about mods, the engine and the test kit that took time to find out |
 | [directory.md](directory.md) | Submitting to Anthropic's plugin directory: what its validation flagged, and what was done |
+| [directory-report-0.7.0.md](directory-report-0.7.0.md) | The full reading of the directory's 0.7.0 validation: each finding, the lines behind it, and how to fix it |
+| [plan-0.8.0.md](plan-0.8.0.md) | The plan for 0.8.0: settings by scope (this session, this project, all projects), and how the menu shows it |
 
 Add to them whenever something takes a while to work out.
