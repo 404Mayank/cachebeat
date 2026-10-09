@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { VARIANTS, cells, loopIndex, previewFrame, slotWidths, variant } from './animations'
+import { VARIANTS, cells, loopIndex, previewFrame, slotText, slotWidths, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
 import { DEFAULTS, EPISODE, accept, glyphs, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
@@ -990,9 +990,13 @@ test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engin
   expect((await stateNow($)).session.intervalFrom).toBe('default')
 })
 
-test('on a proportional font a heart\'s slot is half again a cell, wherever any frame puts one', () => {
+test('on a proportional font a heart\'s slot is half again a cell, and line characters overlap into one line', () => {
   expect(slotWidths(variant('wave'))).toEqual([1.5, 1.5, 1.5, 1.5, 1.5])
-  expect(slotWidths(variant('ecg'))[1]).toBe(1) // a line character
+  expect(slotWidths(variant('charge')).slice(0, 4)).toEqual([1.5, 0.6, 0.6, 1.5]) // its blast's hearts sit among the lines
+  expect([slotText('━', 1.5), slotText('━', 0.6), slotText('♥', 1.5)]).toEqual(['━━━', '━', '♥']) // a line spans its slot
+  expect(slotWidths(variant('beam')).slice(0, 5)).toEqual([0.6, 0.6, 0.6, 0.6, 0.6]) // lines alone: they touch
+  expect(slotWidths(variant('classic'))[0]).toBe(1.5)
+  expect(slotWidths(variant('ecg'))[1]).toBe(0.6) // a line character
   expect(slotWidths(variant('ecg')).at(-1)).toBe(1.5) // the heart at its end
   for (const x of VARIANTS) expect(slotWidths(x).length).toBe(cells(x.loop[0]!))
 })

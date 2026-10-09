@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Alert, BeatSettings, PanePage, Pulse, Saved, Ttl } from '../types'
-import { cells, loopIndex, slotWidths, statusFrame, variant } from './animations'
+import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
 import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, normalize, rowOf, spans, tokens } from './settings'
 import type { Span } from './settings'
@@ -689,7 +689,9 @@ export const register: Register = on => {
       <Box flexDirection="row">
         <Box flexDirection="row" flexShrink={0} marginLeft={1} marginRight={1}>
           {slots.map((sp, i) => (
-            <Box width={widths[i] ?? 1} flexShrink={0} justifyContent="center">{paint(Text, [sp])}</Box>
+            <Box width={widths[i] ?? 1} flexShrink={0} justifyContent="center">
+              {paint(Text, [{ ...sp, text: slotText(sp.text, widths[i] ?? 1) }])}
+            </Box>
           ))}
         </Box>
         {paint(Text, rest)}
