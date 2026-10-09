@@ -75,6 +75,8 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 0.7.2 and 0.7.3 followed the same way ([PR #3](https://github.com/404Mayank/cachebeat/pull/3), [PR #4](https://github.com/404Mayank/cachebeat/pull/4)), each after Re-validate still blocked the one before. Next time, validate the release branch before it's released: enter `404Mayank/cachebeat@<branch>` in the portal's Repository field, and merge into `main` only once it passes.
 
+0.7.4 went out that way ([PR #5](https://github.com/404Mayank/cachebeat/pull/5)). The `v0.7.4` branch was validated first, which cleared the block, then fast-forwarded into `main`.
+
 ### Where a release goes
 
 - **GitHub:** the `v<version>` tag and release, created by CI.

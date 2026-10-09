@@ -1,5 +1,7 @@
 # Directory validation of 0.7.0: the full report
 
+> **What actually cleared the block (0.7.4):** none of the eight calls below. The cause was `$.ui.open(PANE_OPEN)`, where `PANE_OPEN` was `{ … } as const`. See [directory.md](directory.md) and [mods-gotchas.md](mods-gotchas.md). The report's "reference: line 561" (`await openSettings($)`) was the call that first reaches it.
+
 This is the portal's validation of `main` at 0.7.0 (`15a263e`), read against the source on 2026-10-09. [directory.md](directory.md) has the short version, next to the 0.6.0 one.
 
 Line numbers below are for `hooks/register.tsx` and `hooks/cachebeat.test.tsx` at `15a263e`. They move once either file changes.
