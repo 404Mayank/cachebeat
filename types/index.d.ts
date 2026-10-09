@@ -13,6 +13,7 @@ export type Saved = {
   small: string | null // why the context is not kept warm, while it is under the minimum
   isCacheShort: boolean // a beat found this session's cache lasts five minutes, whatever its settings say
   paused: string | null // why beats wait for the next turn though the cache was warm: a model switch, a compaction
+  warmModel: string | null // the model the last request ran on, whose cache a beat keeps warm
 }
 
 /** How long the main conversation's prompt cache lives. */
@@ -44,7 +45,7 @@ export type BeatSettings = {
   showTokens: boolean
   onBeat: Alert
   onStop: Alert
-  onModelSwitch: 'wait' | 'keep' // after /model while idle: wait for the next turn, or keep warming the old model's cache
+  onModelSwitch: 'wait' | 'warm' // after /model while idle: wait for the next turn, or have the next beat write the new model's cache
 }
 
 /** Where the settings pane is: a tab, and the row whose picker is open over it. */

@@ -30,7 +30,7 @@ const ABOUT: Record<keyof BeatSettings, string> = {
   showTokens: 'Shows the tokens the last beat kept warm in the status line.',
   onBeat: 'How a beat is announced: a transcript line (log), a toast, both, or none.',
   onStop: 'How beating stopping on its own is announced.',
-  onModelSwitch: "After /model while idle: wait for the next turn, or keep warming the old model's cache.",
+  onModelSwitch: "After /model while idle: wait for the user's next turn, or have the next beat write the new model's cache (a full cache write, the one that turn would make).",
 }
 
 const KEYS = Object.keys(ABOUT) as (keyof BeatSettings)[]

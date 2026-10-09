@@ -47,7 +47,7 @@ export function normalize(stored: unknown): BeatSettings {
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
   if (typeof out.speed === 'number' && parseFrameMs(`${out.speed}`) === undefined) out.speed = DEFAULTS.speed
   if (out.interval !== 'auto' && (typeof out.interval !== 'number' || parseMinutes(`${out.interval}`) === undefined)) out.interval = DEFAULTS.interval
-  if (!['wait', 'keep'].includes(out.onModelSwitch)) out.onModelSwitch = DEFAULTS.onModelSwitch
+  if (!['wait', 'warm'].includes(out.onModelSwitch)) out.onModelSwitch = DEFAULTS.onModelSwitch
   return out
 }
 
@@ -221,9 +221,9 @@ export const TABS: readonly Tab[] = [
         custom: { placeholder: 'e.g. 35k', parse: parseTokens },
       },
       {
-        key: 'onModelSwitch', label: 'After /model', values: ['wait', 'keep'],
-        fmt: v => (v === 'wait' ? 'wait for your next turn' : 'keep warming the old model'),
-        note: 'Each model has its own cache, so after a switch your next message reads none of the old one.',
+        key: 'onModelSwitch', label: 'After /model', values: ['wait', 'warm'],
+        fmt: v => (v === 'wait' ? 'wait for your next turn' : 'warm the new model'),
+        note: "A beat always goes to the current model. Warming the new one costs the full cache write your next message would make, done before you're back.",
       },
     ],
   },

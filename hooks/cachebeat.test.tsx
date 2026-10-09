@@ -13,10 +13,12 @@ const TOOL = { state: `mcp__cachebeat__${STATE.name}`, set: `mcp__cachebeat__${S
 const M = 60_000
 const TICK = 80 // a frame at normal speed
 const { loop: BEAT, blast: BLAST } = variant('classic')
-const turn = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as const
 const usage = (read: number, wrote: number) => ({
   input_tokens: 5, output_tokens: 1, cache_read_input_tokens: read, cache_creation_input_tokens: wrote,
 })
+const OPUS = 'claude-opus-5-5'
+// a turn that sent its requests on Opus; one without usage sent none
+const turn = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage: { ...usage(90_000, 0), model: OPUS } } as const
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
 type World = {
@@ -44,6 +46,8 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
       rateLimits: world.isSubscription === false ? [] : [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
     },
   }) as never)
+  let model: string = OPUS
+  on('session.model', () => ({ value: model }) as never)
   on('env.get', (_$, e) => ({ value: world.env?.[e.name] }) as never)
   on('settings.read', () => ({ value: world.settingsFile ?? {} }) as never)
   on('model.fork', () => {
@@ -70,7 +74,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('classic.PostModelSwitch', () => ({}))
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  return { clock, forks, logs, toasts, tails, store, specs }
+  return { clock, forks, logs, toasts, tails, store, specs, switchTo: (m: string) => (model = m) }
 }
 
 const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
@@ -866,13 +870,51 @@ test('after /model, beats wait for the next turn', async ($: Engine, on: On) => 
   expect(forks.length).toBe(1)
 })
 
-test('after /model, keep warms the old model on', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on, { settings: { onModelSwitch: 'keep' } })
+test('after /model set to warm, the next beat writes the new model\'s cache and keeps it from there', async ($: Engine, on: On) => {
+  const { clock, forks, logs, switchTo } = await setup($, on, {
+    settings: { onModelSwitch: 'warm' }, fork: [{ ...ok, usage: usage(0, 90_000) }, ok],
+  })
   await cmd($, 'on')
   await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
   await $.classic.PostModelSwitch(SWITCH)
+  expect(logs.at(-1)).toBe("the next beat writes the new model's cache")
   await clock.advance(IDLE)
-  expect(forks).toEqual([IDLE])
+  expect(logs.at(-1)).toBe("♥ warmed the new model's cache (90,000 written)")
+  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · next beat in 50m')
+  await clock.advance(IDLE)
+  expect(forks).toEqual([IDLE, 2 * IDLE])
+  expect(await cmd($, '')).toBe('on, every 50m idle · 1 beats · next beat in 50m')
+})
+
+test('a model changed with no event in between is caught when the beat comes: it waits, never forks', async ($: Engine, on: On) => {
+  const { clock, forks, switchTo } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+  expect((await stateNow($)).session).toMatchObject({ paused: 'the model changed', nextBeat: 'after the next turn' })
+})
+
+test('a turn that sent no request warms nothing', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, 'on')
+  const { usage: _, ...noRequest } = turn
+  await $.turn.complete(noRequest)
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+})
+
+test('commands and turns arriving together leave one beat armed', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await Promise.all([cmd($, '5'), $.turn.complete(turn), cmd($, '5'), call($, 'state')])
+  await clock.advance(5 * M)
+  expect(forks).toEqual([5 * M])
+  await clock.advance(5 * M)
+  expect(forks).toEqual([5 * M, 10 * M])
 })
 
 test('after a compaction between turns, beats wait for the next turn', async ($: Engine, on: On) => {
@@ -901,12 +943,12 @@ test('on the desktop the countdown rides with the heart, and a beat logs no line
 
 test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engine, on: On) => {
   const { store } = await setup($, on, { settings: { interval: 30 } })
-  expect(await set($, { settings: { interval: 'auto', onModelSwitch: 'keep' } })).toMatchObject({
+  expect(await set($, { settings: { interval: 'auto', onModelSwitch: 'warm' } })).toMatchObject({
     changed: ['settings.interval', 'settings.onModelSwitch'], session: { intervalMinutes: 50, cacheTtl: '1h' },
   })
-  expect([stored(store).interval, stored(store).onModelSwitch]).toEqual(['auto', 'keep'])
+  expect([stored(store).interval, stored(store).onModelSwitch]).toEqual(['auto', 'warm'])
   expect((await call($, 'set', { settings: { onModelSwitch: 'later' } })).deny)
-    .toBe('nothing changed: settings.onModelSwitch takes wait, keep, or null, not "later"')
+    .toBe('nothing changed: settings.onModelSwitch takes wait, warm, or null, not "later"')
   expect((await call($, 'set', { settings: { interval: 0 } })).deny).toBe('nothing changed: settings.interval takes auto, 1–55 minutes, or null, not 0')
   expect((await stateNow($)).session.intervalFrom).toBe('auto')
   await set($, { settings: { interval: 30 } })

@@ -24,7 +24,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
-  isCacheShort: false, paused: null,
+  isCacheShort: false, paused: null, warmModel: null,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS
@@ -42,6 +42,7 @@ let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnHint = false // the surface has no closing row, so the hint row carries the countdown
 let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
+let scheduling = 0 // counts schedule() calls: one still awaiting when a newer starts leaves the timer to it
 const rowsSeen = new Set<string>()
 
 export const fmt = (ms: number) => {
@@ -184,25 +185,30 @@ async function checkSmall($: EngineInterface) {
 
 /** Sets the next beat from the last cache read; resolves its delay, or undefined when none is set. */
 async function schedule($: EngineInterface): Promise<number | undefined> {
+  const call = ++scheduling
   timer?.cancel()
   timer = undefined
   s.nextAt = null
   let ms: number | undefined
+  let p: Pulse = 'armed'
   if (!s.enabled) s.small = null
-  if (!s.enabled || busy) setPulse($, 'hidden') // a turn keeps the last word on the context; its end checks again
-  else if (await checkSmall($)) setPulse($, 'waiting') // nothing to beat for until a turn grows it
+  if (!s.enabled || busy) p = 'hidden' // a turn keeps the last word on the context; its end checks again
+  else if (await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
-    if (since >= MAX_TTL) setPulse($, 'waiting') // nothing warm to keep; the next turn starts it
+    if (since >= MAX_TTL) p = 'waiting' // nothing warm to keep; the next turn starts it
     else {
       if (cfg.interval === 'auto' && s.idle === null) ttl = await cacheTtl($) // usage can cross into credits
+      if (call !== scheduling) return undefined
       ms = Math.max(0, idle() - since)
       s.nextAt = now + ms
       timer = $.clock.after(ms, () => void beat($))
-      setPulse($, 'armed')
     }
   }
+  // a newer call, begun while this one awaited, sets the timer and the heart: two would each arm one
+  if (call !== scheduling) return undefined
+  setPulse($, p)
   save($)
   await refreshLine($)
   return ms
@@ -216,6 +222,14 @@ function announce($: EngineInterface, text: string) {
   if (toasts(cfg.onStop)) $.ui.toast(`cachebeat ${text}`)
 }
 
+/** Beats wait for the next turn, which will cache what a beat would have to write: says why, once. */
+async function pause($: EngineInterface, why: string, said: string) {
+  s.lastWarm = null
+  s.paused = why
+  if (s.enabled) $.ui.log(`beats wait for your next turn: ${said}`)
+  await schedule($)
+}
+
 function stop($: EngineInterface, why?: string) {
   s.enabled = false
   void schedule($)
@@ -227,6 +241,7 @@ function stop($: EngineInterface, why?: string) {
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
   if (busy) return 'a turn is running; the beat waits for it to end'
+  if (!s.enabled) return 'off'
   const now = await $.clock.now()
   if (now - (s.lastReal ?? now) >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
   if (now - (s.lastWarm ?? now) >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
@@ -240,6 +255,13 @@ async function beat($: EngineInterface): Promise<string> {
     await schedule($) // says so, and waits for a turn to grow it
     return `beats skip: ${s.small}`
   }
+  // a beat goes to the current model, whose cache is not the one warmed if the model changed since
+  const model = await $.session.model()
+  const isNewModel = s.warmModel !== null && model !== s.warmModel
+  if (isNewModel && cfg.onModelSwitch === 'wait') {
+    await pause($, 'the model changed', 'the new model has no cache yet')
+    return 'beats wait for your next turn: the model changed'
+  }
 
   beating = true
   const r = await $.model.fork({ prompt: 'Reply with a single period.' }).finally(() => (beating = false))
@@ -251,6 +273,15 @@ async function beat($: EngineInterface): Promise<string> {
     return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
+  if (isNewModel) {
+    // the first beat on a new model writes its cache, as the next turn would have: kept warm from here
+    s.warmModel = model
+    s.lastWarm = await $.clock.now()
+    const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written)`
+    $.ui.log(warmed)
+    await schedule($)
+    return warmed
+  }
   if (got < wrote) {
     const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
     // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
@@ -501,15 +532,13 @@ export const register: Register = on => {
     return <Text>{''}</Text>
   })
 
-  // each model has its own cache: after a switch the next turn reads none of the old one, so warming
-  // it is no use unless the person switches back
+  // each model has its own cache, and a beat goes to the current one: after a switch the old cache is
+  // out of reach and the new model has none, so beats wait for the next turn, or the next writes it
   on('classic.PostModelSwitch', async ($, e, next) => {
     const r = await next(e)
-    if (cfg.onModelSwitch === 'wait' && !busy && s.lastWarm !== null) {
-      s.lastWarm = null
-      s.paused = 'the model changed'
-      if (s.enabled) $.ui.log('beats wait for your next turn: the new model has no cache yet')
-      await schedule($)
+    if (!busy && s.lastWarm !== null) {
+      if (cfg.onModelSwitch === 'wait') await pause($, 'the model changed', 'the new model has no cache yet')
+      else if (s.enabled) $.ui.log("the next beat writes the new model's cache")
     }
     return r
   })
@@ -519,12 +548,7 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
-    if (isDone && !busy && s.lastWarm !== null) {
-      s.lastWarm = null
-      s.paused = 'compaction replaced the conversation'
-      if (s.enabled) $.ui.log('beats wait for your next turn: compaction replaced the conversation')
-      await schedule($)
-    }
+    if (isDone && !busy && s.lastWarm !== null) await pause($, 'compaction replaced the conversation', 'compaction replaced the conversation')
     return r
   })
 
@@ -541,8 +565,13 @@ export const register: Register = on => {
     if (e.agentId === undefined && !beating) {
       busy = false
       rowPending = true
-      s.lastReal = s.lastWarm = await $.clock.now()
-      s.paused = null
+      s.lastReal = await $.clock.now()
+      // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
+      if (e.usage) {
+        s.lastWarm = s.lastReal
+        s.warmModel = await $.session.model()
+        s.paused = null
+      }
       await syncSettings($)
       await schedule($)
     }
