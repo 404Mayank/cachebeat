@@ -5,7 +5,10 @@ import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
 import { DEFAULTS, EPISODE, accept, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
-import { SET, STATE, TOOL } from './tools'
+import { SET, STATE } from './tools'
+
+/** The tools as the model calls them: `mcp__<plugin>__<name>`. */
+const TOOL = { state: `mcp__cachebeat__${STATE.name}`, set: `mcp__cachebeat__${SET.name}` }
 
 const M = 60_000
 const TICK = 80 // a frame at normal speed
@@ -788,4 +791,5 @@ test('a call is one dim line in the transcript, its answer not drawn', async ($:
   expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat: this session on, every 20m · Beat after idle 30m, Heart placement own line'])
   expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat: read the state'])
   expect(await draw($, toolRow('ToolResult', TOOL.set, change))).toEqual([''])
+  expect(await draw($, toolRow('ToolResult', TOOL.state, {}))).toEqual([''])
 })

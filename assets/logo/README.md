@@ -16,4 +16,4 @@ Three cache layers seen from above. The top one holds the prompt, lying flat on 
 
 Every file here is drawn by a script that lives on the [`dev` branch](https://github.com/404Mayank/cachebeat/tree/dev/assets/logo), with the steps to rebuild and change the logo.
 
-The name and the social card's line are set in [Lexend](https://github.com/googlefonts/lexend), under the SIL Open Font License 1.1, and drawn as outlines, so the SVGs don't need the font.
+The name and the social card's line are set in [Lexend](https://github.com/googlefonts/lexend), under the [SIL Open Font License 1.1](https://openfontlicense.org/open-font-license-official-text/), and drawn as outlines, so the SVGs don't need the font.
