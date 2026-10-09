@@ -1,13 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Alert, BeatSettings, PanePage, Pulse, Saved } from '../types'
-import { loopIndex, variant } from './animations'
+import type { Alert, BeatSettings, PanePage, Pulse, Saved, Ttl } from '../types'
+import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
-import { DEFAULTS, TABS, changed, frameMs, isLit, normalize, rowOf, spans, tokens } from './settings'
+import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, lookOf, normalize, rowOf, spans, tokens } from './settings'
+import type { Span, Value } from './settings'
 import { SET, STATE, parseSet, summary } from './tools'
 
 const MIN = 60_000
-export const IDLE = DEFAULTS.interval * MIN // default silence before a beat; must stay under the cache TTL
+export const IDLE = AUTO['1h'] * MIN // the default silence before a beat on a subscription's one-hour cache
 export const DEADLINE = DEFAULTS.stopAfterHours * 60 * MIN // default stop this long after the last real turn
 export const RETRY = MIN // after a transient API error
 export const MAX_TTL = 60 * MIN // past this since the last cache read, the cache is gone whatever the TTL
@@ -15,6 +16,7 @@ export const MAX_TTL = 60 * MIN // past this since the last cache read, the cach
 const pulse = atom({ plugin: 'cachebeat', key: 'pulse' } as const, 'hidden' as Pulse)
 const saved = atom({ plugin: 'cachebeat', key: 'saved' } as const, null as Saved | null)
 const frameAtom = atom({ plugin: 'cachebeat', key: 'frame' } as const, 0)
+const lineFrameAtom = atom({ plugin: 'cachebeat', key: 'lineFrame' } as const, 0)
 const lineAtom = atom({ plugin: 'cachebeat', key: 'line' } as const, '')
 const settingsAtom = atom({ plugin: 'cachebeat', key: 'settings' } as const, DEFAULTS)
 const tickAtom = atom({ plugin: 'cachebeat', key: 'tick' } as const, 0)
@@ -23,21 +25,28 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
+  isCacheShort: false, paused: null, warmModel: null,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS
 let timer: { cancel: () => void } | undefined
-let ticker: { cancel: () => void } | undefined
+let ticker: { cancel: () => void } | undefined // the prompt heart's animation clock
+let lineTicker: { cancel: () => void } | undefined // the turn line's, at its own speed
 let paneTicker: { cancel: () => void } | undefined
 let paneTick = 0
 let ring: string[] = [] // the pane's focusable keys as last drawn, in order
 let notice = '' // the pane's footer line
 let isResetArmed = false
 let frame = 0
+let lineFrame = 0
 let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
+let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
+let paneSurface = 'terminal' // where the settings pane last drew: the terminal's keys are walked here, a desktop's its own
+let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
+let scheduling = 0 // counts schedule() calls: one still awaiting when a newer starts leaves the timer to it
 const rowsSeen = new Set<string>()
 
 export const fmt = (ms: number) => {
@@ -45,14 +54,52 @@ export const fmt = (ms: number) => {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`
 }
 
-const idle = () => s.idle ?? cfg.interval * MIN
+/** This session's interval: its own, else the setting's, `auto` read off the cache's lifetime. */
+const idle = () => s.idle ?? (cfg.interval === 'auto' ? AUTO[s.isCacheShort ? '5m' : ttl] : cfg.interval) * MIN
+
+const isSet = (v: string | undefined) => v !== undefined && /^(1|true|yes|on)$/i.test(v)
+
+/**
+ * The main conversation's cache lifetime, as Claude Code picks it: the first of the variables and the
+ * setting that choose one, else an hour on a subscription within its plan's usage and five minutes on
+ * usage credits, an API key or a cloud provider (code.claude.com/docs/en/prompt-caching).
+ */
+async function cacheTtl($: EngineInterface): Promise<Ttl> {
+  if (isSet(await $.env.get('FORCE_PROMPT_CACHING_5M'))) return '5m'
+  const chosen = (v: unknown) => (v === '5m' || v === '1h' ? v : undefined)
+  const fromEnv = chosen(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
+  if (fromEnv) return fromEnv
+  const fromSettings = chosen((await $.settings.read()).promptCacheTtl)
+  if (fromSettings) return fromSettings
+  if (isSet(await $.env.get('ENABLE_PROMPT_CACHING_1H'))) return '1h'
+  // rate-limit windows are reported on a subscription alone; one used up means usage credits are paying
+  const { rateLimits } = await $.session.usage()
+  return rateLimits.length > 0 && rateLimits.every(l => l.percentUsed < 100) ? '1h' : '5m'
+}
 
 function save($: EngineInterface) {
   const copy = { ...s }
   void update($, saved, () => copy)
 }
 
+/**
+ * The custom value each setting last took, in its own store key: a preset or a reset leaves it in the
+ * setting's list, one Enter from coming back.
+ */
+let customs: Partial<Record<keyof BeatSettings, Value>> = {}
+
+async function keepCustoms($: EngineInterface, patch: Partial<BeatSettings>) {
+  const kept = Object.entries(patch).filter(([k, v]) => {
+    const row = rowOf(k as keyof BeatSettings)?.row
+    return row?.custom && !row.values.includes(v as Value)
+  })
+  if (!kept.length) return
+  customs = { ...((await $.store.get('customs')) as typeof customs | undefined), ...Object.fromEntries(kept) }
+  await $.store.set('customs', customs)
+}
+
 async function setSettings($: EngineInterface, patch: Partial<BeatSettings>) {
+  await keepCustoms($, patch)
   // from the store, not this session's copy: another session may have changed it since
   cfg = { ...normalize(await $.store.get('settings')), ...patch }
   const copy = { ...cfg }
@@ -78,10 +125,10 @@ async function syncSettings($: EngineInterface) {
 
 /** The animation clocks restart at the settings' speed, or stay stopped, as the next drawing finds them. */
 function restartClocks($: EngineInterface) {
-  ticker?.cancel()
-  ticker = undefined
+  stopClocks()
   stopPaneTicker()
   void update($, frameAtom, f => f + 1)
+  void update($, lineFrameAtom, f => f + 1)
   void update($, tickAtom, t => t + 1)
 }
 
@@ -89,6 +136,7 @@ function restartClocks($: EngineInterface) {
 async function refreshLine($: EngineInterface) {
   let text = ''
   if (s.enabled && s.small) text = `♡ beats skip · ${s.small}`
+  else if (s.enabled && s.paused) text = s.beats > 0 ? `${statusText(cfg, s.beats, s.lastRead, null)} · waits for your next turn` : '♡ beats wait for your next turn'
   else if (s.enabled || s.beats > 0) {
     const next = s.enabled && s.nextAt !== null ? fmt(s.nextAt - (await $.clock.now())) : null
     text = statusText(cfg, s.beats, s.lastRead, next)
@@ -96,10 +144,10 @@ async function refreshLine($: EngineInterface) {
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
 }
 
-/** The animation clock: runs while the heart is drawn beating (the hint row draws it). */
+/** The prompt heart's animation clock: runs while the hint row draws the heart beating. */
 function animate($: EngineInterface) {
   if (ticker) return
-  const ms = frameMs(cfg)
+  const ms = frameMs(lookOf(cfg, 'heart'))
   const perSecond = Math.round(1000 / ms)
   ticker = $.clock.every(ms, () => {
     frame++
@@ -109,18 +157,69 @@ function animate($: EngineInterface) {
   })
 }
 
+/** The turn line's animation clock, at the line's own speed: runs while the line is drawn moving. */
+function animateLine($: EngineInterface) {
+  if (lineTicker) return
+  const ms = frameMs(lookOf(cfg, 'line'))
+  const perSecond = Math.round(1000 / ms)
+  lineTicker = $.clock.every(ms, () => {
+    lineFrame++
+    void update($, lineFrameAtom, () => lineFrame)
+    if (lineFrame % perSecond === 0) void refreshLine($)
+  })
+}
+
+function stopClocks() {
+  ticker?.cancel()
+  ticker = undefined
+  lineTicker?.cancel()
+  lineTicker = undefined
+}
+
 /** The heart as drawn now: the blast after a beat, the loop while armed, else the loop's first frame. */
 function heartFrame(c: BeatSettings, p: Pulse, f: number) {
   const x = variant(c.variant)
-  if (!c.animate) return x.loop[0]!
+  if (!c.heartAnimate) return x.loop[0]!
   if (blast >= 0) return x.blast[blast]!
-  return p === 'armed' ? x.loop[loopIndex(x, f, c.timing)]! : x.loop[0]!
+  return p === 'armed' ? x.loop[loopIndex(x, f, c.heartTiming)]! : x.loop[0]!
 }
+
+/**
+ * The status line as drawn, in its effect, its leading heart playing the status line's own animation:
+ * the heart's spans, then the rest's, and the cells the heart takes at its widest.
+ */
+function liveLine(line: string, c: BeatSettings, p: Pulse, f: number): { head: Span[]; rest: Span[]; width: number } {
+  const look = lookOf(c, 'line')
+  const isPlaying = look.animate && p === 'armed' && c.statusHeart !== 'off'
+  const lead = /^[♥♡]/.test(line) ? line[0]! : ''
+  const heart = lead && isPlaying ? statusFrame(c.statusHeart, f, look.timing) : lead
+  // a flash lights the line as its heart fills, or as one would beat, the heart still or none
+  const lit = isLit(isPlaying ? heart : statusFrame('beat', f, look.timing))
+  const all = spans(heart + line.slice(lead.length), look.animate && look.effect !== 'steady' ? look : { ...look, effect: 'steady' }, f, lit)
+  // the spans split where the heart ends, so it can sit in a box of its own
+  const head: Span[] = []
+  const rest: Span[] = []
+  let left = heart.length
+  for (const sp of all) {
+    const take = Math.min(left, sp.text.length)
+    if (take > 0) head.push({ ...sp, text: sp.text.slice(0, take) })
+    if (take < sp.text.length) rest.push({ ...sp, text: sp.text.slice(take) })
+    left -= take
+  }
+  return { head, rest, width: cells(heart) }
+}
+
+/** Spans in a row joined where they look alike, so a line draws as few runs of text as it can. */
+const joined = (list: Span[]) => list.reduce<Span[]>((out, sp) => {
+  const last = out.at(-1)
+  if (last && last.color === sp.color && last.dim === sp.dim) last.text += sp.text
+  else out.push({ ...sp })
+  return out
+}, [])
 
 function setPulse($: EngineInterface, p: Pulse) {
   if (p !== 'armed') {
-    ticker?.cancel()
-    ticker = undefined
+    stopClocks()
     blast = -1
   }
   void update($, pulse, () => p)
@@ -155,24 +254,30 @@ async function checkSmall($: EngineInterface) {
 
 /** Sets the next beat from the last cache read; resolves its delay, or undefined when none is set. */
 async function schedule($: EngineInterface): Promise<number | undefined> {
+  const call = ++scheduling
   timer?.cancel()
   timer = undefined
   s.nextAt = null
   let ms: number | undefined
+  let p: Pulse = 'armed'
   if (!s.enabled) s.small = null
-  if (!s.enabled || busy) setPulse($, 'hidden') // a turn keeps the last word on the context; its end checks again
-  else if (await checkSmall($)) setPulse($, 'waiting') // nothing to beat for until a turn grows it
+  if (!s.enabled || busy) p = 'hidden' // a turn keeps the last word on the context; its end checks again
+  else if (await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
-    if (since >= MAX_TTL) setPulse($, 'waiting') // nothing warm to keep; the next turn starts it
+    if (since >= MAX_TTL || s.paused) p = 'waiting' // nothing warm to keep, or none of use: the next turn starts it
     else {
+      if (cfg.interval === 'auto' && s.idle === null) ttl = await cacheTtl($) // usage can cross into credits
+      if (call !== scheduling) return undefined
       ms = Math.max(0, idle() - since)
       s.nextAt = now + ms
-      timer = $.clock.after(ms, () => void beat($))
-      setPulse($, 'armed')
+      timer = $.clock.after(ms, () => void scheduledBeat($))
     }
   }
+  // a newer call, begun while this one awaited, sets the timer and the heart: two would each arm one
+  if (call !== scheduling) return undefined
+  setPulse($, p)
   save($)
   await refreshLine($)
   return ms
@@ -184,6 +289,24 @@ const toasts = (how: Alert) => how === 'toast' || how === 'both'
 function announce($: EngineInterface, text: string) {
   if (logs(cfg.onStop)) $.ui.log(text)
   if (toasts(cfg.onStop)) $.ui.toast(`cachebeat ${text}`)
+}
+
+/** Beats wait for the next turn, which will cache what a beat would have to write: says why, once. */
+async function pause($: EngineInterface, why: string, said: string) {
+  if (s.enabled && s.paused !== why) $.ui.log(`beats wait for your next turn: ${said}`)
+  s.paused = why
+  await schedule($)
+}
+
+const MODEL_CHANGED = 'the model changed'
+const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have settled
+
+/** Beats paused for a model switch go on once the model is back to the one the cache was warmed on. */
+async function resumeIfWarmed($: EngineInterface) {
+  if (s.paused !== MODEL_CHANGED || busy || (await $.session.model()) !== s.warmModel) return
+  s.paused = null
+  if (s.enabled) $.ui.log('beats go on: back on the model the cache was warmed on')
+  await schedule($)
 }
 
 function stop($: EngineInterface, why?: string) {
@@ -210,6 +333,13 @@ async function beat($: EngineInterface): Promise<string> {
     await schedule($) // says so, and waits for a turn to grow it
     return `beats skip: ${s.small}`
   }
+  // a beat goes to the current model, whose cache is not the one warmed if the model changed since
+  const model = await $.session.model()
+  const isNewModel = s.warmModel !== null && model !== s.warmModel
+  if (isNewModel && cfg.onModelSwitch === 'wait') {
+    await pause($, MODEL_CHANGED, 'the new model has no cache yet')
+    return `beats wait for your next turn: ${MODEL_CHANGED}`
+  }
 
   beating = true
   const r = await $.model.fork({ prompt: 'Reply with a single period.' }).finally(() => (beating = false))
@@ -217,21 +347,43 @@ async function beat($: EngineInterface): Promise<string> {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
     if (!isTransient) return stop($, r.error === 'rate_limit' ? 'rate limited' : `API error (${r.error})`)
-    if (!busy && s.enabled) timer = $.clock.after(RETRY, () => void beat($))
+    if (!busy && s.enabled) timer = $.clock.after(RETRY, () => void scheduledBeat($))
     return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
-  if (got < wrote) return stop($, `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`)
+  if (isNewModel) {
+    // the first beat on a new model writes its cache, as the next turn would have: kept warm from here
+    s.warmModel = model
+    s.lastWarm = await $.clock.now()
+    const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written)`
+    $.ui.log(warmed)
+    await schedule($)
+    return warmed
+  }
+  if (got < wrote) {
+    const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
+    // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
+    // this beat wrote it afresh, so beat at that from here
+    if (cfg.interval !== 'auto' || s.idle !== null || s.isCacheShort || ttl === '5m') return stop($, why)
+    s.isCacheShort = true
+    s.lastWarm = await $.clock.now()
+    announce($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
+    await schedule($)
+    return `${why}; beating every ${AUTO['5m']}m`
+  }
   s.lastWarm = await $.clock.now()
   s.lastRead = got
   s.beats++
-  if (cfg.animate) blast = 0
+  if (cfg.heartAnimate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
-  if (logs(cfg.onBeat) || s.row === null) $.ui.log(renewed) // with no closing row, no status line says it
+  if (logs(cfg.onBeat) || (s.row === null && !isStatusOnBand)) $.ui.log(renewed) // else no line at all says it
   if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
   await schedule($)
   return renewed
 }
+
+/** A beat its timer brought: none once beating was turned off, whatever timer was still set. */
+const scheduledBeat = ($: EngineInterface) => (s.enabled ? beat($) : Promise.resolve('off'))
 
 /** A beat asked for by hand: never one that would switch cachebeat off for having nothing to fork. */
 const beatNow = ($: EngineInterface) => (s.lastReal === null ? Promise.resolve('nothing to keep warm until this session has a turn') : beat($))
@@ -268,14 +420,16 @@ async function turnOn($: EngineInterface, minutes: number | undefined) {
 /** What the tools answer: this session's beating, and the settings every session shares. */
 async function stateOf($: EngineInterface) {
   await syncSettings($)
+  ttl = await cacheTtl($) // usage can cross into credits between turns
   const now = await $.clock.now()
   const nextBeat = !s.enabled || s.small ? null
     : s.nextAt !== null ? `in ${fmt(s.nextAt - now)}`
     : busy ? `${fmt(idle())} after this turn ends`
     : 'after the next turn'
   const session = {
-    enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle === null ? 'default' : 'session',
-    beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small,
+    enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle !== null ? 'session' : cfg.interval === 'auto' ? 'auto' : 'default',
+    cacheTtl: s.isCacheShort ? '5m' : ttl,
+    beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small, paused: s.paused,
   }
   const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
   return { session, settings: cfg, defaults }
@@ -304,15 +458,22 @@ const PANE_OPEN = { id: PANE, title: 'cachebeat', focus: true, closeOnEscape: tr
 
 async function openSettings($: EngineInterface) {
   await syncSettings($)
+  customs = ((await $.store.get('customs')) as typeof customs | undefined) ?? {}
+  ttl = await cacheTtl($)
   notice = ''
   isResetArmed = false
   await update($, pageAtom, () => ({ tab: 'beating', picker: null }))
   await $.ui.open(PANE_OPEN)
-  await focusOn($, 'tab:beating')
+  await focusOn($, 'tab:beating', true)
 }
 
-/** Moves the pane's focus; a move this plugin makes skips its own ui.focus hook, so it notes it here. */
-async function focusOn($: EngineInterface, key: string) {
+/**
+ * Moves the pane's focus; a move this plugin makes skips its own ui.focus hook, so it notes it here.
+ * A desktop's Tab and clicks move its own focus, and a move made for it after a press lands where the
+ * person didn't look: there it moves only to land somewhere new, the pane or a list of choices opening.
+ */
+async function focusOn($: EngineInterface, key: string, isLanding = false) {
+  if (paneSurface !== 'terminal' && !isLanding) return
   // a focus that cannot move leaves the page as it is (`claude plugin test` has no focus to move)
   let deny: string | undefined
   try {
@@ -338,11 +499,12 @@ function stopPaneTicker() {
   paneTicker = undefined
 }
 
-/** Shows a page of the pane and puts the focus on `key` there. */
-async function goTo($: EngineInterface, page: PanePage, key: string) {
+/** Shows a page of the pane and puts the focus on `key` there; `isLanding` as `focusOn` takes it. */
+async function goTo($: EngineInterface, page: PanePage, key: string, isLanding = false) {
   isResetArmed = false
+  notice = '' // the last outcome was about where the person was, not where they go
   await update($, pageAtom, () => page)
-  await focusOn($, key)
+  await focusOn($, key, isLanding)
 }
 
 /** The first element of a tab's settings, where going into it lands. */
@@ -360,6 +522,8 @@ const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|global on|off|settings]'
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
   on('session.start', async ($, e, next) => {
+    isStatusOnBand = false // until the band is drawn on a desktop
+    paneSurface = 'terminal' // until the pane draws, on whichever surface
     cfg = normalize(await $.store.get('settings'))
     await update($, settingsAtom, () => cfg)
     const prev = await read($, saved)
@@ -381,13 +545,14 @@ export const register: Register = on => {
   // conversation, so it starts its count afresh, keeping whether this session beats and how often
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     const r = await next(e)
-    s = { ...fresh, enabled: s.enabled, idle: s.idle }
+    s = { ...fresh, enabled: s.enabled, idle: s.idle, isCacheShort: s.isCacheShort }
     await syncSettings($)
     await schedule($)
     return r
   })
 
   on('command.run', { command: 'cachebeat' }, async ($, e) => {
+    ttl = await cacheTtl($) // what `auto` comes to, for the answer
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const minutes = words.find(w => /^\d+$/.test(w))
     switch (words[0]) {
@@ -456,6 +621,29 @@ export const register: Register = on => {
     return <Text>{''}</Text>
   })
 
+  // each model has its own cache, and a beat goes to the current one: after a switch the old cache is
+  // out of reach and the new model has none, so beats wait for the next turn, or the next writes it
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    const r = await next(e)
+    if (!busy && s.lastWarm !== null) {
+      if (cfg.onModelSwitch === 'wait') {
+        await pause($, MODEL_CHANGED, 'the new model has no cache yet')
+        // the switch takes effect once this hook settles: a switch back finds the warmed model then
+        $.clock.after(SETTLE, () => void resumeIfWarmed($))
+      } else if (s.enabled) $.ui.log("the next beat writes the new model's cache")
+    }
+    return r
+  })
+
+  // a compaction replaces the conversation, so the prefix a beat would warm is gone; the next turn
+  // caches the new one. One within a turn needs nothing: the turn's end starts the count from there
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
+    if (isDone && !busy && s.lastWarm !== null) await pause($, 'compaction replaced the conversation', 'compaction replaced the conversation')
+    return r
+  })
+
   on('turn.start', async ($, e, next) => {
     if (!beating) {
       busy = true
@@ -469,7 +657,13 @@ export const register: Register = on => {
     if (e.agentId === undefined && !beating) {
       busy = false
       rowPending = true
-      s.lastReal = s.lastWarm = await $.clock.now()
+      s.lastReal = await $.clock.now()
+      // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
+      if (e.usage) {
+        s.lastWarm = s.lastReal
+        s.warmModel = await $.session.model()
+        s.paused = null
+      }
       await syncSettings($)
       await schedule($)
     }
@@ -490,11 +684,13 @@ export const register: Register = on => {
     const line = isLive ? await read($, lineAtom) : '' // one line, under the latest turn alone
     const c = await read($, settingsAtom)
     if (!line || c.statusLine === 'off') return next(e)
-    const moving = isLive && c.animate && c.effect !== 'steady'
-    const f = moving ? await read($, frameAtom) : 0
+    const moving = c.lineAnimate && (c.lineEffect !== 'steady' || c.statusHeart !== 'off')
+    const f = moving ? await read($, lineFrameAtom) : 0
     const p = moving ? await read($, pulse) : 'hidden'
+    if (isLive && p === 'armed') animateLine($)
     const { Box, Text } = $.ui.resolve(e)
-    const painted = paint(Text, spans(line, moving ? c : { ...c, effect: 'steady' }, f, isLit(heartFrame(c, p, f))))
+    const { head, rest } = liveLine(line, c, p, f)
+    const painted = paint(Text, joined([...head, ...rest])) // monospace: the heart needs no box
     return (
       <Box flexDirection="column">
         {await next(e)}
@@ -504,19 +700,20 @@ export const register: Register = on => {
   })
 
   // the heart and beat count. The hint row ("⏸ manual mode on · ...") takes added text only as its dim
-  // tail, so the heart rides it dim, or gets its own line under that row to take color.
+  // tail, so the heart rides it dim, or gets its own line under that row to take color. The desktop
+  // draws nothing added to the hint row: there the band above the prompt carries it
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     const p = await read($, pulse)
-    if (e.props.isWorking || p === 'hidden') return next(e)
+    if (e.surface === 'desktop' || e.props.isWorking || p === 'hidden') return next(e)
     const c = await read($, settingsAtom)
-    if (p === 'armed' && c.animate) animate($)
+    if (p === 'armed' && c.heartAnimate) animate($)
     const f = await read($, frameAtom)
     const heart = heartFrame(c, p, f)
     // a space past the frame's own blank edge: the heart sits as far from the count as from the ' · ' before it
     const count = c.showCount ? ` ×${s.beats}` : ''
     if (c.heartPlacement === 'tail') return next({ ...e, props: { ...e.props, tail: `${heart}${count}` } })
     const { Box, Text } = $.ui.resolve(e)
-    const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, c, f, isLit(heart))
+    const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, lookOf(c, 'heart'), f, isLit(heart))
     return (
       <Box flexDirection="column">
         {await next(e)}
@@ -524,6 +721,44 @@ export const register: Register = on => {
           {paint(Text, look)}
           <Text dimColor>{count}</Text>
         </Box>
+      </Box>
+    )
+  })
+
+  // the desktop has neither the hint row's tail nor the closing row: there the status line stays above
+  // the prompt, as it reads under the latest turn on the terminal
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface !== 'desktop') return next(e)
+    const c = await read($, settingsAtom)
+    isStatusOnBand = c.statusLine !== 'off'
+    const line = await read($, lineAtom)
+    if (!isStatusOnBand || !line || e.props.hasSurvey || e.props.isWorking) return next(e)
+    const p = await read($, pulse)
+    if (p === 'armed' && c.lineAnimate) animateLine($)
+    const f = c.lineAnimate ? await read($, lineFrameAtom) : 0
+    const { Box, Text } = $.ui.resolve(e)
+    // the band's font is proportional: the heart's frames differ in width, so it gets a box of its own
+    // and the words after it never move
+    const { head, rest, width } = liveLine(line, c, p, f)
+    // one glyph keeps its width as it beats: the line is one run of text, spaced as written
+    if (width <= 1) return <Box>{paint(Text, joined([...head, ...rest]))}</Box>
+    // a wider animation, on this proportional font, would change width from frame to frame and carry
+    // the words after it along: each of its characters gets a cell of its own, centered in it, as the
+    // terminal's grid has them, so it is as wide as its frames' cells. A cell's margin, not the space,
+    // keeps the words off it: that space would collapse at the next box's start, as in HTML
+    if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '') }
+    const slots = head.flatMap(sp => glyphs(sp.text).map(ch => ({ ...sp, text: ch })))
+    const widths = slotWidths(variant(c.statusHeart)) // a heart's slot is wider, wherever any frame has one
+    return (
+      <Box flexDirection="row">
+        <Box flexDirection="row" flexShrink={0} marginLeft={1} marginRight={1}>
+          {slots.map((sp, i) => (
+            <Box width={widths[i] ?? 1} flexShrink={0} justifyContent="center">
+              {paint(Text, [{ ...sp, text: slotText(sp.text, widths[i] ?? 1) }])}
+            </Box>
+          ))}
+        </Box>
+        {paint(Text, rest)}
       </Box>
     )
   })
@@ -537,11 +772,17 @@ export const register: Register = on => {
     // the preview's clock runs only while there is a preview to move
     const picked = page.picker ? rowOf(page.picker) : undefined
     const isMoving = picked ? picked.row.key === 'variant' || !!picked.tab.preview : !!TABS.find(t => t.id === page.tab)?.preview
+    // at the speed of the part on show: the turn line's on its tab, the heart's elsewhere
+    const part = (picked?.tab.id ?? page.tab) === 'status' ? 'line' : 'heart'
     if (!isMoving) stopPaneTicker()
-    else if (!paneTicker) paneTicker = $.clock.every(frameMs(c), () => void update($, tickAtom, () => ++paneTick))
+    else if (!paneTicker) paneTicker = $.clock.every(frameMs(lookOf(c, part)), () => void update($, tickAtom, () => ++paneTick))
     const els = $.ui.resolve(e)
+    paneSurface = e.surface
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
-    const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN, notice, isResetArmed }
+    const view = {
+      page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN,
+      autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal', customs,
+    }
     const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
       // a press on a tab (Enter, 1-5, a click) shows it and goes into its settings
@@ -551,9 +792,11 @@ export const register: Register = on => {
         // the focus starts on the value set: one of the choices, or the custom field
         const { row } = rowOf(key)!
         const i = row.values.indexOf(c[key])
-        void goTo($, { ...page, picker: key }, i >= 0 ? `opt:${i}` : row.custom ? 'custom' : 'opt:0')
+        void goTo($, { ...page, picker: key }, i >= 0 ? `opt:${i}` : row.custom ? 'custom' : 'opt:0', true)
       },
-      pick: (key, value) => void setSettings($, { [key]: value }).then(() => goTo($, { ...page, picker: null }, `row:${key}`)),
+      pick: (key, value) => void setSettings($, { [key]: value }).then(() => (say($, ''), goTo($, { ...page, picker: null }, `row:${key}`))),
+      refuse: text => say($, text),
+      resetRow: key => void setSettings($, { [key]: DEFAULTS[key] }).then(() => say($, `${rowOf(key)!.row.label.trim()} back to its default`)),
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
       toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($, undefined).then(r => r.text)).then(t => say($, `this session: ${t}`)),
       beatNow: () => void beatNow($).then(t => say($, t)),
@@ -571,6 +814,12 @@ export const register: Register = on => {
   })
 
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
+    // a desktop moves its own focus (Tab, a click): the pane notes where, and a tab opens when pressed
+    if (paneSurface !== 'terminal') {
+      const r = await next(e)
+      if (!r.deny) await update($, focusAtom, () => e.element ?? '')
+      return r
+    }
     // the tab bar and a tab's settings are two levels: the arrows never cross between them
     let to = e.element
     if (e.origin.kind === 'person' && to) {
@@ -594,7 +843,7 @@ export const register: Register = on => {
 
   // the arrows walk the focus ring, and the window follows it; the wheel and page keys scroll
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
-    if (e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
+    if (paneSurface !== 'terminal' || e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
     const focus = await read($, focusAtom)
     if (focus.startsWith('tab:')) {
       const t = TABS[(TABS.findIndex(x => `tab:${x.id}` === focus) + e.by + TABS.length) % TABS.length]!
@@ -610,12 +859,14 @@ export const register: Register = on => {
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const page = await read($, pageAtom)
-    // Esc steps back a level: a picker to its row, a tab's settings to the tab bar; the tab bar closes
+    // Esc steps back a level: a picker to its row, a tab's settings to the tab bar; the tab bar closes.
+    // A desktop has no levels to its focus: there Esc leaves a picker, and otherwise closes
     const focus = await read($, focusAtom)
-    if (e.origin.kind === 'person' && (page.picker || !focus.startsWith('tab:'))) {
+    const isInTab = paneSurface === 'terminal' && !focus.startsWith('tab:')
+    if (e.origin.kind === 'person' && (page.picker || isInTab)) {
       // Esc has handed the keys back to the prompt: open asks for them again
       await $.ui.open(PANE_OPEN)
-      await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`)
+      await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`, true)
       return { value: undefined }
     }
     stopPaneTicker()

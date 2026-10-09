@@ -18,9 +18,9 @@ You come back from lunch, type your next message, and it picks up right where yo
 
 ## Features
 
-- **Background beats** keep the cache warm while you're idle and stay out of the conversation
+- **Background beats** keep the cache warm while you're idle, timed to how long your cache lasts, and stay out of the conversation
 - **A live heart** under the prompt, with 19 animations to choose from
-- **A status line** under your latest turn shows the beats so far and the time until the next one
+- **A turn line** under your latest turn shows the beats so far and the time until the next one
 - **A settings menu** with live previews, driven by keyboard or mouse
 - **Ask Claude** to turn it on, change the interval, or change any setting, in your own words
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
@@ -29,7 +29,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 ## Requirements
 
 - **Claude Code 2.1.287 or later.** Check your version with `claude --version` and update with `claude update`.
-- A terminal. The heart, status line and settings menu are drawn in the terminal, so they don't show in the desktop app or in `claude -p`.
+- **Claude Code in the terminal**, which cachebeat is built for. In the Claude desktop app beating works the same, the turn line sits above the prompt and the settings menu opens beside the chat, but the wider heart animations and the menu's keyboard controls are rougher there: you can just ask Claude to change settings for you. Nothing is drawn in `claude -p`.
 
 ## Install
 
@@ -82,7 +82,7 @@ The heart appears under the prompt, and after your next turn it starts beating. 
 
 Or ask Claude: "keep the cache warm in this session", "make 30 minutes the default beat time".
 
-Beats come every 50 minutes, to fit the one-hour cache of a Claude subscription. With an API key, a cloud provider, or usage credits, the cache lasts five minutes, so beat under that: `/cachebeat 4` for this session, or set **Beat after idle** to 4 in `/cachebeat settings` to make it the default.
+Beats fit your cache by themselves: every 50 minutes on a Claude subscription's one-hour cache, and every 4 on the five-minute cache of an API key, a cloud provider or usage credits. To pick your own interval, use `/cachebeat 30` for this session, or set **Beat after idle** in `/cachebeat settings`.
 
 ## What it sends, and what it costs
 
@@ -91,6 +91,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 - A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would.
 - Beats happen only while the session is idle, at most once per interval (50 minutes by default).
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
+- To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
 - `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself. The tools read or change only cachebeat's own state and settings. Claude calls them without a permission prompt, and each call that goes through shows as one line in the transcript.
 
 ## Commands
@@ -109,7 +110,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 **The heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next turn.
 
-**The status line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · next in 42m`. When you send a new message, the line moves down to the new turn.
+**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`. Its heart beats too, with an animation of its own under **Turn line**. While beats wait for your next message, after `/model` or `/compact`, it says so. When you send a new message, the line moves down to the new turn. In the desktop app it stays above the prompt instead.
 
 ```
 ✻ Cogitated for 12s · done 3:09 PM
@@ -125,45 +126,59 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings are saved once and apply to every session.
 
 - On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
-- Inside a tab, ↑↓ move between settings, and Enter changes one or opens its list of choices.
+- Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
+- **r** puts the focused setting back to its default.
 - In a list, ↑↓ preview each choice and Enter picks it.
 - Esc goes back one step, and closes the menu from the tab bar.
 - The mouse works too: click to pick, scroll to scroll.
 
-Settings with numbers also take a custom value at the bottom of their list, such as `35` minutes, `90m`, or `35k` tokens.
+Settings with numbers also take a custom value at the bottom of their list, such as `35` minutes, `90m`, or `35k` tokens. A value out of range is refused, with what the setting takes. Your last custom value stays in the list after you pick another, so it's one Enter from coming back.
+
+Everything in the menu applies to every session, except **This session** at the top of Beating.
 
 <details>
-<summary><b>Beating</b>: when beats happen and when they stop</summary>
+<summary><b>Beating</b>: whether it's on, and how often</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
 | This session | Turns beating on or off right here | off |
 | New sessions start | Whether new sessions start with it on | off |
-| Beat after idle | How long the session sits idle before a beat | 50 minutes |
-| `/cachebeat <min>` sets | Whether `/cachebeat 30` changes this session only, or the default for all | this session |
-| Stop after idle | Stops beating after this long without a message from you | 8 hours |
-| Stop at usage | Stops once any of your usage limits reaches this percentage | 100% |
-| Skip small contexts | Skips beating chats under a minimum size | off, 20k tokens |
+| Beat after idle | How long the session sits idle before a beat: auto fits your cache, or a number of minutes | auto: 50 minutes on a one-hour cache, 4 on a five-minute one |
+| After /model | Wait for your next message, or have the next beat warm the new model's cache | wait |
+| `/cachebeat 30` changes | Whether `/cachebeat 30` changes this session only, or the default for all | this session |
 
-With **Skip small contexts** on, cachebeat tells you up front when a chat is under your minimum, once in the log and in the status line: `♡ beats skip · this chat is 38k tokens, under your 50k minimum`. It starts beating as soon as the chat grows past the minimum.
+**Beat now** sends a beat right away, and **Reset all** puts every setting back to its default.
 
 </details>
 
 <details>
-<summary><b>Heart</b>: 19 animations, speed and timing</summary>
+<summary><b>Limits</b>: when beating stops or skips</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
+| Stop after idle | Stops beating after this long without a message from you | 8 hours |
+| Stop at usage | Stops once any of your usage limits reaches this percentage | 90% |
+| Skip small chats | Skips beating chats under a minimum size | off, 20k tokens |
+
+With **Skip small chats** on, cachebeat tells you up front when a chat is under your minimum, once in the log and in the turn line: `♡ beats skip · this chat is 38k tokens, under your 50k minimum`. It starts beating as soon as the chat grows past the minimum.
+
+</details>
+
+<details>
+<summary><b>Prompt heart</b>: the heart under the prompt</summary>
+
+| Setting | What it does | Default |
+| --- | --- | --- |
+| Placement | At the end of the hint line, drawn dim, or on its own line, in color | hint line |
 | Animation | Which of the 19 animations the heart plays | Classic |
-| Animate | Turns the animation on or off | on |
-| Speed | Slow, normal, fast, or a custom frame time | normal |
-| Timing | Linear plays evenly; lub-dub beats twice, then rests | linear |
-| Placement | At the end of the hint line, or on its own line below it | hint line |
 | Beat count | Shows the `×3` beside the heart | on |
+| Color | On its own line: dim, a color from your theme, a preset, or any hex color | claude, your theme's accent |
+| Animate | Turns its animation on or off | on |
+| Effect | On its own line: steady; flash on each beat; flow, a shimmer sweeping across; or mixed, which switches between them | steady |
+| Speed | Slow, normal, fast, or a custom frame time | normal |
+| Timing | Lub-dub beats twice, then rests, and suits the hearts; linear plays evenly, and suits the line animations | lub-dub |
 
-The Animation list plays every animation at once, so you can watch them side by side before you pick. Linear suits the line animations, and lub-dub suits the hearts.
-
-The animations are Classic, Pulse, Triplet, Sparkle, Fleuron, Wave, ECG, Beam, Dash, Sine, Charge, Converge, Twins, Orbit, Static, Garland, Equalizer, Cupid and Bounce.
+The Animation list plays every animation at once, so you can watch them side by side before you pick: Classic, Pulse, Triplet, Sparkle, Fleuron, Wave, ECG, Beam, Dash, Sine, Charge, Converge, Twins, Orbit, Static, Garland, Equalizer, Cupid and Bounce.
 
 ```
 Classic    ⋅ ♡ ⋅            ECG     ─⎼⎺⎽────⎼⎺⎽───♥
@@ -171,28 +186,23 @@ Sparkle    ✦ ♥ ✦            Sine    ⠒⠉⠒⠤⣀⠤⠒⠉⠒⠤⣀⠤�
 Orbit       •♥              Cupid       ─➤ ♡
 ```
 
-</details>
-
-<details>
-<summary><b>Look</b>: color and effect</summary>
-
-| Setting | What it does | Default |
-| --- | --- | --- |
-| Color | Dim, a color from your theme, a preset, or any hex color | claude, your theme's accent |
-| Effect | Steady; flash on each beat; flow, a shimmer sweeping across; or mixed, which switches between them | steady |
-
-Theme colors follow your Claude Code theme, so they change when you switch themes. A heart at the end of the hint line is always dim; put it on its own line to give it color. The status line takes the color either way.
+The desktop app draws no heart under the prompt.
 
 </details>
 
 <details>
-<summary><b>Status</b>: the line under your latest turn</summary>
+<summary><b>Turn line</b>: the line under your latest turn</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| Placement | Under the turn after a blank line, directly under it, or off | after a blank line |
+| Show | Under the turn after a blank line, directly under it, or off | after a blank line |
 | Countdown | Shows the time to the next beat | on |
-| Tokens kept | Shows how much the last beat kept warm, e.g. `· 184k cached` | off |
+| Tokens kept | Shows how much the last beat kept warm, e.g. `· 184k cached` | on |
+| Its heart | What the heart at the start of the line plays: one heart beating, a still one, or any of the 19 animations | one heart, beating |
+| Color | Dim, a color from your theme, a preset, or any hex color | claude, your theme's accent |
+| Animate · Effect · Speed · Timing | As for the prompt heart, for the line on its own | on · steady · normal · lub-dub |
+
+Theme colors follow your Claude Code theme, so they change when you switch themes. In the desktop app the line sits above the prompt.
 
 </details>
 
@@ -215,11 +225,12 @@ cachebeat turns itself off for the session when:
 - the API rate-limits it, or returns an error that doesn't clear up (a passing hiccup is retried a minute later)
 - the cache is already gone, so there's nothing left to keep warm
 
-It tells you why, the way you chose under **Alerts**.
+It tells you why, the way you chose under **Alerts**. On auto, a cache that's gone before a 50-minute beat lasts five minutes: instead of stopping, cachebeat says so and beats every 4 minutes from there.
 
 ## Good to know
 
 - Sending a message restarts the countdown.
+- After `/compact`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.
 - Settings you change in one session reach your other open sessions at their next turn.
@@ -231,3 +242,9 @@ Contributions are welcome. Read [the contributing guide](https://github.com/404M
 ## License
 
 [MIT](LICENSE)
+
+## Disclaimer
+
+cachebeat began as a personal project and is shared publicly in good faith. It's actively maintained: report problems or ideas as a GitHub issue and they'll be looked at, though what gets fixed or added is up to the maintainer.
+
+Every beat is a real request that counts toward your usage limits, or toward your API bill if you pay per token. You use cachebeat at your own risk, and its author isn't responsible for any usage, charges or other costs it causes.

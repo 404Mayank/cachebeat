@@ -1,10 +1,10 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
+import { VARIANTS, cells, loopIndex, previewFrame, slotText, slotWidths, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
-import { DEFAULTS, EPISODE, accept, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
+import { DEFAULTS, EPISODE, accept, glyphs, lookOf, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
 
 /** The tools as the model calls them: `mcp__<plugin>__<name>`. */
@@ -13,13 +13,18 @@ const TOOL = { state: `mcp__cachebeat__${STATE.name}`, set: `mcp__cachebeat__${S
 const M = 60_000
 const TICK = 80 // a frame at normal speed
 const { loop: BEAT, blast: BLAST } = variant('classic')
-const turn = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as const
 const usage = (read: number, wrote: number) => ({
   input_tokens: 5, output_tokens: 1, cache_read_input_tokens: read, cache_creation_input_tokens: wrote,
 })
+const OPUS = 'claude-opus-5-5'
+// a turn that sent its requests on Opus; one without usage sent none
+const turn = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage: { ...usage(90_000, 0), model: OPUS } } as const
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
-type World = { fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS> }
+type World = {
+  fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS>
+  env?: Record<string, string>; settingsFile?: Record<string, unknown>; isSubscription?: boolean
+}
 
 const setup = async ($: Engine, on: On, world: World = {}) => {
   const clock = mock.clock(on)
@@ -38,9 +43,13 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     value: {
       startedAt: 0,
       context: { tokens: world.contextTokens, window: 200_000, ...(world.lastUsage ? { breakdown: { apiUsage: world.lastUsage } } : {}) },
-      rateLimits: [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
+      rateLimits: world.isSubscription === false ? [] : [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
     },
   }) as never)
+  let model: string = OPUS
+  on('session.model', () => ({ value: model }) as never)
+  on('env.get', (_$, e) => ({ value: world.env?.[e.name] }) as never)
+  on('settings.read', () => ({ value: world.settingsFile ?? {} }) as never)
   on('model.fork', () => {
     forks.push(clock.now())
     return { value: replies[forks.length - 1] ?? replies.at(-1) ?? ok } as never
@@ -48,6 +57,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   const tails: (string | undefined)[] = []
   on('ui.render', { component: 'PromptHint' }, ($, e) => {
     tails.push(e.props.tail)
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  })
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>
   })
@@ -62,9 +75,13 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('ui.focus', () => ({})) // the engine's ring; a move the test raises lands
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('classic.PostModelSwitch', () => ({}))
+  on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  return { clock, forks, logs, toasts, tails, store, specs }
+  return { clock, forks, logs, toasts, tails, store, specs, switchTo: (m: string) => (model = m) }
 }
+
+const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
 
 const cmd = async ($: Engine, args: string) =>
   (await $.command.run({ command: 'cachebeat', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })).text
@@ -135,14 +152,17 @@ test('custom numbers through the pane: an interval, a frame time', async ($: Eng
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
   await ui.press({ key: 'row:interval' })
+  await ui.input({ key: 'custom', text: '90' }) // out of range: the footer says why, nothing changes
+  expect(await ui.find({ type: 'Text', text: 'Beat after idle takes 1–55 minutes, not "90"' })).toBeDefined()
+  expect(stored(store).interval).toBe('auto')
   await ui.input({ key: 'custom', text: '35' })
   expect(stored(store).interval).toBe(35)
   expect(await cmd($, 'on')).toBe('on, every 35m idle · starts after your next turn')
   await ui.press({ key: 'tab:heart' })
-  await ui.press({ key: 'row:speed' })
+  await ui.press({ key: 'row:heartSpeed' })
   await ui.input({ key: 'custom', text: '65ms' })
-  expect(stored(store).speed).toBe(65)
-  expect((await ui.find({ key: 'row:speed' }))?.text).toContain('65ms a frame')
+  expect(stored(store).heartSpeed).toBe(65)
+  expect((await ui.find({ key: 'row:heartSpeed' }))?.text).toContain('65ms a frame')
   await ui.unmount()
 })
 
@@ -150,6 +170,7 @@ test('smaller than takes a custom count', async ($: Engine, on: On) => {
   const { store } = await setup($, on, { settings: { skipSmall: true } })
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'tab:limits' })
   await ui.press({ key: 'row:skipSmallTokens' })
   await ui.input({ key: 'custom', text: 'lots' })
   expect(stored(store).skipSmallTokens).toBe(20_000)
@@ -165,7 +186,7 @@ test('settings from an older store fall back to the defaults one by one', () => 
 })
 
 test('flow sweeps a highlight across the text; flash lights it on a full heart', () => {
-  const s = { ...DEFAULTS, color: 'claude', effect: 'flow' as const }
+  const s = { ...lookOf(DEFAULTS, 'line'), color: 'claude', effect: 'flow' as const }
   expect(spans('abcdefgh', s, 5, false)).toEqual([
     { text: 'a', color: 'claude', dim: false },
     { text: 'bcd', color: 'claudeShimmer', dim: false },
@@ -185,7 +206,7 @@ test('mixed holds a mode for an episode, never repeats one, and plays all three'
 })
 
 test('both flashes and flows at once: lit, the sweep dips to the resting tone', () => {
-  const s = { ...DEFAULTS, color: 'claude', effect: 'mixed' as const }
+  const s = { ...lookOf(DEFAULTS, 'line'), color: 'claude', effect: 'mixed' as const }
   const start = Array.from({ length: 30 }, (_, n) => n * EPISODE).find(k => mixedMode(k) === 'both')!
   const t = start + ((5 - (start % 14)) + 14) % 14 // the sweep centred on 'c', as at tick 5 in an 8-glyph text
   expect(spans('abcdefgh', s, t, true)).toEqual([
@@ -232,7 +253,7 @@ test('global on sets the default and turns this session on; global off the rever
 test('an interval set for the session leaves the global one; set globally, it changes it', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   await cmd($, '7')
-  expect(stored(store).interval).toBe(50)
+  expect(stored(store).interval).toBe('auto')
   await cmd($, 'off')
   store.set('settings', { ...DEFAULTS, intervalScope: 'global' })
   await $.turn.complete(turn) // picks up the store
@@ -299,7 +320,7 @@ test('off, a new turn and a subagent turn each keep it from beating', async ($: 
 })
 
 test('one status line, under the latest turn: counts the session\'s beats and down to the next', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on)
+  const { clock, logs } = await setup($, on, { settings: { statusHeart: 'off', showTokens: false } }) // a still heart, no tokens: the countdown is what's checked
   await cmd($, '3')
   await $.turn.complete(turn)
   expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 3m']) // no beat yet
@@ -366,7 +387,7 @@ test('a beat can log and toast both, closing row or not', async ($: Engine, on: 
 })
 
 test('a stop can log and toast both', async ($: Engine, on: On) => {
-  const { clock, logs, toasts } = await setup($, on, { percentUsed: 100, settings: { onStop: 'both' } })
+  const { clock, logs, toasts } = await setup($, on, { percentUsed: 100, settings: { onStop: 'both', stopAtUsage: 100 } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(IDLE)
@@ -382,8 +403,8 @@ test('a beat can toast', async ($: Engine, on: On) => {
   expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
 })
 
-test('stops when the fork was not served from cache', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }] })
+test('at a fixed interval, stops when the fork was not served from cache', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }], settings: { interval: 50 } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(IDLE * 3)
@@ -412,7 +433,7 @@ test('the deadline is a setting, and a stop can toast', async ($: Engine, on: On
 })
 
 test('stops without forking once a usage limit is used up', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { percentUsed: 100 })
+  const { clock, forks, logs } = await setup($, on, { percentUsed: 100, settings: { stopAtUsage: 100 } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(IDLE)
@@ -524,7 +545,7 @@ test('the variant picks the frames; the count can hide; still when not animated'
   await clock.advance(3 * TICK)
   await draw($, HINT)
   expect(variant('ecg').loop).toContain(tails.at(-1))
-  store.set('settings', { ...DEFAULTS, variant: 'ecg', animate: false })
+  store.set('settings', { ...DEFAULTS, variant: 'ecg', heartAnimate: false })
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await $.turn.complete(turn)
   await clock.advance(7 * TICK)
@@ -533,11 +554,11 @@ test('the variant picks the frames; the count can hide; still when not animated'
 })
 
 test('a preset is drawn as hex, lit a lighter shade', () => {
-  expect(spans('x', { ...DEFAULTS, color: 'red', effect: 'flash' }, 0, true)).toEqual([{ text: 'x', color: '#f1a09c', dim: false }])
+  expect(spans('x', { ...lookOf(DEFAULTS, 'line'), color: 'red', effect: 'flash' }, 0, true)).toEqual([{ text: 'x', color: '#f1a09c', dim: false }])
 })
 
 test('on its own line the heart takes the color', async ($: Engine, on: On) => {
-  await setup($, on, { settings: { heartPlacement: 'line', color: 'claude' } })
+  await setup($, on, { settings: { heartPlacement: 'line', heartColor: 'claude' } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   const ui = await $.ui.mount(HINT)
@@ -552,42 +573,54 @@ test('on its own line the heart takes the color', async ($: Engine, on: On) => {
 const buttons = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
   (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith(prefix))
 
-test('the settings pane: tabs, toggles in place, pickers for the rest', async ($: Engine, on: On) => {
+test('the settings pane: six tabs, two choices flip in place, more open a list, help for what\'s focused', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await cmd($, 'settings')).toBe('settings opened')
   expect(await cmd($, 'config')).toBe('settings opened') // unlisted, for the hand that types it
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:heart', 'tab:look', 'tab:status', 'tab:alerts'])
+  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:alerts'])
+  expect([(await ui.find({ key: 'beatNow' }))?.text, (await ui.find({ key: 'reset' }))?.text]).toEqual(['Beat now', 'Reset all'])
+  expect(await ui.find({ type: 'Text', text: /^This session is this session alone; every other setting applies to every session/ })).toBeDefined()
 
-  await ui.press({ key: 'row:defaultOn' }) // two values: toggles
+  await ui.press({ key: 'row:defaultOn' }) // two values: flips
   expect(stored(store).defaultOn).toBe(true)
-  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeUndefined() // shows only once skipping
-  await ui.press({ key: 'row:skipSmall' })
-  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeDefined()
+  await move($, 'row:defaultOn') // the kit moves no focus on a press: the person's arrows do
+  expect(await ui.find({ type: 'Text', text: /^Whether new sessions start beating/ })).toBeDefined() // the focused row's help
+  await ui.press({ key: 'row:onModelSwitch' }) // two named choices flip too
+  expect(stored(store).onModelSwitch).toBe('warm')
+  expect(await buttons(ui, 'opt:')).toHaveLength(0)
 
-  await ui.press({ key: 'row:interval' }) // more: a picker
-  expect(await buttons(ui, 'opt:')).toHaveLength(4)
-  await ui.press({ key: 'opt:0' })
+  await ui.press({ key: 'row:interval' }) // more: a list, its help above it
+  expect(await buttons(ui, 'opt:')).toHaveLength(6)
+  expect(await ui.find({ type: 'Text', text: /^How long you're idle before a beat/ })).toBeDefined()
+  await ui.press({ key: 'opt:1' })
   expect(stored(store).interval).toBe(4)
   expect(await ui.find({ key: 'row:interval' })).toBeDefined() // back on the tab
 
   await ui.press({ key: 'session' })
   expect(await cmd($, '')).toContain('on, every 4m idle')
 
-  await ui.press({ key: 'tab:beating' }) // Enter on the open tab goes into it: the page stays
-  expect(await ui.find({ key: 'row:interval' })).toBeDefined()
-  await ui.press({ key: 'tab:heart' }) // another tab shows that one
-  expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  await ui.press({ key: 'tab:limits' })
+  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeUndefined() // shows only once skipping
+  await ui.press({ key: 'row:skipSmall' })
+  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeDefined()
+  expect(await ui.find({ key: 'beatNow' })).toBeUndefined()
+
+  await ui.press({ key: 'tab:heart' })
   await ui.press({ key: 'row:variant' })
   expect(await buttons(ui, 'opt:')).toHaveLength(19)
-  await ui.press({ key: 'back' })
-  await ui.press({ key: 'row:timing' }) // named choices open a picker, even two of them
-  expect(await buttons(ui, 'opt:')).toHaveLength(2)
-  expect(await ui.find({ type: 'Text', text: /^Linear suits the line animations \(ECG, Beam/ })).toBeDefined()
-  await ui.press({ key: 'back' })
-  await ui.press({ key: 'row:variant' })
   await ui.press({ key: 'opt:13' })
   expect(stored(store).variant).toBe('orbit')
+
+  await ui.press({ key: 'row:heartTiming' }) // lub-dub, the default, flips to linear
+  expect(stored(store).heartTiming).toBe('linear')
+  await move($, 'row:heartTiming')
+  expect(await ui.find({ type: 'Text', text: /^lub-dub beats twice, then rests/ })).toBeDefined()
+  expect(await ui.find({ key: 'row:heartColor' })).toBe(undefined) // on the hint line the heart is dim: no color to pick
+  expect(await ui.find({ type: 'Text', text: 'These apply to every session.' })).toBeDefined()
+
+  await ui.press({ key: 'tab:alerts' })
+  expect(await ui.find({ key: 'reset' })).toBe(undefined)
   await ui.unmount()
 })
 
@@ -620,12 +653,12 @@ test('the focused option of a picker shows in the preview before it is picked', 
   const { store } = await setup($, on)
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
-  await ui.press({ key: 'tab:look' })
-  await ui.press({ key: 'row:color' })
+  await ui.press({ key: 'tab:status' })
+  await ui.press({ key: 'row:lineColor' })
   await $.ui.focus({ component: 'Pane', requestId: PANE, element: 'opt:2', origin: { kind: 'person' } }) // permission
   const line = (await ui.findAll({ type: 'Text' })).find(t => t.text?.includes('cache kept warm'))
   expect(line?.props).toMatchObject({ color: 'permission' })
-  expect(stored(store).color).toBe('claude')
+  expect(stored(store).lineColor).toBe('claude')
   await ui.unmount()
 })
 
@@ -652,12 +685,14 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
   const ui = await $.ui.mount(SETTINGS_PANE)
   await ui.press({ key: 'row:defaultOn' })
   store.set('settings', { ...stored(store), interval: 10 }) // another session's change
+  await ui.press({ key: 'tab:limits' })
   await ui.press({ key: 'row:stopAtUsage' })
-  await ui.press({ key: 'opt:1' })
-  expect(stored(store)).toMatchObject({ interval: 10, stopAtUsage: 90, defaultOn: true })
+  await ui.press({ key: 'opt:0' })
+  expect(stored(store)).toMatchObject({ interval: 10, stopAtUsage: 80, defaultOn: true })
+  await ui.press({ key: 'tab:beating' })
   await ui.press({ key: 'reset' })
   expect(stored(store).interval).toBe(10)
-  expect((await ui.find({ key: 'reset' }))?.text).toBe('Press again to reset')
+  expect((await ui.find({ key: 'reset' }))?.text).toBe('Press again to reset all')
   await ui.press({ key: 'reset' })
   expect(stored(store)).toEqual(DEFAULTS)
   await ui.unmount()
@@ -666,7 +701,7 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
 type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) => $.tool.call({ tool: TOOL[name], ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'default', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null, paused: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
   plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
@@ -680,15 +715,15 @@ test('both tools register, every setting in the schema with the pane\'s ranges',
   expect(specs).toEqual([STATE, SET])
   const settings = props(props(SET.inputSchema).settings)
   expect(Object.keys(settings).sort()).toEqual(Object.keys(DEFAULTS).sort())
-  expect((settings.interval as Args).anyOf).toEqual([{ type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }])
-  expect((settings.speed as Args).anyOf).toEqual([{ enum: ['slow', 'normal', 'fast'] }, { type: 'number', minimum: 20, maximum: 500 }, { type: 'null' }])
+  expect((settings.interval as Args).anyOf).toEqual([{ enum: ['auto'] }, { type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }])
+  expect((settings.heartSpeed as Args).anyOf).toEqual([{ enum: ['slow', 'normal', 'fast'] }, { type: 'number', minimum: 20, maximum: 500 }, { type: 'null' }])
 })
 
 test('state on a fresh session: off, at the default interval, the settings as they are', async ($: Engine, on: On) => {
   await setup($, on)
   expect(await stateNow($)).toEqual({ session: FRESH, settings: DEFAULTS, defaults: {} })
-  await call($, 'set', { settings: { interval: 30, showTokens: true } })
-  expect((await stateNow($)).defaults).toEqual({ interval: 50, showTokens: false })
+  await call($, 'set', { settings: { interval: 30, showTokens: false } })
+  expect((await stateNow($)).defaults).toEqual({ interval: 'auto', showTokens: true })
 })
 
 const set = async ($: Engine, args: Args) => JSON.parse((await call($, 'set', args)).result as string)
@@ -699,23 +734,23 @@ test('a session interval turns beating on and leaves the default; null follows i
   expect(await set($, { session: { intervalMinutes: 20 } })).toEqual({
     changed: ['session.enabled', 'session.intervalMinutes'], session: on20, settings: {},
   })
-  expect(stored(store).interval).toBe(50)
+  expect(stored(store).interval).toBe('auto')
   expect((await set($, { session: { intervalMinutes: null } })).session).toEqual({ ...FRESH, enabled: true, nextBeat: 'after the next turn' })
   expect((await set($, { session: { intervalMinutes: 30, enabled: false } })).session.enabled).toBe(false)
 })
 
 test('set answers with what changed and those settings alone; null resets a setting', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
-  expect(await set($, { settings: { skipSmall: true, skipSmallTokens: 35_000, interval: 50 } })).toEqual({
+  expect(await set($, { settings: { skipSmall: true, skipSmallTokens: 35_000, interval: 'auto' } })).toEqual({
     changed: ['settings.skipSmall', 'settings.skipSmallTokens'], session: FRESH, settings: { skipSmall: true, skipSmallTokens: 35_000 },
   })
-  expect(await set($, { settings: { skipSmallTokens: null, customColor: null } })).toEqual({
+  expect(await set($, { settings: { skipSmallTokens: null, heartHex: null } })).toEqual({
     changed: ['settings.skipSmallTokens'], session: FRESH, settings: { skipSmallTokens: 20_000 },
   })
   expect(stored(store)).toEqual({ ...DEFAULTS, skipSmall: true })
   // a session that follows the default moves with it, but the call changed the default alone
   expect(await set($, { settings: { interval: 30 } })).toEqual({
-    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30 }, settings: { interval: 30 },
+    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30, intervalFrom: 'default' }, settings: { interval: 30 },
   })
 })
 
@@ -730,23 +765,23 @@ test('a default interval is saved, and a session that follows it beats at it', a
 
 test('settings take the pane\'s values: named or custom, with units', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
-  await call($, 'set', { settings: { skipSmall: true, skipSmallTokens: 35_000, speed: 65 } })
-  expect([stored(store).skipSmall, stored(store).skipSmallTokens, stored(store).speed]).toEqual([true, 35_000, 65])
-  await call($, 'set', { settings: { speed: 'fast', skipSmall: false } })
-  expect([stored(store).speed, stored(store).skipSmall]).toEqual(['fast', false])
-  expect([accept('skipSmallTokens', '35k'), accept('skipSmall', false), accept('customColor', '#AABBCC')]).toEqual([35_000, false, '#aabbcc'])
-  expect([accept('customColor', 'red'), accept('interval', 56), accept('timing', 3), accept('nope', 1)]).toEqual([undefined, undefined, undefined, undefined])
+  await call($, 'set', { settings: { skipSmall: true, skipSmallTokens: 35_000, lineSpeed: 65 } })
+  expect([stored(store).skipSmall, stored(store).skipSmallTokens, stored(store).lineSpeed]).toEqual([true, 35_000, 65])
+  await call($, 'set', { settings: { lineSpeed: 'fast', skipSmall: false } })
+  expect([stored(store).lineSpeed, stored(store).skipSmall]).toEqual(['fast', false])
+  expect([accept('skipSmallTokens', '35k'), accept('skipSmall', false), accept('heartHex', '#AABBCC')]).toEqual([35_000, false, '#aabbcc'])
+  expect([accept('lineHex', 'red'), accept('interval', 56), accept('heartTiming', 3), accept('nope', 1)]).toEqual([undefined, undefined, undefined, undefined])
 })
 
 test('a call with any bad value is refused whole, saying what each takes', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   const deny = async (args: Args) => (await call($, 'set', args)).deny
   expect(await deny({ session: { intervalMinutes: 90 } })).toBe('nothing changed: session.intervalMinutes takes 1–55 minutes or null, not 90')
-  expect(await deny({ settings: { variant: 'nope' } })).toStartWith('nothing changed: settings.variant takes one of classic, pulse,')
+  expect(await deny({ settings: { variant: 'nope' } })).toStartWith('nothing changed: settings.variant takes classic, pulse,')
   expect(await deny({ settings: { skipSmallTokens: 5 } })).toBe('nothing changed: settings.skipSmallTokens takes 1000–1000000 tokens or null, not 5')
   expect(await deny({ settings: { bogus: 1 }, session: 'on' })).toBe('nothing changed: session is an object, not "on"; settings has no bogus')
-  expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, timing: 'fast' } }))
-    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.timing takes one of linear, lubdub or null, not "fast"')
+  expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, heartTiming: 'fast' } }))
+    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.heartTiming takes lubdub, linear, or null, not "fast"')
   expect(store.has('settings')).toBe(false)
   expect((await stateNow($)).session).toEqual(FRESH)
 })
@@ -788,8 +823,298 @@ test('a subagent can read, never change', async ($: Engine, on: On) => {
 test('a call is one dim line in the transcript, its answer not drawn', async ($: Engine, on: On) => {
   await setup($, on)
   const change = { session: { enabled: true, intervalMinutes: 20 }, settings: { interval: 30, heartPlacement: 'line' } }
-  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat: this session on, every 20m · Beat after idle 30m, Heart placement own line'])
+  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat: this session on, every 20m · Beat after idle 30m, Prompt heart placement own line'])
   expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat: read the state'])
   expect(await draw($, toolRow('ToolResult', TOOL.set, change))).toEqual([''])
   expect(await draw($, toolRow('ToolResult', TOOL.state, {}))).toEqual([''])
+})
+
+// the cache's lifetime, by Claude Code's own order (code.claude.com/docs/en/prompt-caching)
+const TTL_CASES: [string, World, string, number][] = [
+  ['a subscription within its usage', {}, '1h', 50],
+  ['no subscription: an API key or a cloud provider', { isSubscription: false }, '5m', 4],
+  ['a subscription on usage credits', { percentUsed: 100, settings: { stopAtUsage: 100 } }, '5m', 4],
+  ['FORCE_PROMPT_CACHING_5M, over every other choice', { env: { FORCE_PROMPT_CACHING_5M: '1', CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' } }, '5m', 4],
+  ['CLAUDE_CODE_PROMPT_CACHE_TTL, over the setting', { env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '5m' }, settingsFile: { promptCacheTtl: '1h' } }, '5m', 4],
+  ['the promptCacheTtl setting, off a subscription', { isSubscription: false, settingsFile: { promptCacheTtl: '1h' } }, '1h', 50],
+  ['the setting, over ENABLE_PROMPT_CACHING_1H', { env: { ENABLE_PROMPT_CACHING_1H: '1' }, settingsFile: { promptCacheTtl: '5m' } }, '5m', 4],
+  ['ENABLE_PROMPT_CACHING_1H, off a subscription', { isSubscription: false, env: { ENABLE_PROMPT_CACHING_1H: 'true' } }, '1h', 50],
+  ['a value Claude Code ignores', { isSubscription: false, env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '2h' }, settingsFile: { promptCacheTtl: 'long' } }, '5m', 4],
+]
+for (const [name, world, ttl, minutes] of TTL_CASES) {
+  test(`auto reads the cache's lifetime: ${name}`, async ($: Engine, on: On) => {
+    await setup($, on, world)
+    const { session } = await stateNow($)
+    expect([session.cacheTtl, session.intervalMinutes]).toEqual([ttl, minutes])
+  })
+}
+
+test('auto beats at 4m on a five-minute cache', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on, { isSubscription: false })
+  expect(await cmd($, 'on')).toBe('on, every 4m idle · starts after your next turn')
+  await $.turn.complete(turn)
+  expect(await cmd($, '')).toBe('on, every 4m idle · 0 beats · next beat in 4m')
+  await clock.advance(8 * M)
+  expect(forks).toEqual([4 * M, 8 * M])
+})
+
+test('under auto, a cache gone before the hour beats every 4m from there, and stops if that misses too', async ($: Engine, on: On) => {
+  const miss = { ...ok, usage: usage(0, 90_000) }
+  const { clock, forks, logs } = await setup($, on, { fork: [miss, ok, miss] })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(logs.at(-1)).toBe("the cache was not served (0 read, 90,000 written): this session's cache lasts 5 minutes, so beats come every 4m")
+  expect(await cmd($, '')).toBe('on, every 4m idle · 0 beats · next beat in 4m')
+  expect((await stateNow($)).session.cacheTtl).toBe('5m')
+  await clock.advance(8 * M)
+  expect(forks).toEqual([IDLE, IDLE + 4 * M, IDLE + 8 * M])
+  expect(logs.at(-1)).toContain('stopped: the cache was not served')
+})
+
+const SWITCH = {
+  from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5', requested_model: 'sonnet', source: 'command', context_tokens: 90_000,
+  prompt_cache_warm: true, cache_ttl: '1h', estimated_cache_write_usd: 0.5, pricing: 'catalog',
+} as const
+
+test('after /model, beats wait for the next turn', async ($: Engine, on: On) => {
+  const { clock, forks, logs, switchTo } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  expect(logs.at(-1)).toBe('beats wait for your next turn: the new model has no cache yet')
+  expect((await stateNow($)).session).toMatchObject({ nextBeat: 'after the next turn', paused: 'the model changed' })
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+  await $.turn.complete(turn)
+  expect((await stateNow($)).session.paused).toBe(null)
+  await clock.advance(IDLE)
+  expect(forks.length).toBe(1)
+})
+
+test('after /model set to warm, the next beat writes the new model\'s cache and keeps it from there', async ($: Engine, on: On) => {
+  const { clock, forks, logs, switchTo } = await setup($, on, {
+    settings: { onModelSwitch: 'warm' }, fork: [{ ...ok, usage: usage(0, 90_000) }, ok],
+  })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  expect(logs.at(-1)).toBe("the next beat writes the new model's cache")
+  await clock.advance(IDLE)
+  expect(logs.at(-1)).toBe("♥ warmed the new model's cache (90,000 written)")
+  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · next beat in 50m')
+  await clock.advance(IDLE)
+  expect(forks).toEqual([IDLE, 2 * IDLE])
+  expect(await cmd($, '')).toBe('on, every 50m idle · 1 beats · next beat in 50m')
+})
+
+test('a model changed with no event in between is caught when the beat comes: it waits, never forks', async ($: Engine, on: On) => {
+  const { clock, forks, switchTo } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+  expect((await stateNow($)).session).toMatchObject({ paused: 'the model changed', nextBeat: 'after the next turn' })
+})
+
+test('a turn that sent no request warms nothing', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, 'on')
+  const { usage: _, ...noRequest } = turn
+  await $.turn.complete(noRequest)
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+})
+
+test('commands and turns arriving together leave one beat armed', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await Promise.all([cmd($, '5'), $.turn.complete(turn), cmd($, '5'), call($, 'state')])
+  await clock.advance(5 * M)
+  expect(forks).toEqual([5 * M])
+  await clock.advance(5 * M)
+  expect(forks).toEqual([5 * M, 10 * M])
+})
+
+test('after a compaction between turns, beats wait for the next turn', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await $.session.compact({ messages: [said('user', 'hi'), said('assistant', 'ok')] } as never) // the transcript, which a session supplies
+  expect(logs.at(-1)).toBe('beats wait for your next turn: compaction replaced the conversation')
+  expect((await stateNow($)).session.paused).toBe('compaction replaced the conversation')
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+})
+
+const BAND = (surface: 'terminal' | 'desktop') => ({
+  plugin: 'cachebeat', surface, component: 'AbovePrompt',
+  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+}) as never
+
+test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
+  const { clock, logs, tails } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false, showTokens: false } })
+  const band = async () => (await draw($, BAND('desktop'))).join('').replace('\u00a0', ' ') // the space after the heart can't collapse
+  expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  expect(await draw($, BAND('desktop'))).toEqual(['♡ next beat in 50m']) // one glyph: one run of text, its space kept
+  await draw($, { ...HINT, surface: 'desktop' } as never)
+  expect(tails.at(-1)).toBe(undefined) // the desktop draws no tail: nothing is added there
+  await clock.advance(IDLE)
+  expect(logs.some(l => l.startsWith('♥ cache renewed'))).toBe(false)
+  expect(await band()).toBe('♥ cache kept warm ×1 · next in 50m')
+  await $.classic.PostModelSwitch(SWITCH)
+  expect(await band()).toBe('♥ cache kept warm ×1 · waits for your next turn')
+})
+
+test('the status line\'s heart beats as one glyph by default, and its setting takes any animation or none', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await draw($, HINT) // the hint row starts the heart's clock
+  const lead = async () => (await draw($, row('r1'))).filter(t => t !== 'engine').join('')
+  const seen = new Set<string>()
+  for (let i = 0; i < BEAT.length; i++) {
+    seen.add((await lead()).split(' ')[0]!)
+    await clock.advance(TICK)
+  }
+  expect(seen).toEqual(new Set(['♡', '♥'])) // one glyph, never wider
+  expect(normalize({ statusHeart: 'nope' }).statusHeart).toBe('beat')
+  // a wide animation on the desktop takes a cell per character, as the terminal's grid has it, with a
+  // cell's margin before the words
+  await set($, { settings: { statusHeart: 'classic' } })
+  const texts = await draw($, BAND('desktop'))
+  expect(texts.length).toBe(6) // Classic's five cells, then the words
+  expect(texts.slice(0, 5).every(t => glyphs(t).length === 1)).toBe(true)
+  expect(texts[5]).toBe('next beat in 50m') // a cell's margin before it, not a space
+  expect(normalize({ statusHeart: 'ecg' }).statusHeart).toBe('ecg')
+})
+
+test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { settings: { interval: 30 } })
+  expect(await set($, { settings: { interval: 'auto', onModelSwitch: 'warm' } })).toMatchObject({
+    changed: ['settings.interval', 'settings.onModelSwitch'], session: { intervalMinutes: 50, cacheTtl: '1h' },
+  })
+  expect([stored(store).interval, stored(store).onModelSwitch]).toEqual(['auto', 'warm'])
+  expect((await call($, 'set', { settings: { onModelSwitch: 'later' } })).deny)
+    .toBe('nothing changed: settings.onModelSwitch takes wait, warm, or null, not "later"')
+  expect((await call($, 'set', { settings: { interval: 0 } })).deny).toBe('nothing changed: settings.interval takes auto, 1–55 minutes, or null, not 0')
+  expect((await stateNow($)).session.intervalFrom).toBe('auto')
+  await set($, { settings: { interval: 30 } })
+  expect((await stateNow($)).session.intervalFrom).toBe('default')
+})
+
+test('on a proportional font a heart\'s slot is half again a cell, and line characters overlap into one line', () => {
+  expect(slotWidths(variant('wave'))).toEqual([1.5, 1.5, 1.5, 1.5, 1.5])
+  expect(slotWidths(variant('charge')).slice(0, 4)).toEqual([1.5, 0.6, 0.6, 1.5]) // its blast's hearts sit among the lines
+  expect([slotText('━', 1.5), slotText('━', 0.6), slotText('♥', 1.5)]).toEqual(['━━━', '━', '♥']) // a line spans its slot
+  expect(slotWidths(variant('beam')).slice(0, 5)).toEqual([0.6, 0.6, 0.6, 0.6, 0.6]) // lines alone: they touch
+  expect(slotWidths(variant('classic'))[0]).toBe(1.5)
+  expect(slotWidths(variant('ecg'))[1]).toBe(0.6) // a line character
+  expect(slotWidths(variant('ecg')).at(-1)).toBe(1.5) // the heart at its end
+  for (const x of VARIANTS) expect(slotWidths(x).length).toBe(cells(x.loop[0]!))
+})
+
+test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and a tab opens when pressed', async ($: Engine, on: On) => {
+  const { logs } = await setup($, on)
+  // where cachebeat itself tries to put the focus: the kit has none to move, so each try logs why
+  const moved = () => logs.filter(l => l.startsWith('focus ')).map(l => l.split(':')[0]!.slice(6))
+  await cmd($, 'settings')
+  const ui = await $.ui.mount({ ...SETTINGS_PANE, surface: 'desktop' } as never)
+  expect(await move($, 'tab:heart')).toEqual({})
+  expect(await ui.find({ key: 'row:variant' })).toBe(undefined) // focus alone doesn't open the tab
+  expect(await move($, 'row:interval')).toEqual({}) // Tab crosses from the tabs into the settings
+  const before = moved().length // the pane opening landed it on the tabs
+  await ui.press({ key: 'tab:heart' })
+  expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  expect(moved().slice(before)).toEqual([]) // the focus stays where the person put it
+  await ui.press({ key: 'row:variant' }) // a list of choices opens: the focus lands in it
+  expect(moved().slice(before)).toEqual(['opt'])
+  await ui.press({ key: 'opt:1' }) // picked: back on the tab, the focus left alone
+  expect(moved().slice(before)).toEqual(['opt'])
+  expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-5 tabs · esc closes')).toBe(true)
+  await ui.unmount()
+})
+
+test('switched to another model and back while idle, beats go on from the cache still warm', async ($: Engine, on: On) => {
+  const { clock, forks, logs, switchTo } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe('the model changed')
+  switchTo(OPUS)
+  await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
+  await clock.advance(2000)
+  expect(logs.at(-1)).toBe('beats go on: back on the model the cache was warmed on')
+  expect((await stateNow($)).session.paused).toBe(null)
+  await clock.advance(IDLE)
+  expect(forks).toEqual([IDLE]) // counted from the turn, which warmed it
+})
+
+test('a beat by hand works while beating is off, after a turn', async ($: Engine, on: On) => {
+  const { forks } = await setup($, on)
+  await $.turn.complete(turn)
+  expect(await cmd($, 'now')).toBe('♥ cache renewed (90,000 read, 0 written)')
+  expect(forks.length).toBe(1)
+  expect(await cmd($, '')).toBe('off') // and it stays off
+})
+
+test('a refusal in the footer goes once the person moves on', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:interval' })
+  await ui.input({ key: 'custom', text: '90' })
+  const refusal = { type: 'Text', text: 'Beat after idle takes 1–55 minutes, not "90"' } as const
+  expect(await ui.find(refusal)).toBeDefined()
+  await ui.press({ key: 'back' })
+  expect(await ui.find(refusal)).toBe(undefined)
+  await ui.unmount()
+})
+
+test('settings saved before the parts had their own look carry over to both, a part\'s own kept', () => {
+  const old = { color: 'red', customColor: '#112233', effect: 'flow', animate: false, speed: 65, timing: 'linear', lineColor: 'cyan' }
+  const s = normalize(old)
+  expect([s.heartColor, s.heartHex, s.heartEffect, s.heartAnimate, s.heartSpeed, s.heartTiming]).toEqual(['red', '#112233', 'flow', false, 65, 'linear'])
+  expect([s.lineColor, s.lineHex, s.lineEffect, s.lineAnimate, s.lineSpeed, s.lineTiming]).toEqual(['cyan', '#112233', 'flow', false, 65, 'linear'])
+  expect('color' in s).toBe(false)
+})
+
+test('the prompt heart and the turn line each take their own color', async ($: Engine, on: On) => {
+  await setup($, on, { settings: { heartPlacement: 'line', heartColor: 'claude', lineColor: 'red', heartAnimate: false, lineAnimate: false } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  const ui = await $.ui.mount(row('r1'))
+  expect((await ui.findAll({ type: 'Text' })).find(t => t.text?.includes('next beat'))?.props).toMatchObject({ color: '#e5534b' })
+  await ui.unmount()
+  const hint = await $.ui.mount(HINT)
+  expect((await hint.findAll({ type: 'Text' })).find(t => t.props?.color)?.props).toMatchObject({ color: 'claude' })
+  await hint.unmount()
+})
+
+test('r takes the focused setting back to its default; a custom value stays in its list', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:interval' })
+  await ui.input({ key: 'custom', text: '35' })
+  expect(stored(store).interval).toBe(35)
+  await move($, 'row:interval')
+  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('back to auto') // the hotkey draws its own 'r: '
+  await ui.press({ key: 'resetRow' })
+  expect(stored(store).interval).toBe('auto')
+  expect(await ui.find({ key: 'resetRow' })).toBe(undefined) // at its default: nothing to reset
+  await ui.press({ key: 'row:interval' })
+  expect((await ui.find({ key: 'custom' }))?.props).toMatchObject({ value: '35m' }) // kept, one Enter from back
+  await ui.input({ key: 'custom', text: '35m' })
+  expect(stored(store).interval).toBe(35)
+  await ui.unmount()
 })
