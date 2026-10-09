@@ -7,8 +7,8 @@ import { DEADLINE, IDLE, RETRY, fmt } from './register'
 import { DEFAULTS, EPISODE, accept, glyphs, lookOf, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
 
-/** The tools as the model calls them: `mcp__<plugin>__<name>`. */
-const TOOL = { state: `mcp__cachebeat__${STATE.name}`, set: `mcp__cachebeat__${SET.name}` }
+/** The tools as the model calls them: `mcp__<plugin>__<name>`, spelled out as register.tsx's matchers are. */
+const TOOL = { state: 'mcp__cachebeat__state', set: 'mcp__cachebeat__set' } as const
 
 const M = 60_000
 const TICK = 80 // a frame at normal speed
@@ -48,7 +48,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   }) as never)
   let model: string = OPUS
   on('session.model', () => ({ value: model }) as never)
-  on('env.get', (_$, e) => ({ value: world.env?.[e.name] }) as never)
+  mock.env(on, world.env ?? {})
   on('settings.read', () => ({ value: world.settingsFile ?? {} }) as never)
   on('model.fork', () => {
     forks.push(clock.now())
@@ -71,7 +71,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
   const specs: unknown[] = []
-  on('tool.register', (_$, e) => (specs.push(e), { value: { tool: `mcp__cachebeat__${e.name}` } }) as never)
+  on('tool.register', (_$, e) => (specs.push(e), { value: { tool: e.name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set' } }) as never)
   on('ui.focus', () => ({})) // the engine's ring; a move the test raises lands
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
@@ -699,7 +699,8 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
 })
 
 type Args = Record<string, unknown>
-const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) => $.tool.call({ tool: TOOL[name], ...args } as never)
+const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
+  $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
 const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null, paused: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
@@ -713,6 +714,7 @@ const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unkno
 test('both tools register, every setting in the schema with the pane\'s ranges', async ($: Engine, on: On) => {
   const { specs } = await setup($, on)
   expect(specs).toEqual([STATE, SET])
+  expect([STATE.name, SET.name]).toEqual(['state', 'set']) // the names TOOL spells out
   const settings = props(props(SET.inputSchema).settings)
   expect(Object.keys(settings).sort()).toEqual(Object.keys(DEFAULTS).sort())
   expect((settings.interval as Args).anyOf).toEqual([{ enum: ['auto'] }, { type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }])
