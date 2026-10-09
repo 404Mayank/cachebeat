@@ -69,7 +69,9 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 2. Once both legs passed, `main` was fast-forwarded to the branch and pushed (`git merge --ff-only`). That kept the commits the same, so `dev`'s history lines up. GitHub marks the PR merged.
 3. CI on `main` tagged `v<version>` and made the release with generated notes.
 4. The notes were edited with `gh release edit` to put a short summary and any changed defaults on top.
-5. `main` was merged into `dev`, and the release branch deleted.
+5. `main` was merged into `dev`, and the release branch deleted. GitHub deletes it on the remote by itself once the PR shows as merged, so only the local branch is left to delete.
+
+0.7.1 went out the same way from a cloud session (branch `v0.7.1`, [PR #2](https://github.com/404Mayank/cachebeat/pull/2)). Its fix was merged into `dev` before `main`, which is fine: the branch came off `main`, so `dev` gains no file `main` lacks. Its release notes are still the generated ones.
 
 ### Where a release goes
 
