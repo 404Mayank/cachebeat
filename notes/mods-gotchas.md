@@ -36,7 +36,18 @@ Things about mods, the engine and the test kit that took time to work out. These
   - `$.model.fork`, which a beat uses, re-sends the main thread's last request with only its own tail uncached.
 
   The docs don't say which bucket `$.model.fork` falls in. The user has seen two or more beats chain at 50 minutes on a subscription, so a beat keeps the one-hour entry alive.
+- **A beat always goes to the current model.** `$.model.fork`'s doc says the prefix is "billed afresh … after `/model`". After a switch, the old model's cache is out of reach and the new one has none, so "keep warming the old model" can't exist. The option is to wait (the default) or to warm the new model, which costs the same full write the next turn would make.
 - **After `/model` or a compaction, the cached prefix a beat would warm is no use to the next turn.** Each model has its own cache, and compaction replaces the history. So beats wait for the next turn: `classic.PostModelSwitch` (setting `onModelSwitch`) and `session.compact` (main thread, not `precompute`, not skipped).
+
+## Timing and events (found live, 0.7.0)
+
+- **`schedule()` used to arm two timers.** It cancelled the old timer, awaited (the 0.7.0 cache-lifetime read made the gap longer), then armed a new one. Two overlapping calls each armed one, and the leaked timer fired through a pause. Seen live as two beats in one minute, and a beat firing after "beats wait". Now a call counter lets only the newest call arm.
+- **The test kit runs dispatches one at a time,** so it can't reproduce that race. The test "commands and turns arriving together" passes with or without the guard. The live rerun is the evidence: no minute with two beats.
+- **`/model` raises `classic.PostModelSwitch` before the engine applies the switch** (`send set_model` comes after it in the debug log), and no `turn.complete` follows. So `$.session.model()` inside that hook may still be the old model. That's why the model is checked again when the beat fires.
+- **`turn.complete` without `usage` sent no request.** Only a turn with `usage` warms the cache. cachebeat records `$.session.model()` there and compares it when a beat fires, so a model change is caught whatever events arrive.
+- **A background subagent doesn't stall beats** (item 8, tested live). Beats kept landing every minute while a background subagent ran `sleep 180`, and its finishing turn reset the count as a normal turn.
+- **The "beats wait" line after `/compact` lands above the compaction's output,** not at the end of the transcript. The engine places `$.ui.log` lines. This is cosmetic and isn't fixed.
+- **`claude --debug` writes `~/.claude/debug/<session>.txt`.** It holds every hook dispatch (`hooks module cachebeat@inline <event> settled …`) and every `$.ui.log` line. Use it to see event order instead of guessing.
 
 ## Surfaces
 
