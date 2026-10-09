@@ -315,7 +315,7 @@ async function stateOf($: EngineInterface) {
     : busy ? `${fmt(idle())} after this turn ends`
     : 'after the next turn'
   const session = {
-    enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle === null ? 'default' : 'session',
+    enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle !== null ? 'session' : cfg.interval === 'auto' ? 'auto' : 'default',
     cacheTtl: s.isCacheShort ? '5m' : ttl,
     beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small, paused: s.paused,
   }

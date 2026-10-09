@@ -675,7 +675,7 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
 type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) => $.tool.call({ tool: TOOL[name], ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'default', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null, paused: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null, paused: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
   plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
@@ -724,7 +724,7 @@ test('set answers with what changed and those settings alone; null resets a sett
   expect(stored(store)).toEqual({ ...DEFAULTS, skipSmall: true })
   // a session that follows the default moves with it, but the call changed the default alone
   expect(await set($, { settings: { interval: 30 } })).toEqual({
-    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30 }, settings: { interval: 30 },
+    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30, intervalFrom: 'default' }, settings: { interval: 30 },
   })
 })
 
@@ -751,11 +751,11 @@ test('a call with any bad value is refused whole, saying what each takes', async
   const { store } = await setup($, on)
   const deny = async (args: Args) => (await call($, 'set', args)).deny
   expect(await deny({ session: { intervalMinutes: 90 } })).toBe('nothing changed: session.intervalMinutes takes 1–55 minutes or null, not 90')
-  expect(await deny({ settings: { variant: 'nope' } })).toStartWith('nothing changed: settings.variant takes one of classic, pulse,')
+  expect(await deny({ settings: { variant: 'nope' } })).toStartWith('nothing changed: settings.variant takes classic, pulse,')
   expect(await deny({ settings: { skipSmallTokens: 5 } })).toBe('nothing changed: settings.skipSmallTokens takes 1000–1000000 tokens or null, not 5')
   expect(await deny({ settings: { bogus: 1 }, session: 'on' })).toBe('nothing changed: session is an object, not "on"; settings has no bogus')
   expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, timing: 'fast' } }))
-    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.timing takes one of linear, lubdub or null, not "fast"')
+    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.timing takes linear, lubdub, or null, not "fast"')
   expect(store.has('settings')).toBe(false)
   expect((await stateNow($)).session).toEqual(FRESH)
 })
@@ -906,5 +906,9 @@ test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engin
   })
   expect([stored(store).interval, stored(store).onModelSwitch]).toEqual(['auto', 'keep'])
   expect((await call($, 'set', { settings: { onModelSwitch: 'later' } })).deny)
-    .toBe('nothing changed: settings.onModelSwitch takes one of wait, keep or null, not "later"')
+    .toBe('nothing changed: settings.onModelSwitch takes wait, keep, or null, not "later"')
+  expect((await call($, 'set', { settings: { interval: 0 } })).deny).toBe('nothing changed: settings.interval takes auto, 1–55 minutes, or null, not 0')
+  expect((await stateNow($)).session.intervalFrom).toBe('auto')
+  await set($, { settings: { interval: 30 } })
+  expect((await stateNow($)).session.intervalFrom).toBe('default')
 })

@@ -54,15 +54,18 @@ function field(key: keyof BeatSettings): Record<string, unknown> {
   return { anyOf: [...kinds(key), { type: 'null' }], description: r ? `${ABOUT[key]} (${range(r)})` : ABOUT[key] }
 }
 
-/** What a setting takes, in words, for a refusal. */
-function takes(key: keyof BeatSettings) {
-  if (key === 'customColor') return 'a hex color, #rrggbb'
+/** What a setting takes, each choice in words, for a refusal. */
+function takes(key: keyof BeatSettings): string[] {
+  if (key === 'customColor') return ['a hex color (#rrggbb)']
   const { row } = rowOf(key)!
-  if (typeof row.values[0] === 'boolean') return 'true or false'
-  if (!row.custom) return `one of ${row.values.join(', ')}`
-  const named = names(row.values)
-  return named.length ? `${named.join(', ')}, or ${range(row.custom.parse)}` : range(row.custom.parse)
+  if (typeof row.values[0] === 'boolean') return ['true', 'false']
+  if (!row.custom) return row.values.map(String)
+  return [...names(row.values), range(row.custom.parse)]
 }
+
+/** `a, b, or c`; `a or b`. */
+const either = (choices: string[]) =>
+  choices.length < 3 ? choices.join(' or ') : `${choices.slice(0, -1).join(', ')}, or ${choices.at(-1)}`
 
 const object = (properties: Record<string, unknown>) => ({ type: 'object', properties, additionalProperties: false })
 
@@ -70,7 +73,7 @@ export const STATE: ToolSpec = {
   name: 'state',
   description: [
     "cachebeat's state in this session and every setting with its value.",
-    "`intervalFrom` is `session` when this session has its own interval, `default` when it follows settings.interval. `skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum). `lastBeatReadTokens` is how much the last beat read from the cache. `cacheTtl` is how long this session's cache lives, `1h` or `5m`, which an `auto` interval beats under. `paused`, when set, says why beats wait for the user's next turn (a model switch, a compaction). `defaults` has the default of each setting that differs from it.",
+    "`intervalFrom` is `session` when this session has its own interval, `default` when it follows a settings.interval in minutes, and `auto` when it follows an auto one, which comes to 50 or 4 by the cache's lifetime. `skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum). `lastBeatReadTokens` is how much the last beat read from the cache. `cacheTtl` is how long this session's cache lives, `1h` or `5m`; an auto interval beats within it. `paused`, when set, says why beats wait for the user's next turn (a model switch, a compaction). `defaults` has the default of each setting that differs from it.",
   ].join('\n\n'),
   inputSchema: object({}),
 }
@@ -129,7 +132,7 @@ export function parseSet(input: { session?: unknown; settings?: unknown }): SetC
     }
     const key = k as keyof BeatSettings
     const value = v === null ? DEFAULTS[key] : accept(key, v)
-    if (value === undefined) bad.push(`settings.${key} takes ${takes(key)} or null, not ${said(v)}`)
+    if (value === undefined) bad.push(`settings.${key} takes ${either([...takes(key), 'null'])}, not ${said(v)}`)
     else change.patch = { ...change.patch, [key]: value }
   }
   // an interval of its own is asked for to beat at, as `/cachebeat <minutes>` takes it
