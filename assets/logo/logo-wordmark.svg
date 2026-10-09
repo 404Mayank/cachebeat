@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="116 156 1434 488" width="560" height="191" role="img" aria-label="cachebeat">
-  <!-- cachebeat: three cache layers; the top one holds the prompt, and the layer below it turns into a heartbeat that ends in a heart. Built by assets/logo/src/build.py on the dev branch. Wordmark: Lexend (SIL Open Font License 1.1), as outlines. -->
+  <!-- cachebeat: three cache layers; the top one holds the prompt, and the layer below it turns into a heartbeat that ends in a heart. Wordmark: Lexend (SIL Open Font License 1.1), as outlines. -->
 <defs>
     <linearGradient id="cbw-card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1A1B1F"/><stop offset="1" stop-color="#0D0E11"/></linearGradient>
     <linearGradient id="cbw-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset=".5" stop-color="#fff" stop-opacity=".07"/><stop offset="1" stop-color="#fff" stop-opacity=".05"/></linearGradient>

@@ -9,17 +9,20 @@ This is the `dev` branch: `main` plus what the plugin doesn't ship.
 | | `main` | `dev` |
 | --- | --- | --- |
 | What it is | The plugin, exactly as users get it | `main` plus the tools and notes behind it |
-| Holds | `.claude-plugin/`, `hooks/`, `types/`, `README.md`, `LICENSE`, CI, and the images the README and manifest show (`assets/demo.gif`, `assets/logo/*.svg`/`.png`) | Everything on `main`, plus `assets/demo.py` and `assets/demo.tape` (the demo recording), `assets/logo/src/` (the logo build), and `notes/` |
-| Who reads it | Users, the marketplace, the plugin directory | Us |
+| Holds | `.claude-plugin/`, `hooks/`, `types/`, `README.md`, `LICENSE`, CI, and the images the README and manifest show (`assets/demo.gif`, `assets/logo/*.svg`/`.png`) | Everything on `main`, plus `CLAUDE.md`, `notes/`, `assets/demo.py` and `assets/demo.tape` (the demo recording), and `assets/logo/src/` with `assets/logo/README.md` (the logo build) |
+| Who reads it | Users and their agents, the marketplace, the plugin directory | Us |
 
 The plugin folder is the repo root, so anything on `main` ships to every user and is read by the directory's validation. If a file isn't needed to run, show or describe the plugin, it goes on `dev`. That includes scripts that name images or fonts, which the directory holds for review.
+
+Every README on `main` is for users and their agents: what cachebeat does, how to use it, what it sends and costs. Justifications, design notes, contributor workflow, build steps and gotchas go here in `notes/`. So do comments in shipped files that name dev-only files.
 
 ### Day to day
 
 - **Plugin changes** (code, tests, README, manifest) are made on `main`, or on a short branch fast-forwarded into it.
 - **Notes, and changes to the demo or logo scripts,** are made on `dev`.
 - **After `main` moves,** bring `dev` up to date: `git switch dev && git merge main`. The scripts were added on `dev` after `main` dropped them, so the merge leaves them alone.
-- **`assets/logo/README.md` differs between the two branches:** a short version on `main` that points here, and the full rebuilding guide on `dev`. A merge that touches it conflicts. Keep `dev`'s version (`git checkout --ours assets/logo/README.md`) and carry any real change over by hand.
+- **Keep a file on one branch or the same on both, never in two versions.** A file that differs between the branches (as `assets/logo/README.md` once did) conflicts on every merge that touches it.
+- **A dev-only file that `main` deleted** is now only on `dev`. Merges leave it alone, because `main`'s deletion is already merged in.
 - **Never merge `dev` into `main`.** That would ship the scripts and these notes. If something done on `dev` belongs in the plugin, such as a new `demo.gif` or regenerated logo files, cherry-pick it or check out just those files onto `main`:
 
   ```sh
@@ -61,6 +64,7 @@ The plugin folder is the repo root, so anything on `main` ships to every user an
 
 | File | What's in it |
 | --- | --- |
+| [contributing.md](contributing.md) | Working on cachebeat: loading it, the checks, and where things are |
 | [claude-tools.md](claude-tools.md) | The two tools Claude calls: how they're built, and why each choice was made |
 | [mods-gotchas.md](mods-gotchas.md) | Things about mods, the engine and the test kit that took time to find out |
 | [directory.md](directory.md) | Submitting to Anthropic's plugin directory: what its validation flagged, and what was done |
