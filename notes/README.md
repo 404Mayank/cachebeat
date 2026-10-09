@@ -53,6 +53,15 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 4. CI tags `v<version>` and creates the GitHub release with generated notes.
 5. Bring `dev` up to date (`git merge main`) and push it.
 
+### Changing a default, or a setting's name
+
+- **The store keeps only what differs from the defaults** (`changed()` in `settings.ts`). So on an update:
+  - someone who never touched a setting gets its new default
+  - someone who picked another value keeps theirs
+- **Someone who explicitly picked the old default had nothing saved.** They move to the new default too, and nothing in the store tells them apart. Avoiding that would take versioning the store. 0.7.0 moved lub-dub timing, tokens kept, and stopping at 90% usage this way.
+- **Renamed or removed keys:** `normalize()` drops keys it doesn't know and replaces invalid values with the defaults, so an old store never breaks a new version. A renamed key loses its value unless `normalize()` carries it across.
+- **Say a changed default in the release notes,** especially one that changes behavior, like stopping at 90% instead of 100%.
+
 ### Where a release goes
 
 - **GitHub:** the `v<version>` tag and release, created by CI.
