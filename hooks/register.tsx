@@ -473,8 +473,6 @@ async function answerSet($: EngineInterface, before: Before, patch: Partial<Beat
 
 const json = (x: unknown) => JSON.stringify(x, null, 2)
 
-const PANE_OPEN = { id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, holdToasts: true, rows: 24 } as const
-
 async function openSettings($: EngineInterface) {
   await syncSettings($)
   const stored = await $.store.get('customs')
@@ -483,7 +481,7 @@ async function openSettings($: EngineInterface) {
   notice = ''
   isResetArmed = false
   await update($, pageAtom, () => ({ tab: 'beating', picker: null }))
-  await $.ui.open(PANE_OPEN)
+  await $.ui.open({ id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, holdToasts: true, rows: 24 })
   await focusOn($, 'tab:beating', true)
 }
 
@@ -885,7 +883,7 @@ export const register: Register = on => {
     const isInTab = paneSurface === 'terminal' && !focus.startsWith('tab:')
     if (e.origin.kind === 'person' && (page.picker || isInTab)) {
       // Esc has handed the keys back to the prompt: open asks for them again
-      await $.ui.open(PANE_OPEN)
+      await $.ui.open({ id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, holdToasts: true, rows: 24 })
       await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`, true)
       return { value: undefined }
     }
