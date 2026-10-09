@@ -502,7 +502,10 @@ async function focusOn($: EngineInterface, key: string, isLanding = false) {
   } catch (err) {
     deny = String(err)
   }
-  if (deny) return $.ui.log(`focus ${key}: ${deny}`, { to: 'debug' })
+  if (deny) {
+    $.ui.log(`focus ${key}: ${deny}`, { to: 'debug' })
+    return
+  }
   await update($, focusAtom, () => key)
   let stuck: string | undefined
   try {
