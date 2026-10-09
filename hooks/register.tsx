@@ -69,7 +69,8 @@ async function cacheTtl($: EngineInterface): Promise<Ttl> {
   const chosen = (v: unknown) => (v === '5m' || v === '1h' ? v : undefined)
   const fromEnv = chosen(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
   if (fromEnv) return fromEnv
-  const fromSettings = chosen((await $.settings.read()).promptCacheTtl)
+  const merged = await $.settings.read()
+  const fromSettings = chosen(merged.promptCacheTtl)
   if (fromSettings) return fromSettings
   if (isSet(await $.env.get('ENABLE_PROMPT_CACHING_1H'))) return '1h'
   // rate-limit windows are reported on a subscription alone; one used up means usage credits are paying
@@ -94,7 +95,8 @@ async function keepCustoms($: EngineInterface, patch: Partial<BeatSettings>) {
     return row?.custom && !row.values.includes(v as Value)
   })
   if (!kept.length) return
-  customs = { ...((await $.store.get('customs')) as typeof customs | undefined), ...Object.fromEntries(kept) }
+  const stored = await $.store.get('customs')
+  customs = { ...(stored as typeof customs | undefined), ...Object.fromEntries(kept) }
   await $.store.set('customs', customs)
 }
 
@@ -138,7 +140,12 @@ async function refreshLine($: EngineInterface) {
   if (s.enabled && s.small) text = `♡ beats skip · ${s.small}`
   else if (s.enabled && s.paused) text = s.beats > 0 ? `${statusText(cfg, s.beats, s.lastRead, null)} · waits for your next turn` : '♡ beats wait for your next turn'
   else if (s.enabled || s.beats > 0) {
-    const next = s.enabled && s.nextAt !== null ? fmt(s.nextAt - (await $.clock.now())) : null
+    let next: string | null = null
+    const at = s.nextAt
+    if (s.enabled && at !== null) {
+      const now = await $.clock.now()
+      next = fmt(at - now)
+    }
     text = statusText(cfg, s.beats, s.lastRead, next)
   }
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
@@ -303,7 +310,9 @@ const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have 
 
 /** Beats paused for a model switch go on once the model is back to the one the cache was warmed on. */
 async function resumeIfWarmed($: EngineInterface) {
-  if (s.paused !== MODEL_CHANGED || busy || (await $.session.model()) !== s.warmModel) return
+  if (s.paused !== MODEL_CHANGED || busy) return
+  const model = await $.session.model()
+  if (model !== s.warmModel) return
   s.paused = null
   if (s.enabled) $.ui.log('beats go on: back on the model the cache was warmed on')
   await schedule($)
@@ -342,7 +351,8 @@ async function beat($: EngineInterface): Promise<string> {
   }
 
   beating = true
-  const r = await $.model.fork({ prompt: 'Reply with a single period.' }).finally(() => (beating = false))
+  const forking = $.model.fork({ prompt: 'Reply with a single period.' })
+  const r = await forking.finally(() => (beating = false))
   if (!r.isAnswered && r.reason !== 'empty-reply') {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
@@ -383,10 +393,14 @@ async function beat($: EngineInterface): Promise<string> {
 }
 
 /** A beat its timer brought: none once beating was turned off, whatever timer was still set. */
-const scheduledBeat = ($: EngineInterface) => (s.enabled ? beat($) : Promise.resolve('off'))
+function scheduledBeat($: EngineInterface) {
+  return s.enabled ? beat($) : Promise.resolve('off')
+}
 
 /** A beat asked for by hand: never one that would switch cachebeat off for having nothing to fork. */
-const beatNow = ($: EngineInterface) => (s.lastReal === null ? Promise.resolve('nothing to keep warm until this session has a turn') : beat($))
+function beatNow($: EngineInterface) {
+  return s.lastReal === null ? Promise.resolve('nothing to keep warm until this session has a turn') : beat($)
+}
 
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
@@ -409,7 +423,12 @@ async function turnOn($: EngineInterface, minutes: number | undefined) {
     return { text: `on, ${every()}; starts after this turn` }
   }
   if (wasOn && idle() === before) {
-    const ms = s.nextAt === null ? undefined : Math.max(0, s.nextAt - (await $.clock.now()))
+    let ms: number | undefined
+    const at = s.nextAt
+    if (at !== null) {
+      const now = await $.clock.now()
+      ms = Math.max(0, at - now)
+    }
     return { text: `already on, ${every()} · ${when(ms)}` }
   }
   const ms = await schedule($)
@@ -458,7 +477,8 @@ const PANE_OPEN = { id: PANE, title: 'cachebeat', focus: true, closeOnEscape: tr
 
 async function openSettings($: EngineInterface) {
   await syncSettings($)
-  customs = ((await $.store.get('customs')) as typeof customs | undefined) ?? {}
+  const stored = await $.store.get('customs')
+  customs = (stored as typeof customs | undefined) ?? {}
   ttl = await cacheTtl($)
   notice = ''
   isResetArmed = false
@@ -575,7 +595,12 @@ export const register: Register = on => {
     if (words[0] === 'on' || minutes) return turnOn($, minutes === undefined ? undefined : Number(minutes))
     if (words.length) return { text: USAGE }
     if (!s.enabled) return { text: 'off' }
-    const ms = s.nextAt === null ? undefined : Math.max(0, s.nextAt - (await $.clock.now()))
+    let ms: number | undefined
+    const at = s.nextAt
+    if (at !== null) {
+      const now = await $.clock.now()
+      ms = Math.max(0, at - now)
+    }
     return { text: `on, ${every()} · ${s.beats} beats · ${when(ms)}` }
   })
 
