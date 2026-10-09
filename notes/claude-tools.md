@@ -18,6 +18,7 @@
 - **The `set` answer is `{ changed, session, settings }`:**
   - `changed` lists what the call itself changed: this session's switch and interval, and the settings in its own patch. Effects don't count: a session following the default isn't listed when the default moves.
   - It's computed from the patch, not by diffing the store before and after, so another session saving at the same moment isn't credited to this call.
+- **`state` reports `session.cacheTtl`**, the lifetime `auto` read (0.7.0), and `intervalMinutes` comes to what `auto` resolves to.
 - **`state` has `defaults`**, the default of each setting that differs from it, so an agent can check a reset on its own.
 
 ## Decisions, and why

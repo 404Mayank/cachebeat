@@ -10,6 +10,39 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **The countdown already starts from the last turn.** `schedule()` waits the interval minus the time since the cache was last read (`s.lastWarm`, set at `turn.complete` and after each beat), so `/cachebeat on` a minute after a turn says 49m. It's easy to think it counts from the command.
 - **`/cachebeat` is registered `immediate: true`,** so it answers even while a turn runs, and its `command.run` hook mustn't assume the turn's state.
 
+## The prompt cache
+
+- **How Claude Code picks the main conversation's cache lifetime** (code.claude.com/docs/en/prompt-caching, "Which TTL each request gets" and "Choose the TTL yourself"). The first match wins:
+  1. `FORCE_PROMPT_CACHING_5M=1`.
+  2. `CLAUDE_CODE_PROMPT_CACHE_TTL`.
+  3. The `promptCacheTtl` setting.
+  4. `ENABLE_PROMPT_CACHING_1H=1`.
+  5. The default: one hour on a subscription within its plan's usage, five minutes on usage credits, an API key or a cloud provider.
+
+  `cacheTtl()` in `register.tsx` reads each input:
+  - the variables through `$.env.get`
+  - the setting through `$.settings.read()`, whose `Settings` type is open, so the key is there
+  - the subscription through `$.session.usage().rateLimits`, which the types call "empty off a subscription". A window at 100% or more means usage credits.
+- **The docs name gaps the rules can't see:**
+  - a custom gateway that drops the one-hour beta header
+  - the Claude apps gateway, which has no one-hour TTL
+  - Bedrock, which varies by model
+
+  That's why, under `auto`, a beat that finds the cache gone before an hour switches the session to 4-minute beats rather than stopping. The beat that found it gone wrote it afresh.
+- **The engine knows the lifetime but doesn't hand it to mods,** except as `cache_ttl` in the `classic.PreModelSwitch` and `classic.PostModelSwitch` inputs.
+- **Three different things are called a fork:**
+  - The "forks" in the docs' five-minute bucket are forked subagents (`/subtask`, or `/fork` with agent view off). They're subagents that inherit the conversation.
+  - `/fork` with agent view on copies the session into a background session.
+  - `$.model.fork`, which a beat uses, re-sends the main thread's last request with only its own tail uncached.
+
+  The docs don't say which bucket `$.model.fork` falls in. The user has seen two or more beats chain at 50 minutes on a subscription, so a beat keeps the one-hour entry alive.
+- **After `/model` or a compaction, the cached prefix a beat would warm is no use to the next turn.** Each model has its own cache, and compaction replaces the history. So beats wait for the next turn: `classic.PostModelSwitch` (setting `onModelSwitch`) and `session.compact` (main thread, not `precompute`, not skipped).
+
+## Surfaces
+
+- **`TurnDuration`, the turn's closing row that the status line hangs under, is raised on the terminal only.** `PromptHint`, the heart's row, is raised on the terminal and desktop. So on desktop the countdown rides with the heart (`isStatusOnHint`), and a beat no longer logs its own line there.
+- **Before 0.7.0, a desktop user saw only `♥ cache renewed (…)` per beat:** the fallback log for "no closing row seen".
+
 ## Types
 
 - **`tool.call` matchers only take known tool names.** With MCP servers connected, the generated `McpToolInputs` lists only those servers' tools, so `{ tool: 'mcp__cachebeat__set' }` fails `tsc`. Declare the plugin's own tools in `types/index.d.ts` under `interface McpToolInputs`; that also types `e.session` and `e.settings`. Pinboard doesn't, and probably fails `tsc` once an MCP server is connected (a guess, not checked).
@@ -20,6 +53,10 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **Register a test's own hooks before the first `$` call.** `setup()` starts the session, so a test hook goes above `await setup($, on)`. Otherwise it throws "after the test first called $".
 - **`$.tool.register` needs a stub beneath it** (`on('tool.register', …)` in `setup`). Nothing answers it otherwise.
 - **A `classic.PreToolUse` deny reaches the test's `$.tool.call` as an errored result** (`isError: true`, the reason as `text`), not as `{ deny }`. `{ deny }` is what a plugin's own `$.tool.call` gets.
+- **Stub `env.get` and `settings.read`** in `setup()`, as the cache lifetime is read through them. `World` has `env`, `settingsFile` and `isSubscription` for that.
+- **`$.session.compact()` in a test needs the transcript passed in:** `$.session.compact({ messages: […] } as never)`. Without it, the event's `messages` isn't a list and every hook on it is skipped. A session supplies it itself.
+- **Classic events are raised through `$.classic.<Event>(fields)`,** such as `$.classic.PostModelSwitch(SWITCH)`. Each needs a stub beneath it, like `on('classic.PostModelSwitch', () => ({}))`.
+- **A `$` call left running after a test ends rejects the whole file run** ("no hooks module of that name is loaded"). A `void schedule($)` from `stop()` is one such call, so `schedule()` makes its `$` calls only on the path that arms a beat.
 - **Tool arguments arrive flat on `e`,** beside the reserved `tool`, `tool_use_id`, `consent` and `agentId`. Read `e.session` and `e.settings`; never validate the whole `e`, or every call fails on the reserved keys.
 
 ## Reviews and validation
