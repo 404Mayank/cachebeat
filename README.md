@@ -18,7 +18,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 
 ## Features
 
-- **Background beats** keep the cache warm while you're idle and stay out of the conversation
+- **Background beats** keep the cache warm while you're idle, timed to how long your cache lasts, and stay out of the conversation
 - **A live heart** under the prompt, with 19 animations to choose from
 - **A status line** under your latest turn shows the beats so far and the time until the next one
 - **A settings menu** with live previews, driven by keyboard or mouse
@@ -29,7 +29,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 ## Requirements
 
 - **Claude Code 2.1.287 or later.** Check your version with `claude --version` and update with `claude update`.
-- The terminal or the Claude desktop app. In the desktop app the status line sits above the prompt, and the settings menu opens beside the chat. Nothing is drawn in `claude -p`.
+- **Claude Code in the terminal**, which cachebeat is built for. In the Claude desktop app beating works the same, the status line sits above the prompt and the settings menu opens beside the chat, but the wider heart animations and the menu's keyboard controls are rougher there. Nothing is drawn in `claude -p`.
 
 ## Install
 
@@ -110,7 +110,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 **The heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next turn.
 
-**The status line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · next in 42m`. When you send a new message, the line moves down to the new turn.
+**The status line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · next in 42m`. Its heart beats too, with an animation of its own under **Status**. While beats wait for your next message, after `/model` or `/compact`, it says so. When you send a new message, the line moves down to the new turn. In the desktop app it stays above the prompt instead.
 
 ```
 ✻ Cogitated for 12s · done 3:09 PM
