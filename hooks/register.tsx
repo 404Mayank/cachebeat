@@ -410,11 +410,16 @@ async function openSettings($: EngineInterface) {
   isResetArmed = false
   await update($, pageAtom, () => ({ tab: 'beating', picker: null }))
   await $.ui.open(PANE_OPEN)
-  await focusOn($, 'tab:beating')
+  await focusOn($, 'tab:beating', true)
 }
 
-/** Moves the pane's focus; a move this plugin makes skips its own ui.focus hook, so it notes it here. */
-async function focusOn($: EngineInterface, key: string) {
+/**
+ * Moves the pane's focus; a move this plugin makes skips its own ui.focus hook, so it notes it here.
+ * A desktop's Tab and clicks move its own focus, and a move made for it after a press lands where the
+ * person didn't look: there it moves only to land somewhere new, the pane or a list of choices opening.
+ */
+async function focusOn($: EngineInterface, key: string, isLanding = false) {
+  if (paneSurface !== 'terminal' && !isLanding) return
   // a focus that cannot move leaves the page as it is (`claude plugin test` has no focus to move)
   let deny: string | undefined
   try {
@@ -440,11 +445,11 @@ function stopPaneTicker() {
   paneTicker = undefined
 }
 
-/** Shows a page of the pane and puts the focus on `key` there. */
-async function goTo($: EngineInterface, page: PanePage, key: string) {
+/** Shows a page of the pane and puts the focus on `key` there; `isLanding` as `focusOn` takes it. */
+async function goTo($: EngineInterface, page: PanePage, key: string, isLanding = false) {
   isResetArmed = false
   await update($, pageAtom, () => page)
-  await focusOn($, key)
+  await focusOn($, key, isLanding)
 }
 
 /** The first element of a tab's settings, where going into it lands. */
@@ -726,7 +731,7 @@ export const register: Register = on => {
         // the focus starts on the value set: one of the choices, or the custom field
         const { row } = rowOf(key)!
         const i = row.values.indexOf(c[key])
-        void goTo($, { ...page, picker: key }, i >= 0 ? `opt:${i}` : row.custom ? 'custom' : 'opt:0')
+        void goTo($, { ...page, picker: key }, i >= 0 ? `opt:${i}` : row.custom ? 'custom' : 'opt:0', true)
       },
       pick: (key, value) => void setSettings($, { [key]: value }).then(() => goTo($, { ...page, picker: null }, `row:${key}`)),
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
@@ -798,7 +803,7 @@ export const register: Register = on => {
     if (e.origin.kind === 'person' && (page.picker || isInTab)) {
       // Esc has handed the keys back to the prompt: open asks for them again
       await $.ui.open(PANE_OPEN)
-      await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`)
+      await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`, true)
       return { value: undefined }
     }
     stopPaneTicker()

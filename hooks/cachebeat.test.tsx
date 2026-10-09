@@ -1002,14 +1002,23 @@ test('on a proportional font a heart\'s slot is half again a cell, and line char
 })
 
 test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and a tab opens when pressed', async ($: Engine, on: On) => {
-  await setup($, on)
+  const { logs } = await setup($, on)
+  // where cachebeat itself tries to put the focus: the kit has none to move, so each try logs why
+  const moved = () => logs.filter(l => l.startsWith('focus ')).map(l => l.split(':')[0]!.slice(6))
   await cmd($, 'settings')
   const ui = await $.ui.mount({ ...SETTINGS_PANE, surface: 'desktop' } as never)
   expect(await move($, 'tab:heart')).toEqual({})
   expect(await ui.find({ key: 'row:variant' })).toBe(undefined) // focus alone doesn't open the tab
   expect(await move($, 'row:interval')).toEqual({}) // Tab crosses from the tabs into the settings
+  const before = moved().length // the pane opening landed it on the tabs
   await ui.press({ key: 'tab:heart' })
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  expect(moved().slice(before)).toEqual([]) // the focus stays where the person put it
+  await ui.press({ key: 'row:timing' }) // a list of choices opens: the focus lands in it
+  expect(moved().slice(before)).toEqual(['opt'])
+  await ui.press({ key: 'opt:1' }) // picked: back on the tab, the focus left alone
+  expect(moved().slice(before)).toEqual(['opt'])
+  expect(await ui.find({ key: 'row:timing' })).toBeDefined()
   expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-5 tabs · esc closes')).toBe(true)
   await ui.unmount()
 })
