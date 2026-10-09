@@ -107,6 +107,8 @@ Things about mods, the engine and the test kit that took time to work out. These
 ## Reviews and validation
 
 - **`/code-review ultra` bundles tracked files only.** An untracked new file (`hooks/tools.ts`, before its first commit) shows up as "module does not exist". Commit, or at least `git add`, new files before an ultrareview.
+- **The directory's `$` rule wants each call as a statement of its own:** `$.a.b()`, `await $.a.b()`, or `const x = await $.a.b()`. Inside an `if`, or as an argument (`isSet(await $.env.get(…))`), it passed. `return $.ui.log(…)` didn't: that blocked every validation from 0.6.0 to 0.7.1.
+- **The report's location is the hook's call into the helper chain, not the bad line itself.** It named `await openSettings($)` (line 561, then 581), and the bad call was two helpers down, in `focusOn`. Calls reached earlier from other hooks passed, so look only at what that one call reaches first.
 - **`claude plugin validate` shows a matcher built from a constant as `?`** (`tool=?`, `requestId=?`). A literal resolves (`tool=mcp__cachebeat__set`). The plugin directory reads the source the same way, so its tool matchers are literals.
 - **Type-checking without a loaded session (a cloud session):** `npx -p typescript tsc -p .` needs `.claude-plugin/types/`, which the engine lays only when a session loads the plugin. Instead, point a scratch tsconfig (the options are in the header of the types file) at the `plugin-authoring` skill's `types/claude-code.d.ts`, plus `hooks` and `types`. That checks against the running build's API.
 - **Running 2.1.287 in a cloud session:** `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder ran without the install-script approval step, and its `claude plugin test` and `validate` work there.
