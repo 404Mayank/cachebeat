@@ -40,7 +40,7 @@ let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
-let isStatusOnHint = false // the surface has no closing row, so the hint row carries the countdown
+let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
 let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
 let scheduling = 0 // counts schedule() calls: one still awaiting when a newer starts leaves the timer to it
 const rowsSeen = new Set<string>()
@@ -120,13 +120,14 @@ async function refreshLine($: EngineInterface) {
     text = statusText(cfg, s.beats, s.lastRead, next)
   }
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
-  // the hint row has no room for the whole line: the countdown, or why there is none
+  // the desktop's band, beside its heart: the count, and the countdown or why there is none
   const next = s.enabled && s.nextAt !== null && cfg.showCountdown ? `next in ${fmt(s.nextAt - (await $.clock.now()))}` : ''
-  const hint = s.enabled && s.small ? 'beats skip' : next
+  const why = s.enabled && s.small ? 'beats skip' : s.paused ? 'waits for your next turn' : next
+  const hint = `${cfg.showCount ? ` ×${s.beats}` : ''}${why ? ` · ${why}` : ''}`
   if (hint !== (await read($, hintAtom))) await update($, hintAtom, () => hint)
 }
 
-/** The animation clock: runs while the heart is drawn beating (the hint row draws it). */
+/** The animation clock: runs while the heart is drawn beating (the hint row draws it, or the desktop's band). */
 function animate($: EngineInterface) {
   if (ticker) return
   const ms = frameMs(cfg)
@@ -298,7 +299,7 @@ async function beat($: EngineInterface): Promise<string> {
   s.beats++
   if (cfg.animate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
-  if (logs(cfg.onBeat) || (s.row === null && !isStatusOnHint)) $.ui.log(renewed) // else no line at all says it
+  if (logs(cfg.onBeat) || (s.row === null && !isStatusOnBand)) $.ui.log(renewed) // else no line at all says it
   if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
   await schedule($)
   return renewed
@@ -434,7 +435,7 @@ const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|global on|off|settings]'
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
   on('session.start', async ($, e, next) => {
-    isStatusOnHint = false // until the hint row is drawn, on whichever surface draws it
+    isStatusOnBand = false // until the band is drawn on a desktop
     cfg = normalize(await $.store.get('settings'))
     await update($, settingsAtom, () => cfg)
     const prev = await read($, saved)
@@ -607,18 +608,16 @@ export const register: Register = on => {
 
   // the heart and beat count. The hint row ("⏸ manual mode on · ...") takes added text only as its dim
   // tail, so the heart rides it dim, or gets its own line under that row to take color. The desktop
-  // draws no closing row for the status line, so there the countdown rides with the heart.
+  // draws nothing added to the hint row: there the band above the prompt carries it
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    const c = await read($, settingsAtom)
-    isStatusOnHint = e.surface === 'desktop' && c.statusLine !== 'off'
     const p = await read($, pulse)
-    if (e.props.isWorking || p === 'hidden') return next(e)
+    if (e.surface === 'desktop' || e.props.isWorking || p === 'hidden') return next(e)
+    const c = await read($, settingsAtom)
     if (p === 'armed' && c.animate) animate($)
     const f = await read($, frameAtom)
     const heart = heartFrame(c, p, f)
     // a space past the frame's own blank edge: the heart sits as far from the count as from the ' · ' before it
-    const status = isStatusOnHint ? await read($, hintAtom) : ''
-    const count = `${c.showCount ? ` ×${s.beats}` : ''}${status ? ` · ${status}` : ''}`
+    const count = c.showCount ? ` ×${s.beats}` : ''
     if (c.heartPlacement === 'tail') return next({ ...e, props: { ...e.props, tail: `${heart}${count}` } })
     const { Box, Text } = $.ui.resolve(e)
     const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, c, f, isLit(heart))
@@ -629,6 +628,27 @@ export const register: Register = on => {
           {paint(Text, look)}
           <Text dimColor>{count}</Text>
         </Box>
+      </Box>
+    )
+  })
+
+  // on the desktop, which has neither the hint row's tail nor the closing row: the heart in color, its
+  // count and the countdown, in one line above the prompt while beating is on
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface !== 'desktop') return next(e)
+    const c = await read($, settingsAtom)
+    isStatusOnBand = c.statusLine !== 'off'
+    const p = await read($, pulse)
+    if (!isStatusOnBand || e.props.hasSurvey || e.props.isWorking || p === 'hidden') return next(e)
+    if (p === 'armed' && c.animate) animate($)
+    const f = await read($, frameAtom)
+    const heart = heartFrame(c, p, f)
+    const { Box, Text } = $.ui.resolve(e)
+    const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, c, f, isLit(heart))
+    return (
+      <Box>
+        {paint(Text, look)}
+        <Text dimColor>{await read($, hintAtom)}</Text>
       </Box>
     )
   })

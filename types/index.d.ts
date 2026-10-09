@@ -66,7 +66,7 @@ declare module 'claude-code' {
       saved: Saved | null
       frame: number
       line: string
-      hint: string // the countdown, on a surface with no closing row to put the status line under
+      hint: string // the count and countdown, for the desktop's band above the prompt
       settings: BeatSettings
       tick: number // the settings pane's preview clock
       page: PanePage

@@ -60,6 +60,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>
   })
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>engine</Text>
+  })
   on('ui.render', { component: 'TurnDuration' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>
@@ -928,17 +932,24 @@ test('after a compaction between turns, beats wait for the next turn', async ($:
   expect(forks.length).toBe(0)
 })
 
-test('on the desktop the countdown rides with the heart, and a beat logs no line for it', async ($: Engine, on: On) => {
+const BAND = (surface: 'terminal' | 'desktop') => ({
+  plugin: 'cachebeat', surface, component: 'AbovePrompt',
+  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+}) as never
+
+test('on the desktop the band above the prompt carries the heart and the countdown, and a beat logs no line', async ($: Engine, on: On) => {
   const { clock, logs, tails } = await setup($, on, { settings: { animate: false } })
+  expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
   await cmd($, 'on')
   await $.turn.complete(turn)
-  const desktop = { ...HINT, surface: 'desktop' } as const
-  await draw($, desktop)
-  expect(tails.at(-1)).toEndWith(' ×0 · next in 50m')
+  expect((await draw($, BAND('desktop'))).at(-1)).toBe(' ×0 · next in 50m')
+  await draw($, { ...HINT, surface: 'desktop' } as never)
+  expect(tails.at(-1)).toBe(undefined) // the desktop draws no tail: nothing is added there
   await clock.advance(IDLE)
   expect(logs.some(l => l.startsWith('♥ cache renewed'))).toBe(false)
-  await draw($, desktop)
-  expect(tails.at(-1)).toEndWith(' ×1 · next in 50m')
+  expect((await draw($, BAND('desktop'))).at(-1)).toBe(' ×1 · next in 50m')
+  await $.classic.PostModelSwitch(SWITCH)
+  expect((await draw($, BAND('desktop'))).at(-1)).toBe(' ×1 · waits for your next turn')
 })
 
 test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engine, on: On) => {
