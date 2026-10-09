@@ -1,5 +1,5 @@
 import type { BeatSettings, Ttl } from '../types'
-import { VARIANTS } from './animations'
+import { STATUS_HEARTS, VARIANTS } from './animations'
 
 export const DEFAULTS: BeatSettings = {
   defaultOn: false,
@@ -21,6 +21,7 @@ export const DEFAULTS: BeatSettings = {
   statusLine: 'spaced',
   showCountdown: true,
   showTokens: false,
+  statusHeart: 'beat',
   onBeat: 'none',
   onStop: 'log',
   onModelSwitch: 'wait',
@@ -44,6 +45,7 @@ export function normalize(stored: unknown): BeatSettings {
   }
   const out = s as BeatSettings
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
+  if (!STATUS_HEARTS.includes(out.statusHeart)) out.statusHeart = DEFAULTS.statusHeart
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
   if (typeof out.speed === 'number' && parseFrameMs(`${out.speed}`) === undefined) out.speed = DEFAULTS.speed
   if (out.interval !== 'auto' && (typeof out.interval !== 'number' || parseMinutes(`${out.interval}`) === undefined)) out.interval = DEFAULTS.interval
@@ -261,6 +263,11 @@ export const TABS: readonly Tab[] = [
       },
       { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff },
       { key: 'showTokens', label: 'Tokens kept', values: [false, true], show: s => s.statusLine !== 'off', fmt: onOff },
+      {
+        key: 'statusHeart', label: 'Heart', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.animate,
+        fmt: v => (v === 'beat' ? 'one heart, beating' : v === 'off' ? 'still' : VARIANTS.find(x => x.id === v)?.name ?? `${v}`),
+        note: 'One heart beating keeps the line still; the wider animations push the words after them as they play.',
+      },
     ],
   },
   {

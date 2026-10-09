@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Alert, BeatSettings, PanePage, Pulse, Saved, Ttl } from '../types'
-import { loopIndex, variant } from './animations'
+import { cells, loopIndex, statusFrame, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
 import { AUTO, DEFAULTS, TABS, changed, frameMs, isLit, normalize, rowOf, spans, tokens } from './settings'
+import type { Span } from './settings'
 import { SET, STATE, parseSet, summary } from './tools'
 
 const MIN = 60_000
@@ -16,7 +17,6 @@ const pulse = atom({ plugin: 'cachebeat', key: 'pulse' } as const, 'hidden' as P
 const saved = atom({ plugin: 'cachebeat', key: 'saved' } as const, null as Saved | null)
 const frameAtom = atom({ plugin: 'cachebeat', key: 'frame' } as const, 0)
 const lineAtom = atom({ plugin: 'cachebeat', key: 'line' } as const, '')
-const hintAtom = atom({ plugin: 'cachebeat', key: 'hint' } as const, '')
 const settingsAtom = atom({ plugin: 'cachebeat', key: 'settings' } as const, DEFAULTS)
 const tickAtom = atom({ plugin: 'cachebeat', key: 'tick' } as const, 0)
 const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'beating', picker: null } as PanePage)
@@ -115,16 +115,12 @@ function restartClocks($: EngineInterface) {
 async function refreshLine($: EngineInterface) {
   let text = ''
   if (s.enabled && s.small) text = `♡ beats skip · ${s.small}`
+  else if (s.enabled && s.paused) text = s.beats > 0 ? `${statusText(cfg, s.beats, s.lastRead, null)} · waits for your next turn` : '♡ beats wait for your next turn'
   else if (s.enabled || s.beats > 0) {
     const next = s.enabled && s.nextAt !== null ? fmt(s.nextAt - (await $.clock.now())) : null
     text = statusText(cfg, s.beats, s.lastRead, next)
   }
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
-  // the desktop's band, beside its heart: the count, and the countdown or why there is none
-  const next = s.enabled && s.nextAt !== null && cfg.showCountdown ? `next in ${fmt(s.nextAt - (await $.clock.now()))}` : ''
-  const why = s.enabled && s.small ? 'beats skip' : s.paused ? 'waits for your next turn' : next
-  const hint = `${cfg.showCount ? ` ×${s.beats}` : ''}${why ? ` · ${why}` : ''}`
-  if (hint !== (await read($, hintAtom))) await update($, hintAtom, () => hint)
 }
 
 /** The animation clock: runs while the heart is drawn beating (the hint row draws it, or the desktop's band). */
@@ -146,6 +142,28 @@ function heartFrame(c: BeatSettings, p: Pulse, f: number) {
   if (!c.animate) return x.loop[0]!
   if (blast >= 0) return x.blast[blast]!
   return p === 'armed' ? x.loop[loopIndex(x, f, c.timing)]! : x.loop[0]!
+}
+
+/**
+ * The status line as drawn, in its effect, its leading heart playing the status line's own animation:
+ * the heart's spans, then the rest's, and the cells the heart takes at its widest.
+ */
+function liveLine(line: string, c: BeatSettings, p: Pulse, f: number): { head: Span[]; rest: Span[]; width: number } {
+  const isPlaying = c.animate && p === 'armed' && c.statusHeart !== 'off'
+  const lead = /^[♥♡]/.test(line) ? line[0]! : ''
+  const heart = lead && isPlaying ? statusFrame(c.statusHeart, f, c.timing, isLit(heartFrame(c, p, f))) : lead
+  const all = spans(heart + line.slice(lead.length), c.animate && c.effect !== 'steady' ? c : { ...c, effect: 'steady' }, f, isLit(heart || heartFrame(c, p, f)))
+  // the spans split where the heart ends, so it can sit in a box of its own
+  const head: Span[] = []
+  const rest: Span[] = []
+  let left = heart.length
+  for (const sp of all) {
+    const take = Math.min(left, sp.text.length)
+    if (take > 0) head.push({ ...sp, text: sp.text.slice(0, take) })
+    if (take < sp.text.length) rest.push({ ...sp, text: sp.text.slice(take) })
+    left -= take
+  }
+  return { head, rest, width: cells(heart) }
 }
 
 function setPulse($: EngineInterface, p: Pulse) {
@@ -593,11 +611,18 @@ export const register: Register = on => {
     const line = isLive ? await read($, lineAtom) : '' // one line, under the latest turn alone
     const c = await read($, settingsAtom)
     if (!line || c.statusLine === 'off') return next(e)
-    const moving = isLive && c.animate && c.effect !== 'steady'
+    const moving = c.animate && (c.effect !== 'steady' || c.statusHeart !== 'off')
     const f = moving ? await read($, frameAtom) : 0
     const p = moving ? await read($, pulse) : 'hidden'
     const { Box, Text } = $.ui.resolve(e)
-    const painted = paint(Text, spans(line, moving ? c : { ...c, effect: 'steady' }, f, isLit(heartFrame(c, p, f))))
+    const { head, rest } = liveLine(line, c, p, f)
+    // monospace: the heart needs no box, and its spans join the rest's where they look alike
+    const painted = paint(Text, [...head, ...rest].reduce<Span[]>((out, sp) => {
+      const last = out.at(-1)
+      if (last && last.color === sp.color && last.dim === sp.dim) last.text += sp.text
+      else out.push({ ...sp })
+      return out
+    }, []))
     return (
       <Box flexDirection="column">
         {await next(e)}
@@ -632,23 +657,25 @@ export const register: Register = on => {
     )
   })
 
-  // on the desktop, which has neither the hint row's tail nor the closing row: the heart in color, its
-  // count and the countdown, in one line above the prompt while beating is on
+  // the desktop has neither the hint row's tail nor the closing row: there the status line stays above
+  // the prompt, as it reads under the latest turn on the terminal
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.surface !== 'desktop') return next(e)
     const c = await read($, settingsAtom)
     isStatusOnBand = c.statusLine !== 'off'
+    const line = await read($, lineAtom)
+    if (!isStatusOnBand || !line || e.props.hasSurvey || e.props.isWorking) return next(e)
     const p = await read($, pulse)
-    if (!isStatusOnBand || e.props.hasSurvey || e.props.isWorking || p === 'hidden') return next(e)
     if (p === 'armed' && c.animate) animate($)
-    const f = await read($, frameAtom)
-    const heart = heartFrame(c, p, f)
+    const f = c.animate ? await read($, frameAtom) : 0
     const { Box, Text } = $.ui.resolve(e)
-    const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, c, f, isLit(heart))
+    // the band's font is proportional: the heart's frames differ in width, so it gets a box of its own
+    // and the words after it never move
+    const { head, rest, width } = liveLine(line, c, p, f)
     return (
-      <Box>
-        {paint(Text, look)}
-        <Text dimColor>{await read($, hintAtom)}</Text>
+      <Box flexDirection="row">
+        <Box width={width} flexShrink={0}>{paint(Text, head)}</Box>
+        {paint(Text, rest)}
       </Box>
     )
   })

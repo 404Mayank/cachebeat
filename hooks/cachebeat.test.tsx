@@ -316,7 +316,7 @@ test('off, a new turn and a subagent turn each keep it from beating', async ($: 
 })
 
 test('one status line, under the latest turn: counts the session\'s beats and down to the next', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on)
+  const { clock, logs } = await setup($, on, { settings: { statusHeart: 'off' } }) // a still heart: the words are what's checked
   await cmd($, '3')
   await $.turn.complete(turn)
   expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 3m']) // no beat yet
@@ -937,19 +937,36 @@ const BAND = (surface: 'terminal' | 'desktop') => ({
   props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
 }) as never
 
-test('on the desktop the band above the prompt carries the heart and the countdown, and a beat logs no line', async ($: Engine, on: On) => {
+test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
   const { clock, logs, tails } = await setup($, on, { settings: { animate: false } })
+  const band = async () => (await draw($, BAND('desktop'))).join('')
   expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
   await cmd($, 'on')
   await $.turn.complete(turn)
-  expect((await draw($, BAND('desktop'))).at(-1)).toBe(' ×0 · next in 50m')
+  expect(await band()).toBe('♡ next beat in 50m')
   await draw($, { ...HINT, surface: 'desktop' } as never)
   expect(tails.at(-1)).toBe(undefined) // the desktop draws no tail: nothing is added there
   await clock.advance(IDLE)
   expect(logs.some(l => l.startsWith('♥ cache renewed'))).toBe(false)
-  expect((await draw($, BAND('desktop'))).at(-1)).toBe(' ×1 · next in 50m')
+  expect(await band()).toBe('♥ cache kept warm ×1 · next in 50m')
   await $.classic.PostModelSwitch(SWITCH)
-  expect((await draw($, BAND('desktop'))).at(-1)).toBe(' ×1 · waits for your next turn')
+  expect(await band()).toBe('♥ cache kept warm ×1 · waits for your next turn')
+})
+
+test('the status line\'s heart beats as one glyph by default, and its setting takes any animation or none', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await draw($, HINT) // the hint row starts the heart's clock
+  const lead = async () => (await draw($, row('r1'))).filter(t => t !== 'engine').join('')
+  const seen = new Set<string>()
+  for (let i = 0; i < BEAT.length; i++) {
+    seen.add((await lead()).split(' ')[0]!)
+    await clock.advance(TICK)
+  }
+  expect(seen).toEqual(new Set(['♡', '♥'])) // one glyph, never wider
+  expect(normalize({ statusHeart: 'nope' }).statusHeart).toBe('beat')
+  expect(normalize({ statusHeart: 'ecg' }).statusHeart).toBe('ecg')
 })
 
 test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engine, on: On) => {

@@ -29,7 +29,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 ## Requirements
 
 - **Claude Code 2.1.287 or later.** Check your version with `claude --version` and update with `claude update`.
-- The terminal or the Claude desktop app. In the desktop app the heart and countdown sit in a line above the prompt, and the settings menu opens beside the chat. Nothing is drawn in `claude -p`.
+- The terminal or the Claude desktop app. In the desktop app the status line sits above the prompt, and the settings menu opens beside the chat. Nothing is drawn in `claude -p`.
 
 ## Install
 
@@ -195,6 +195,7 @@ Theme colors follow your Claude Code theme, so they change when you switch theme
 | Placement | Under the turn after a blank line, directly under it, or off | after a blank line |
 | Countdown | Shows the time to the next beat | on |
 | Tokens kept | Shows how much the last beat kept warm, e.g. `· 184k cached` | off |
+| Heart | What the heart at the start of the line plays: one heart beating, a still one, or any of the 19 animations | one heart, beating |
 
 </details>
 

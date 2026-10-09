@@ -97,3 +97,17 @@ export function previewFrame(x: Variant, tick: number, timing: Timing) {
   const k = tick % (span + x.blast.length)
   return k < span ? x.loop[loopIndex(x, k, timing)]! : x.blast[k - span]!
 }
+
+/** What the status line's own heart plays: one heart beating, a still one, or any of the animations. */
+export const STATUS_HEARTS: readonly string[] = ['beat', 'off', ...VARIANTS.map(x => x.id)]
+
+/**
+ * The status line's heart at `tick`. `beat` is one glyph, filled while the heart under the prompt is
+ * lit, so the line never shifts; an animation plays its own loop.
+ */
+export function statusFrame(id: string, tick: number, timing: Timing, isHeartLit: boolean) {
+  if (id === 'off') return '♥'
+  if (id === 'beat') return isHeartLit ? '♥' : '♡'
+  const x = variant(id)
+  return x.loop[loopIndex(x, tick, timing)]!
+}

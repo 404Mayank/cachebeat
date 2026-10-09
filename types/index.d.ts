@@ -43,6 +43,7 @@ export type BeatSettings = {
   statusLine: 'below' | 'spaced' | 'off'
   showCountdown: boolean
   showTokens: boolean
+  statusHeart: string // what the heart starting the status line plays: beat, off, or an animation's id
   onBeat: Alert
   onStop: Alert
   onModelSwitch: 'wait' | 'warm' // after /model while idle: wait for the next turn, or have the next beat write the new model's cache
@@ -66,7 +67,6 @@ declare module 'claude-code' {
       saved: Saved | null
       frame: number
       line: string
-      hint: string // the count and countdown, for the desktop's band above the prompt
       settings: BeatSettings
       tick: number // the settings pane's preview clock
       page: PanePage

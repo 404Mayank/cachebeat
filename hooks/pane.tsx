@@ -1,6 +1,6 @@
 import type { Elements, RenderElement } from 'claude-code'
 import type { BeatSettings, PanePage } from '../types'
-import { previewFrame, variant } from './animations'
+import { previewFrame, statusFrame, variant } from './animations'
 import type { Preview, Row, Span, Value } from './settings'
 import { TABS, isHex, isLit, isPicker, rowOf, spans, tokens } from './settings'
 
@@ -60,7 +60,9 @@ function preview(els: Els, s: BeatSettings, kind: Preview, tick: number) {
   const lit = isLit(frame)
   // the hint line takes text alone, drawn dim
   const heart = s.heartPlacement === 'tail' ? [{ text: frame, dim: true }] : spans(frame, s, tick, lit)
-  const line = paint(Text, spans(statusText(s, 3, 184_000, '42m'), s, tick, lit))
+  const sample = statusText(s, 3, 184_000, '42m')
+  const lead = s.animate && s.statusHeart !== 'off' ? statusFrame(s.statusHeart, tick, s.timing, lit) : ''
+  const line = paint(Text, spans(lead ? sample.replace(/^[♥♡]/, lead) : sample, s, tick, lit))
   const turn = <Text dimColor>✻ Brewed for 2s</Text>
   const status = s.statusLine === 'off' ? turn
     : (
@@ -103,6 +105,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
     const { row, tab } = at
     const key = row.key
     const isVariant = key === 'variant'
+    const isStatusHeart = key === 'statusHeart'
     // the focused option stands in for the setting in the preview, before it is picked
     const focused = /^opt:(\d+)$/.exec(v.focus)
     const trial = focused ? { ...s, [key]: row.values[Number(focused[1])] } : s
@@ -117,8 +120,12 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
         </Box>
         {rule}
         {row.values.map((val, i) => {
-          const sample = isVariant
-            ? spans(previewFrame(variant(String(val)), v.tick, s.timing), { ...s, animate: true }, v.tick, isLit(previewFrame(variant(String(val)), v.tick, s.timing)))
+          const heartNow = previewFrame(variant(s.variant), v.tick, s.timing)
+          const frame = isVariant ? previewFrame(variant(String(val)), v.tick, s.timing)
+            : isStatusHeart ? statusFrame(String(val), v.tick, s.timing, isLit(heartNow))
+            : ''
+          const sample = frame
+            ? spans(frame, { ...s, animate: true }, v.tick, isLit(frame))
             : key === 'color' && val !== 'dim'
               ? spans('♥ ♥ ♥', { ...s, color: String(val), effect: 'steady' }, 0, false)
               : []
