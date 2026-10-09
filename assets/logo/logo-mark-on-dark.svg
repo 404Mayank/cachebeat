@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="200 240 440 335" width="440" height="335" role="img" aria-label="cachebeat">
-  <!-- cachebeat: three cache layers; the top one holds the prompt, and the layer below it turns into a heartbeat that ends in a heart. Built by assets/logo/src/build.py on the dev branch. Wordmark: Lexend (SIL Open Font License 1.1), as outlines. -->
+  <!-- cachebeat: three cache layers; the top one holds the prompt, and the layer below it turns into a heartbeat that ends in a heart. Wordmark: Lexend (SIL Open Font License 1.1), as outlines. -->
 <defs>
     <linearGradient id="cbm-lid" gradientUnits="userSpaceOnUse" x1="240" y1="270" x2="510" y2="410">
       <stop offset="0" stop-color="#FBF3EC"/><stop offset=".55" stop-color="#FDECE0"/><stop offset="1" stop-color="#FFD3B2"/></linearGradient>
