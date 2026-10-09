@@ -93,7 +93,7 @@ export function tones(s: BeatSettings): { base: Tone; hi: Tone } {
 export const isLit = (frame: string) => /[♥❤]/.test(frame)
 
 /** Characters as a terminal cell sees them: a heart's text-presentation selector stays with its heart. */
-const glyphs = (text: string) => [...text].reduce<string[]>((out, ch) => {
+export const glyphs = (text: string) => [...text].reduce<string[]>((out, ch) => {
   if (ch === '︎' && out.length) out[out.length - 1] += ch
   else out.push(ch)
   return out

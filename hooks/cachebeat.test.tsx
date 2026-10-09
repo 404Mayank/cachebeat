@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
-import { DEFAULTS, EPISODE, accept, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
+import { DEFAULTS, EPISODE, accept, glyphs, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
 
 /** The tools as the model calls them: `mcp__<plugin>__<name>`. */
@@ -966,12 +966,13 @@ test('the status line\'s heart beats as one glyph by default, and its setting ta
   }
   expect(seen).toEqual(new Set(['♡', '♥'])) // one glyph, never wider
   expect(normalize({ statusHeart: 'nope' }).statusHeart).toBe('beat')
-  // a wide animation on the desktop sits in a box, the space after it kept from collapsing
-  await set($, { settings: { statusHeart: 'classic', animate: false } })
-  await call($, 'set', { settings: { animate: true } })
+  // a wide animation on the desktop takes a cell per character, as the terminal's grid has it, and
+  // the space after it is kept from collapsing
+  await set($, { settings: { statusHeart: 'classic' } })
   const texts = await draw($, BAND('desktop'))
-  expect(texts.length).toBeGreaterThan(1)
-  expect(texts.join('').endsWith('\u00a0next beat in 50m')).toBe(true)
+  expect(texts.length).toBe(6) // Classic's five cells, then the words
+  expect(texts.slice(0, 5).every(t => glyphs(t).length === 1)).toBe(true)
+  expect(texts[5]).toBe('\u00a0next beat in 50m')
   expect(normalize({ statusHeart: 'ecg' }).statusHeart).toBe('ecg')
 })
 
