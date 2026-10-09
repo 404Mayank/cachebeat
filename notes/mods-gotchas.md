@@ -42,6 +42,7 @@ Things about mods, the engine and the test kit that took time to work out. These
 ## Timing and events (found live, 0.7.0)
 
 - **`schedule()` used to arm two timers.** It cancelled the old timer, awaited (the 0.7.0 cache-lifetime read made the gap longer), then armed a new one. Two overlapping calls each armed one, and the leaked timer fired through a pause. Seen live as two beats in one minute, and a beat firing after "beats wait". Now a call counter lets only the newest call arm.
+- **The test kit's engine has no `ui.close`,** so a test can't press Esc on a pane.
 - **The test kit runs dispatches one at a time,** so it can't reproduce that race. The test "commands and turns arriving together" passes with or without the guard. The live rerun is the evidence: no minute with two beats.
 - **`/model` raises `classic.PostModelSwitch` before the engine applies the switch** (`send set_model` comes after it in the debug log), and no `turn.complete` follows. So `$.session.model()` inside that hook may still be the old model. That's why the model is checked again when the beat fires.
 - **`turn.complete` without `usage` sent no request.** Only a turn with `usage` warms the cache. cachebeat records `$.session.model()` there and compares it when a beat fires, so a model change is caught whatever events arrive.
@@ -49,9 +50,22 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **The "beats wait" line after `/compact` lands above the compaction's output,** not at the end of the transcript. The engine places `$.ui.log` lines. This is cosmetic and isn't fixed.
 - **`claude --debug` writes `~/.claude/debug/<session>.txt`.** It holds every hook dispatch (`hooks module cachebeat@inline <event> settled …`) and every `$.ui.log` line. Use it to see event order instead of guessing.
 
-## Surfaces
+## Surfaces: the desktop app (found live, 0.7.0)
 
-- **`TurnDuration`, the turn's closing row that the status line hangs under, is raised on the terminal only.** `PromptHint`, the heart's row, is raised on the terminal and desktop. So on desktop the countdown rides with the heart (`isStatusOnHint`), and a beat no longer logs its own line there.
+- **Loading a dev copy into the desktop app:** set `"CLAUDE_CODE_PLUGIN_DIRS": "<repo path>"` in the `env` block of `~/.claude/settings.json`, then start a new Code-tab session. The app's plugin manager page lists marketplace installs only, so a folder-loaded plugin never shows there. Check with `/cachebeat`, or with `<bundled claude> plugin list`.
+- **The desktop app ships its own Claude Code,** at `~/.config/Claude/claude-code/<version>/claude` (2.1.293 at the time). Its logs in `~/.config/Claude/logs/` carry no hook dispatches.
+- **`TurnDuration`** (the closing row the status line hangs under) is raised on the terminal only.
+- **`PromptHint`'s `tail` is drawn on the terminal only.** The types say "no other surface draws it yet". A `PromptHint` tree drew nothing in the chat area either. So on desktop the hint row carries nothing of ours.
+- **`AbovePrompt` (the band above the input) works on desktop.** cachebeat draws the status line there, desktop only (`isStatusOnBand`). The idea follows [desktop-statusline](https://github.com/centminmod/claude-plugins/tree/master/plugins/desktop-statusline), which builds its whole band that way.
+- **The band's font is proportional:**
+  - A frame whose characters differ in width (`─ ⎼ ⎺ ♥ ⠀`) changes width from frame to frame, and carries the words after it along. So a wide animation is drawn one `Box` per character, centered. That gives a fixed grid, which stopped the dancing.
+  - A heart glyph is wider than a cell, so heart slots are wider (`slotWidths`).
+  - Line characters are narrower than a cell, so they leave gaps between slots.
+  - **`Box` widths appear to be whole cells:** fractional ones (0.6, 1.5) look rounded. That's inferred from screenshots. The test kit accepts them.
+  - So line animations keep small gaps, and heart-heavy ones (Converge's burst) space wide. The user judged that acceptable. The exact alternative is drawing frames as an `Svg` grid, at the cost of fixed colors.
+- **A space at the start of a `Box`'s text collapses, as in HTML.** A one-cell box was narrower than a ♥ and covered the space after it. So the single beating heart (♥/♡, one width) is drawn as plain text with its line, and a wide animation gets a `marginLeft`/`marginRight` of one cell instead of a space.
+- **Colors draw on desktop:** theme keys and hex alike, as seen in the settings pane.
+- **The settings pane works on desktop, but its keys are the app's own.** Tab and Shift+Tab move native focus, and a click presses. cachebeat's terminal-only two-level walk (`ui.focus` denials, arrow `ui.scroll`) fought that, so on desktop (`paneSurface`, noted when the pane draws) it passes those events through. A tab opens on press, and Esc leaves a picker or closes. Neither focus nor scroll events say which surface they come from, so the pane's own draw records it.
 - **Before 0.7.0, a desktop user saw only `♥ cache renewed (…)` per beat:** the fallback log for "no closing row seen".
 
 ## Types
