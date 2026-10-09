@@ -73,6 +73,8 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 0.7.1 went out the same way from a cloud session (branch `v0.7.1`, [PR #2](https://github.com/404Mayank/cachebeat/pull/2)). Its fix was merged into `dev` before `main`, which is fine: the branch came off `main`, so `dev` gains no file `main` lacks. Its release notes are still the generated ones.
 
+0.7.2 followed the same way ([PR #3](https://github.com/404Mayank/cachebeat/pull/3)) after Re-validate still blocked 0.7.1.
+
 ### Where a release goes
 
 - **GitHub:** the `v<version>` tag and release, created by CI.
