@@ -166,6 +166,14 @@ function liveLine(line: string, c: BeatSettings, p: Pulse, f: number): { head: S
   return { head, rest, width: cells(heart) }
 }
 
+/** Spans in a row joined where they look alike, so a line draws as few runs of text as it can. */
+const joined = (list: Span[]) => list.reduce<Span[]>((out, sp) => {
+  const last = out.at(-1)
+  if (last && last.color === sp.color && last.dim === sp.dim) last.text += sp.text
+  else out.push({ ...sp })
+  return out
+}, [])
+
 function setPulse($: EngineInterface, p: Pulse) {
   if (p !== 'armed') {
     ticker?.cancel()
@@ -616,13 +624,7 @@ export const register: Register = on => {
     const p = moving ? await read($, pulse) : 'hidden'
     const { Box, Text } = $.ui.resolve(e)
     const { head, rest } = liveLine(line, c, p, f)
-    // monospace: the heart needs no box, and its spans join the rest's where they look alike
-    const painted = paint(Text, [...head, ...rest].reduce<Span[]>((out, sp) => {
-      const last = out.at(-1)
-      if (last && last.color === sp.color && last.dim === sp.dim) last.text += sp.text
-      else out.push({ ...sp })
-      return out
-    }, []))
+    const painted = paint(Text, joined([...head, ...rest])) // monospace: the heart needs no box
     return (
       <Box flexDirection="column">
         {await next(e)}
@@ -672,7 +674,10 @@ export const register: Register = on => {
     // the band's font is proportional: the heart's frames differ in width, so it gets a box of its own
     // and the words after it never move
     const { head, rest, width } = liveLine(line, c, p, f)
-    // a space starting a box is collapsed there, as HTML does: the one after the heart can't be
+    // one glyph keeps its width as it beats: the line is one run of text, spaced as written
+    if (width <= 1) return <Box>{paint(Text, joined([...head, ...rest]))}</Box>
+    // a wider animation's frames vary on this proportional font: it gets a box of its own, and the
+    // space after it, which would collapse at the start of the next box as in HTML, can't
     if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '\u00a0') }
     return (
       <Box flexDirection="row">

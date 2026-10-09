@@ -943,8 +943,7 @@ test('on the desktop the band above the prompt carries the status line, and a be
   expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
   await cmd($, 'on')
   await $.turn.complete(turn)
-  expect((await draw($, BAND('desktop'))).join('')).toBe('♡\u00a0next beat in 50m')
-  expect(await band()).toBe('♡ next beat in 50m')
+  expect(await draw($, BAND('desktop'))).toEqual(['♡ next beat in 50m']) // one glyph: one run of text, its space kept
   await draw($, { ...HINT, surface: 'desktop' } as never)
   expect(tails.at(-1)).toBe(undefined) // the desktop draws no tail: nothing is added there
   await clock.advance(IDLE)
@@ -967,6 +966,12 @@ test('the status line\'s heart beats as one glyph by default, and its setting ta
   }
   expect(seen).toEqual(new Set(['♡', '♥'])) // one glyph, never wider
   expect(normalize({ statusHeart: 'nope' }).statusHeart).toBe('beat')
+  // a wide animation on the desktop sits in a box, the space after it kept from collapsing
+  await set($, { settings: { statusHeart: 'classic', animate: false } })
+  await call($, 'set', { settings: { animate: true } })
+  const texts = await draw($, BAND('desktop'))
+  expect(texts.length).toBeGreaterThan(1)
+  expect(texts.join('').endsWith('\u00a0next beat in 50m')).toBe(true)
   expect(normalize({ statusHeart: 'ecg' }).statusHeart).toBe('ecg')
 })
 
