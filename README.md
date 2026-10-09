@@ -95,6 +95,12 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 - `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself. The tools read or change only cachebeat's own state and settings. Claude calls them without a permission prompt, and each call that goes through shows as one line in the transcript.
 - cachebeat also sees `/model` switches, without changing them, so beats can wait for your next message or warm the new model, as **After /model** says.
 
+## Privacy
+
+- cachebeat collects no personal data and has no telemetry. It sends nothing to its author or anyone else.
+- A beat is a request to Anthropic's API, made by Claude Code with your account, the same way your own messages are sent.
+- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
+
 ## Commands
 
 | Command | What it does |
