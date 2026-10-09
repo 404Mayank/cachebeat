@@ -226,7 +226,7 @@ It tells you why, the way you chose under **Alerts**.
 
 ## Contributing
 
-Ideas, bug reports and pull requests are all welcome: a new heart animation, a setting you'd find useful, or a fix. Open an issue to talk something through, or send a PR straight away. How to work on it is in [the `dev` branch's notes](https://github.com/404Mayank/cachebeat/blob/dev/notes/README.md).
+Contributions are welcome. Read [the contributing guide](https://github.com/404Mayank/cachebeat/blob/dev/notes/contributing.md) to get started.
 
 ## License
 
