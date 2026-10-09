@@ -578,22 +578,24 @@ export const register: Register = on => {
     ttl = await cacheTtl($) // what `auto` comes to, for the answer
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const minutes = words.find(w => /^\d+$/.test(w))
-    switch (words[0]) {
-      case 'settings':
-      case 'config':
-        await openSettings($)
-        return { text: 'settings opened' }
-      case 'now':
-        return { text: await beatNow($) }
-      case 'global': {
-        if (words[1] !== 'on' && words[1] !== 'off') return { text: `new sessions start ${cfg.defaultOn ? 'on' : 'off'} · ${USAGE}` }
-        await setSettings($, { defaultOn: words[1] === 'on' })
-        const here = words[1] === 'on' ? (await turnOn($, undefined)).text : s.enabled ? stop($) : 'already off'
-        return { text: `new sessions start ${words[1]} · this session: ${here}` }
-      }
-      case 'off':
-        if (!s.enabled) return { text: 'already off' }
-        return { text: stop($) }
+    if (words[0] === 'settings' || words[0] === 'config') {
+      await openSettings($)
+      return { text: 'settings opened' }
+    }
+    if (words[0] === 'now') return { text: await beatNow($) }
+    if (words[0] === 'global') {
+      if (words[1] !== 'on' && words[1] !== 'off') return { text: `new sessions start ${cfg.defaultOn ? 'on' : 'off'} · ${USAGE}` }
+      await setSettings($, { defaultOn: words[1] === 'on' })
+      let here = 'already off'
+      if (words[1] === 'on') {
+        const turned = await turnOn($, undefined)
+        here = turned.text
+      } else if (s.enabled) here = stop($)
+      return { text: `new sessions start ${words[1]} · this session: ${here}` }
+    }
+    if (words[0] === 'off') {
+      if (!s.enabled) return { text: 'already off' }
+      return { text: stop($) }
     }
     if (words[0] === 'on' || minutes) return turnOn($, minutes === undefined ? undefined : Number(minutes))
     if (words.length) return { text: USAGE }
