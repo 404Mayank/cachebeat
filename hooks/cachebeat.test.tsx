@@ -1108,7 +1108,7 @@ test('r takes the focused setting back to its default; a custom value stays in i
   await ui.input({ key: 'custom', text: '35' })
   expect(stored(store).interval).toBe(35)
   await move($, 'row:interval')
-  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('r: back to auto')
+  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('back to auto') // the hotkey draws its own 'r: '
   await ui.press({ key: 'resetRow' })
   expect(stored(store).interval).toBe('auto')
   expect(await ui.find({ key: 'resetRow' })).toBe(undefined) // at its default: nothing to reset

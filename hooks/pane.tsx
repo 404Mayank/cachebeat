@@ -250,7 +250,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       )}
       {resettable && (
         <Button plain hotkey="r" key="resetRow" onPress={() => act.resetRow(resettable.key)}>
-          <Text dimColor>{`r: back to ${shown(resettable, DEFAULTS[resettable.key], s)}`}</Text>
+          <Text dimColor>{`back to ${shown(resettable, DEFAULTS[resettable.key], s)}`}</Text>
         </Button>
       )}
       {help && <Text dimColor>{help}</Text>}
