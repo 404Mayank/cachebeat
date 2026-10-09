@@ -98,9 +98,9 @@ async function refreshLine($: EngineInterface) {
 
 /** The animation clock: runs while the heart is drawn beating (the hint row draws it). */
 function animate($: EngineInterface) {
+  if (ticker) return
   const ms = frameMs(cfg)
   const perSecond = Math.round(1000 / ms)
-  if (ticker) return
   ticker = $.clock.every(ms, () => {
     frame++
     if (blast >= 0 && ++blast >= variant(cfg.variant).blast.length) blast = -1
@@ -323,11 +323,14 @@ async function focusOn($: EngineInterface, key: string) {
   }
   if (deny) return $.ui.log(`focus ${key}: ${deny}`, { to: 'debug' })
   await update($, focusAtom, () => key)
+  let stuck: string | undefined
   try {
-    await $.ui.scroll({ to: { key }, in: PANE })
+    const scrolled = await $.ui.scroll({ to: { key }, in: PANE })
+    stuck = scrolled.deny
   } catch (err) {
-    $.ui.log(`scroll to ${key}: ${err}`, { to: 'debug' })
+    stuck = String(err)
   }
+  if (stuck) $.ui.log(`scroll to ${key}: ${stuck}`, { to: 'debug' })
 }
 
 function stopPaneTicker() {

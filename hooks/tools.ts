@@ -6,8 +6,6 @@ import { shown } from './pane'
 import type { Reader, Value } from './settings'
 import { DEFAULTS, TABS, accept, parseMinutes, rowOf } from './settings'
 
-export const TOOL = { state: 'mcp__cachebeat__state', set: 'mcp__cachebeat__set' } as const
-
 /** Each setting, for the model; the unit and range are added from its reader. */
 const ABOUT: Record<keyof BeatSettings, string> = {
   defaultOn: 'New sessions start beating; open sessions keep theirs.',

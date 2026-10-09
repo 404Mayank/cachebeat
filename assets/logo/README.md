@@ -37,7 +37,7 @@ Everything is drawn in one set of units, the pixels of the image the logo was tr
 
 ## The lettering
 
-The name and the social card's line are set in [Lexend](https://github.com/googlefonts/lexend) and drawn as outlines, so the SVGs don't need the font. Lexend is under the SIL Open Font License 1.1, which is in `src/fonts/OFL.txt` alongside the two weights used.
+The name and the social card's line are set in [Lexend](https://github.com/googlefonts/lexend) and drawn as outlines, so the SVGs don't need the font. Lexend is under the [SIL Open Font License 1.1](https://openfontlicense.org/open-font-license-official-text/), which is in `src/fonts/OFL.txt` alongside the two weights used.
 
 The outlines are cached in `src/glyphs.json`, which is why building needs nothing beyond Python. To change the name or the line, edit `SOURCES` in `src/glyphs.py`, then refresh the cache. That step needs fontTools:
 

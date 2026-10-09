@@ -193,7 +193,7 @@ def edge(uid, x, y, w, h, r):
 
 
 NOTE = ('cachebeat: three cache layers; the top one holds the prompt, and the layer below it turns '
-        'into a heartbeat that ends in a heart. Built by assets/logo/src/build.py. '
+        'into a heartbeat that ends in a heart. Built by assets/logo/src/build.py on the dev branch. '
         'Wordmark: Lexend (SIL Open Font License 1.1), as outlines.')
 
 

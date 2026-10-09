@@ -19,6 +19,7 @@ The plugin folder is the repo root, so anything on `main` ships to every user an
 - **Plugin changes** (code, tests, README, manifest) are made on `main`, or on a short branch fast-forwarded into it.
 - **Notes, and changes to the demo or logo scripts,** are made on `dev`.
 - **After `main` moves,** bring `dev` up to date: `git switch dev && git merge main`. The scripts were added on `dev` after `main` dropped them, so the merge leaves them alone.
+- **`assets/logo/README.md` differs between the two branches:** a short version on `main` that points here, and the full rebuilding guide on `dev`. A merge that touches it conflicts. Keep `dev`'s version (`git checkout --ours assets/logo/README.md`) and carry any real change over by hand.
 - **Never merge `dev` into `main`.** That would ship the scripts and these notes. If something done on `dev` belongs in the plugin, such as a new `demo.gif` or regenerated logo files, cherry-pick it or check out just those files onto `main`:
 
   ```sh
