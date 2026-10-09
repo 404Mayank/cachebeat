@@ -4,13 +4,13 @@ import type { ToolSpec } from 'claude-code'
 import type { BeatSettings } from '../types'
 import { shown } from './pane'
 import type { Reader, Value } from './settings'
-import { DEFAULTS, TABS, accept, parseMinutes, rowOf } from './settings'
+import { AUTO, DEFAULTS, TABS, accept, parseMinutes, rowOf } from './settings'
 
 /** Each setting, for the model; the unit and range are added from its reader. */
 const ABOUT: Record<keyof BeatSettings, string> = {
   defaultOn: 'New sessions start beating; open sessions keep theirs.',
   interval:
-    'Minutes idle before a beat, for sessions without their own. Under 60 for a one-hour cache (a Claude subscription); 4 for a five-minute cache (an API key, a cloud provider, usage credits).',
+    `Minutes idle before a beat, for sessions without their own; auto beats at ${AUTO['1h']} on a one-hour cache and ${AUTO['5m']} on a five-minute one, reading which the session has (state's cacheTtl).`,
   intervalScope: "What the user's `/cachebeat <minutes>` changes: this session's interval, or settings.interval.",
   stopAfterHours: 'Beating stops after this long without a message from the user.',
   stopAtUsage: 'Beating stops once any usage limit reaches this.',
@@ -30,6 +30,7 @@ const ABOUT: Record<keyof BeatSettings, string> = {
   showTokens: 'Shows the tokens the last beat kept warm in the status line.',
   onBeat: 'How a beat is announced: a transcript line (log), a toast, both, or none.',
   onStop: 'How beating stopping on its own is announced.',
+  onModelSwitch: "After /model while idle: wait for the next turn, or keep warming the old model's cache.",
 }
 
 const KEYS = Object.keys(ABOUT) as (keyof BeatSettings)[]

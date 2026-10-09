@@ -26,6 +26,7 @@ export type View = {
   columns: number
   isOn: boolean // this session beats
   sessionMinutes: number | null // this session's own interval, set by /cachebeat <minutes>
+  autoMinutes: number // what `auto` beats at for this session's cache
   notice: string // the last action's outcome, shown in the footer
   isResetArmed: boolean
 }
@@ -86,6 +87,10 @@ function preview(els: Els, s: BeatSettings, kind: Preview, tick: number) {
     </Box>
   )
 }
+
+/** What `Beat after idle` adds to its value: what `auto` comes to now, and this session's own interval. */
+const intervalTail = (s: BeatSettings, v: View) =>
+  (s.interval === 'auto' ? ` · ${v.autoMinutes}m now` : '') + (v.sessionMinutes !== null ? ` · this session ${v.sessionMinutes}m` : '')
 
 /** The pane and its focus ring: the keys of its elements, in the order the arrows walk them. */
 export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): { tree: RenderElement; ring: string[] } {
@@ -188,7 +193,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
           >
             {line(
               r.label,
-              shown(r, s[r.key], s) + (r.key === 'interval' && v.sessionMinutes !== null ? ` · this session ${v.sessionMinutes}m` : ''),
+              shown(r, s[r.key], s) + (r.key === 'interval' ? intervalTail(s, v) : ''),
               isPicker(r) ? ' ›' : '',
             )}
           </Button>

@@ -29,7 +29,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 ## Requirements
 
 - **Claude Code 2.1.287 or later.** Check your version with `claude --version` and update with `claude update`.
-- A terminal. The heart, status line and settings menu are drawn in the terminal, so they don't show in the desktop app or in `claude -p`.
+- The terminal or the Claude desktop app. In the desktop app, the countdown rides on the heart's line under the prompt, and the settings menu needs the terminal. Nothing is drawn in `claude -p`.
 
 ## Install
 
@@ -82,7 +82,7 @@ The heart appears under the prompt, and after your next turn it starts beating. 
 
 Or ask Claude: "keep the cache warm in this session", "make 30 minutes the default beat time".
 
-Beats come every 50 minutes, to fit the one-hour cache of a Claude subscription. With an API key, a cloud provider, or usage credits, the cache lasts five minutes, so beat under that: `/cachebeat 4` for this session, or set **Beat after idle** to 4 in `/cachebeat settings` to make it the default.
+Beats fit your cache by themselves: every 50 minutes on a Claude subscription's one-hour cache, and every 4 on the five-minute cache of an API key, a cloud provider or usage credits. To pick your own interval, use `/cachebeat 30` for this session, or set **Beat after idle** in `/cachebeat settings`.
 
 ## What it sends, and what it costs
 
@@ -91,6 +91,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 - A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would.
 - Beats happen only while the session is idle, at most once per interval (50 minutes by default).
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
+- To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
 - `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself. The tools read or change only cachebeat's own state and settings. Claude calls them without a permission prompt, and each call that goes through shows as one line in the transcript.
 
 ## Commands
@@ -139,11 +140,12 @@ Settings with numbers also take a custom value at the bottom of their list, such
 | --- | --- | --- |
 | This session | Turns beating on or off right here | off |
 | New sessions start | Whether new sessions start with it on | off |
-| Beat after idle | How long the session sits idle before a beat | 50 minutes |
+| Beat after idle | How long the session sits idle before a beat: auto fits your cache, or a number of minutes | auto: 50 minutes on a one-hour cache, 4 on a five-minute one |
 | `/cachebeat <min>` sets | Whether `/cachebeat 30` changes this session only, or the default for all | this session |
 | Stop after idle | Stops beating after this long without a message from you | 8 hours |
 | Stop at usage | Stops once any of your usage limits reaches this percentage | 100% |
 | Skip small contexts | Skips beating chats under a minimum size | off, 20k tokens |
+| After /model | Wait for your next turn, or keep warming the old model's cache | wait |
 
 With **Skip small contexts** on, cachebeat tells you up front when a chat is under your minimum, once in the log and in the status line: `♡ beats skip · this chat is 38k tokens, under your 50k minimum`. It starts beating as soon as the chat grows past the minimum.
 
@@ -215,11 +217,12 @@ cachebeat turns itself off for the session when:
 - the API rate-limits it, or returns an error that doesn't clear up (a passing hiccup is retried a minute later)
 - the cache is already gone, so there's nothing left to keep warm
 
-It tells you why, the way you chose under **Alerts**.
+It tells you why, the way you chose under **Alerts**. On auto, a cache that's gone before a 50-minute beat lasts five minutes: instead of stopping, cachebeat says so and beats every 4 minutes from there.
 
 ## Good to know
 
 - Sending a message restarts the countdown.
+- After `/compact`, and after `/model` unless you set **After /model** to keep, beats wait for your next message: there's no cache for it yet.
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.
 - Settings you change in one session reach your other open sessions at their next turn.
@@ -231,3 +234,9 @@ Contributions are welcome. Read [the contributing guide](https://github.com/404M
 ## License
 
 [MIT](LICENSE)
+
+## Disclaimer
+
+cachebeat began as a personal project and is shared publicly in good faith. It's actively maintained: report problems or ideas as a GitHub issue and they'll be looked at, though what gets fixed or added is up to the maintainer.
+
+Every beat is a real request that counts toward your usage limits, or toward your API bill if you pay per token. You use cachebeat at your own risk, and its author isn't responsible for any usage, charges or other costs it causes.

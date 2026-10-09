@@ -1,13 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Alert, BeatSettings, PanePage, Pulse, Saved } from '../types'
+import type { Alert, BeatSettings, PanePage, Pulse, Saved, Ttl } from '../types'
 import { loopIndex, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
-import { DEFAULTS, TABS, changed, frameMs, isLit, normalize, rowOf, spans, tokens } from './settings'
+import { AUTO, DEFAULTS, TABS, changed, frameMs, isLit, normalize, rowOf, spans, tokens } from './settings'
 import { SET, STATE, parseSet, summary } from './tools'
 
 const MIN = 60_000
-export const IDLE = DEFAULTS.interval * MIN // default silence before a beat; must stay under the cache TTL
+export const IDLE = AUTO['1h'] * MIN // the default silence before a beat on a subscription's one-hour cache
 export const DEADLINE = DEFAULTS.stopAfterHours * 60 * MIN // default stop this long after the last real turn
 export const RETRY = MIN // after a transient API error
 export const MAX_TTL = 60 * MIN // past this since the last cache read, the cache is gone whatever the TTL
@@ -16,6 +16,7 @@ const pulse = atom({ plugin: 'cachebeat', key: 'pulse' } as const, 'hidden' as P
 const saved = atom({ plugin: 'cachebeat', key: 'saved' } as const, null as Saved | null)
 const frameAtom = atom({ plugin: 'cachebeat', key: 'frame' } as const, 0)
 const lineAtom = atom({ plugin: 'cachebeat', key: 'line' } as const, '')
+const hintAtom = atom({ plugin: 'cachebeat', key: 'hint' } as const, '')
 const settingsAtom = atom({ plugin: 'cachebeat', key: 'settings' } as const, DEFAULTS)
 const tickAtom = atom({ plugin: 'cachebeat', key: 'tick' } as const, 0)
 const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'beating', picker: null } as PanePage)
@@ -23,6 +24,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
+  isCacheShort: false,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS
@@ -38,6 +40,8 @@ let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
+let isStatusOnHint = false // the surface has no closing row, so the hint row carries the countdown
+let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
 const rowsSeen = new Set<string>()
 
 export const fmt = (ms: number) => {
@@ -45,7 +49,28 @@ export const fmt = (ms: number) => {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`
 }
 
-const idle = () => s.idle ?? cfg.interval * MIN
+/** This session's interval: its own, else the setting's, `auto` read off the cache's lifetime. */
+const idle = () => s.idle ?? (cfg.interval === 'auto' ? AUTO[s.isCacheShort ? '5m' : ttl] : cfg.interval) * MIN
+
+const isSet = (v: string | undefined) => v !== undefined && /^(1|true|yes|on)$/i.test(v)
+
+/**
+ * The main conversation's cache lifetime, as Claude Code picks it: the first of the variables and the
+ * setting that choose one, else an hour on a subscription within its plan's usage and five minutes on
+ * usage credits, an API key or a cloud provider (code.claude.com/docs/en/prompt-caching).
+ */
+async function cacheTtl($: EngineInterface): Promise<Ttl> {
+  if (isSet(await $.env.get('FORCE_PROMPT_CACHING_5M'))) return '5m'
+  const chosen = (v: unknown) => (v === '5m' || v === '1h' ? v : undefined)
+  const fromEnv = chosen(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))
+  if (fromEnv) return fromEnv
+  const fromSettings = chosen((await $.settings.read()).promptCacheTtl)
+  if (fromSettings) return fromSettings
+  if (isSet(await $.env.get('ENABLE_PROMPT_CACHING_1H'))) return '1h'
+  // rate-limit windows are reported on a subscription alone; one used up means usage credits are paying
+  const { rateLimits } = await $.session.usage()
+  return rateLimits.length > 0 && rateLimits.every(l => l.percentUsed < 100) ? '1h' : '5m'
+}
 
 function save($: EngineInterface) {
   const copy = { ...s }
@@ -94,6 +119,10 @@ async function refreshLine($: EngineInterface) {
     text = statusText(cfg, s.beats, s.lastRead, next)
   }
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
+  // the hint row has no room for the whole line: the countdown, or why there is none
+  const next = s.enabled && s.nextAt !== null && cfg.showCountdown ? `next in ${fmt(s.nextAt - (await $.clock.now()))}` : ''
+  const hint = s.enabled && s.small ? 'beats skip' : next
+  if (hint !== (await read($, hintAtom))) await update($, hintAtom, () => hint)
 }
 
 /** The animation clock: runs while the heart is drawn beating (the hint row draws it). */
@@ -167,6 +196,7 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
     if (since >= MAX_TTL) setPulse($, 'waiting') // nothing warm to keep; the next turn starts it
     else {
+      if (cfg.interval === 'auto' && s.idle === null) ttl = await cacheTtl($) // usage can cross into credits
       ms = Math.max(0, idle() - since)
       s.nextAt = now + ms
       timer = $.clock.after(ms, () => void beat($))
@@ -221,13 +251,23 @@ async function beat($: EngineInterface): Promise<string> {
     return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
-  if (got < wrote) return stop($, `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`)
+  if (got < wrote) {
+    const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
+    // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
+    // this beat wrote it afresh, so beat at that from here
+    if (cfg.interval !== 'auto' || s.idle !== null || s.isCacheShort || ttl === '5m') return stop($, why)
+    s.isCacheShort = true
+    s.lastWarm = await $.clock.now()
+    announce($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
+    await schedule($)
+    return `${why}; beating every ${AUTO['5m']}m`
+  }
   s.lastWarm = await $.clock.now()
   s.lastRead = got
   s.beats++
   if (cfg.animate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
-  if (logs(cfg.onBeat) || s.row === null) $.ui.log(renewed) // with no closing row, no status line says it
+  if (logs(cfg.onBeat) || (s.row === null && !isStatusOnHint)) $.ui.log(renewed) // else no line at all says it
   if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
   await schedule($)
   return renewed
@@ -268,6 +308,7 @@ async function turnOn($: EngineInterface, minutes: number | undefined) {
 /** What the tools answer: this session's beating, and the settings every session shares. */
 async function stateOf($: EngineInterface) {
   await syncSettings($)
+  ttl = await cacheTtl($) // usage can cross into credits between turns
   const now = await $.clock.now()
   const nextBeat = !s.enabled || s.small ? null
     : s.nextAt !== null ? `in ${fmt(s.nextAt - now)}`
@@ -275,6 +316,7 @@ async function stateOf($: EngineInterface) {
     : 'after the next turn'
   const session = {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle === null ? 'default' : 'session',
+    cacheTtl: s.isCacheShort ? '5m' : ttl,
     beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small,
   }
   const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
@@ -304,6 +346,7 @@ const PANE_OPEN = { id: PANE, title: 'cachebeat', focus: true, closeOnEscape: tr
 
 async function openSettings($: EngineInterface) {
   await syncSettings($)
+  ttl = await cacheTtl($)
   notice = ''
   isResetArmed = false
   await update($, pageAtom, () => ({ tab: 'beating', picker: null }))
@@ -360,6 +403,7 @@ const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|global on|off|settings]'
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
   on('session.start', async ($, e, next) => {
+    isStatusOnHint = false // until the hint row is drawn, on whichever surface draws it
     cfg = normalize(await $.store.get('settings'))
     await update($, settingsAtom, () => cfg)
     const prev = await read($, saved)
@@ -381,13 +425,14 @@ export const register: Register = on => {
   // conversation, so it starts its count afresh, keeping whether this session beats and how often
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     const r = await next(e)
-    s = { ...fresh, enabled: s.enabled, idle: s.idle }
+    s = { ...fresh, enabled: s.enabled, idle: s.idle, isCacheShort: s.isCacheShort }
     await syncSettings($)
     await schedule($)
     return r
   })
 
   on('command.run', { command: 'cachebeat' }, async ($, e) => {
+    ttl = await cacheTtl($) // what `auto` comes to, for the answer
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const minutes = words.find(w => /^\d+$/.test(w))
     switch (words[0]) {
@@ -456,6 +501,31 @@ export const register: Register = on => {
     return <Text>{''}</Text>
   })
 
+  // each model has its own cache: after a switch the next turn reads none of the old one, so warming
+  // it is no use unless the person switches back
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    const r = await next(e)
+    if (cfg.onModelSwitch === 'wait' && !busy && s.lastWarm !== null) {
+      s.lastWarm = null
+      if (s.enabled) $.ui.log('beats wait for your next turn: the new model has no cache yet')
+      await schedule($)
+    }
+    return r
+  })
+
+  // a compaction replaces the conversation, so the prefix a beat would warm is gone; the next turn
+  // caches the new one. One within a turn needs nothing: the turn's end starts the count from there
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
+    if (isDone && !busy && s.lastWarm !== null) {
+      s.lastWarm = null
+      if (s.enabled) $.ui.log('beats wait for your next turn: compaction replaced the conversation')
+      await schedule($)
+    }
+    return r
+  })
+
   on('turn.start', async ($, e, next) => {
     if (!beating) {
       busy = true
@@ -504,16 +574,19 @@ export const register: Register = on => {
   })
 
   // the heart and beat count. The hint row ("⏸ manual mode on · ...") takes added text only as its dim
-  // tail, so the heart rides it dim, or gets its own line under that row to take color.
+  // tail, so the heart rides it dim, or gets its own line under that row to take color. The desktop
+  // draws no closing row for the status line, so there the countdown rides with the heart.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const c = await read($, settingsAtom)
+    isStatusOnHint = e.surface === 'desktop' && c.statusLine !== 'off'
     const p = await read($, pulse)
     if (e.props.isWorking || p === 'hidden') return next(e)
-    const c = await read($, settingsAtom)
     if (p === 'armed' && c.animate) animate($)
     const f = await read($, frameAtom)
     const heart = heartFrame(c, p, f)
     // a space past the frame's own blank edge: the heart sits as far from the count as from the ' · ' before it
-    const count = c.showCount ? ` ×${s.beats}` : ''
+    const status = isStatusOnHint ? await read($, hintAtom) : ''
+    const count = `${c.showCount ? ` ×${s.beats}` : ''}${status ? ` · ${status}` : ''}`
     if (c.heartPlacement === 'tail') return next({ ...e, props: { ...e.props, tail: `${heart}${count}` } })
     const { Box, Text } = $.ui.resolve(e)
     const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, c, f, isLit(heart))
@@ -541,7 +614,10 @@ export const register: Register = on => {
     else if (!paneTicker) paneTicker = $.clock.every(frameMs(c), () => void update($, tickAtom, () => ++paneTick))
     const els = $.ui.resolve(e)
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
-    const view = { page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN, notice, isResetArmed }
+    const view = {
+      page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN,
+      autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed,
+    }
     const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
       // a press on a tab (Enter, 1-5, a click) shows it and goes into its settings

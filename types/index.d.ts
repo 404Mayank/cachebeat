@@ -11,7 +11,11 @@ export type Saved = {
   beats: number // in this session
   row: string | null // the latest turn's closing row, which carries the status line
   small: string | null // why the context is not kept warm, while it is under the minimum
+  isCacheShort: boolean // a beat found this session's cache lasts five minutes, whatever its settings say
 }
+
+/** How long the main conversation's prompt cache lives. */
+export type Ttl = '5m' | '1h'
 
 /** How an event is told: a line in the transcript, a toast, both, or not at all. */
 export type Alert = 'none' | 'log' | 'toast' | 'both'
@@ -19,7 +23,7 @@ export type Alert = 'none' | 'log' | 'toast' | 'both'
 /** The settings, global: kept in the plugin's store, shared by every session. */
 export type BeatSettings = {
   defaultOn: boolean // new sessions start beating
-  interval: number // minutes of idle before a beat
+  interval: number | 'auto' // minutes of idle before a beat; auto fits the cache's lifetime
   intervalScope: 'session' | 'global' // what `/cachebeat <minutes>` changes
   stopAfterHours: number // since the last real turn
   stopAtUsage: number // percent of any rate-limit window
@@ -39,6 +43,7 @@ export type BeatSettings = {
   showTokens: boolean
   onBeat: Alert
   onStop: Alert
+  onModelSwitch: 'wait' | 'keep' // after /model while idle: wait for the next turn, or keep warming the old model's cache
 }
 
 /** Where the settings pane is: a tab, and the row whose picker is open over it. */
@@ -59,6 +64,7 @@ declare module 'claude-code' {
       saved: Saved | null
       frame: number
       line: string
+      hint: string // the countdown, on a surface with no closing row to put the status line under
       settings: BeatSettings
       tick: number // the settings pane's preview clock
       page: PanePage

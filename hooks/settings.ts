@@ -1,9 +1,9 @@
-import type { BeatSettings } from '../types'
+import type { BeatSettings, Ttl } from '../types'
 import { VARIANTS } from './animations'
 
 export const DEFAULTS: BeatSettings = {
   defaultOn: false,
-  interval: 50,
+  interval: 'auto',
   intervalScope: 'session',
   stopAfterHours: 8,
   stopAtUsage: 100,
@@ -23,7 +23,11 @@ export const DEFAULTS: BeatSettings = {
   showTokens: false,
   onBeat: 'none',
   onStop: 'log',
+  onModelSwitch: 'wait',
 }
+
+/** The interval `auto` beats at for each cache lifetime, in minutes: under it, with room for a slow request. */
+export const AUTO: Record<Ttl, number> = { '1h': 50, '5m': 4 }
 
 /** What the store keeps: the settings that differ from the defaults, so a new default reaches the rest. */
 export const changed = (s: BeatSettings): Partial<BeatSettings> =>
@@ -34,13 +38,16 @@ export function normalize(stored: unknown): BeatSettings {
   const s: Record<string, unknown> = { ...DEFAULTS }
   if (stored && typeof stored === 'object') {
     for (const [k, v] of Object.entries(stored)) {
-      if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || (k === 'speed' && typeof v === 'number'))) s[k] = v
+      const isNumberFor = (key: string) => k === key && typeof v === 'number'
+      if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('speed') || isNumberFor('interval'))) s[k] = v
     }
   }
   const out = s as BeatSettings
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
   if (typeof out.speed === 'number' && parseFrameMs(`${out.speed}`) === undefined) out.speed = DEFAULTS.speed
+  if (out.interval !== 'auto' && (typeof out.interval !== 'number' || parseMinutes(`${out.interval}`) === undefined)) out.interval = DEFAULTS.interval
+  if (!['wait', 'keep'].includes(out.onModelSwitch)) out.onModelSwitch = DEFAULTS.onModelSwitch
   return out
 }
 
@@ -191,7 +198,8 @@ export const TABS: readonly Tab[] = [
     rows: [
       { key: 'defaultOn', label: 'New sessions start', values: [false, true], fmt: onOff },
       {
-        key: 'interval', label: 'Beat after idle', values: [4, 30, 50, 55], fmt: v => `${v}m`, // 4: under a five-minute cache
+        key: 'interval', label: 'Beat after idle', values: ['auto', 4, 30, 50, 55], fmt: v => (v === 'auto' ? 'auto' : `${v}m`), // 4: under a five-minute cache
+        note: `auto fits your cache: every ${AUTO['1h']}m on a one-hour cache, every ${AUTO['5m']}m on a five-minute one.`,
         custom: { placeholder: 'e.g. 35m', parse: parseMinutes },
       },
       {
@@ -211,6 +219,11 @@ export const TABS: readonly Tab[] = [
         key: 'skipSmallTokens', label: '  smaller than', values: [10_000, 20_000, 50_000, 100_000],
         show: s => s.skipSmall, fmt: v => `${tokens(Number(v))} tokens`,
         custom: { placeholder: 'e.g. 35k', parse: parseTokens },
+      },
+      {
+        key: 'onModelSwitch', label: 'After /model', values: ['wait', 'keep'],
+        fmt: v => (v === 'wait' ? 'wait for your next turn' : 'keep warming the old model'),
+        note: 'Each model has its own cache, so after a switch your next message reads none of the old one.',
       },
     ],
   },

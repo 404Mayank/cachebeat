@@ -19,7 +19,10 @@ const usage = (read: number, wrote: number) => ({
 })
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
-type World = { fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS> }
+type World = {
+  fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS>
+  env?: Record<string, string>; settingsFile?: Record<string, unknown>; isSubscription?: boolean
+}
 
 const setup = async ($: Engine, on: On, world: World = {}) => {
   const clock = mock.clock(on)
@@ -38,9 +41,11 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     value: {
       startedAt: 0,
       context: { tokens: world.contextTokens, window: 200_000, ...(world.lastUsage ? { breakdown: { apiUsage: world.lastUsage } } : {}) },
-      rateLimits: [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
+      rateLimits: world.isSubscription === false ? [] : [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
     },
   }) as never)
+  on('env.get', (_$, e) => ({ value: world.env?.[e.name] }) as never)
+  on('settings.read', () => ({ value: world.settingsFile ?? {} }) as never)
   on('model.fork', () => {
     forks.push(clock.now())
     return { value: replies[forks.length - 1] ?? replies.at(-1) ?? ok } as never
@@ -62,9 +67,13 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('ui.focus', () => ({})) // the engine's ring; a move the test raises lands
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('classic.PostModelSwitch', () => ({}))
+  on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return { clock, forks, logs, toasts, tails, store, specs }
 }
+
+const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
 
 const cmd = async ($: Engine, args: string) =>
   (await $.command.run({ command: 'cachebeat', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })).text
@@ -232,7 +241,7 @@ test('global on sets the default and turns this session on; global off the rever
 test('an interval set for the session leaves the global one; set globally, it changes it', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   await cmd($, '7')
-  expect(stored(store).interval).toBe(50)
+  expect(stored(store).interval).toBe('auto')
   await cmd($, 'off')
   store.set('settings', { ...DEFAULTS, intervalScope: 'global' })
   await $.turn.complete(turn) // picks up the store
@@ -382,8 +391,8 @@ test('a beat can toast', async ($: Engine, on: On) => {
   expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
 })
 
-test('stops when the fork was not served from cache', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }] })
+test('at a fixed interval, stops when the fork was not served from cache', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }], settings: { interval: 50 } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(IDLE * 3)
@@ -566,8 +575,8 @@ test('the settings pane: tabs, toggles in place, pickers for the rest', async ($
   expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeDefined()
 
   await ui.press({ key: 'row:interval' }) // more: a picker
-  expect(await buttons(ui, 'opt:')).toHaveLength(4)
-  await ui.press({ key: 'opt:0' })
+  expect(await buttons(ui, 'opt:')).toHaveLength(5)
+  await ui.press({ key: 'opt:1' })
   expect(stored(store).interval).toBe(4)
   expect(await ui.find({ key: 'row:interval' })).toBeDefined() // back on the tab
 
@@ -666,7 +675,7 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
 type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) => $.tool.call({ tool: TOOL[name], ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'default', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'default', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
   plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
@@ -680,7 +689,7 @@ test('both tools register, every setting in the schema with the pane\'s ranges',
   expect(specs).toEqual([STATE, SET])
   const settings = props(props(SET.inputSchema).settings)
   expect(Object.keys(settings).sort()).toEqual(Object.keys(DEFAULTS).sort())
-  expect((settings.interval as Args).anyOf).toEqual([{ type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }])
+  expect((settings.interval as Args).anyOf).toEqual([{ enum: ['auto'] }, { type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }])
   expect((settings.speed as Args).anyOf).toEqual([{ enum: ['slow', 'normal', 'fast'] }, { type: 'number', minimum: 20, maximum: 500 }, { type: 'null' }])
 })
 
@@ -688,7 +697,7 @@ test('state on a fresh session: off, at the default interval, the settings as th
   await setup($, on)
   expect(await stateNow($)).toEqual({ session: FRESH, settings: DEFAULTS, defaults: {} })
   await call($, 'set', { settings: { interval: 30, showTokens: true } })
-  expect((await stateNow($)).defaults).toEqual({ interval: 50, showTokens: false })
+  expect((await stateNow($)).defaults).toEqual({ interval: 'auto', showTokens: false })
 })
 
 const set = async ($: Engine, args: Args) => JSON.parse((await call($, 'set', args)).result as string)
@@ -699,14 +708,14 @@ test('a session interval turns beating on and leaves the default; null follows i
   expect(await set($, { session: { intervalMinutes: 20 } })).toEqual({
     changed: ['session.enabled', 'session.intervalMinutes'], session: on20, settings: {},
   })
-  expect(stored(store).interval).toBe(50)
+  expect(stored(store).interval).toBe('auto')
   expect((await set($, { session: { intervalMinutes: null } })).session).toEqual({ ...FRESH, enabled: true, nextBeat: 'after the next turn' })
   expect((await set($, { session: { intervalMinutes: 30, enabled: false } })).session.enabled).toBe(false)
 })
 
 test('set answers with what changed and those settings alone; null resets a setting', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
-  expect(await set($, { settings: { skipSmall: true, skipSmallTokens: 35_000, interval: 50 } })).toEqual({
+  expect(await set($, { settings: { skipSmall: true, skipSmallTokens: 35_000, interval: 'auto' } })).toEqual({
     changed: ['settings.skipSmall', 'settings.skipSmallTokens'], session: FRESH, settings: { skipSmall: true, skipSmallTokens: 35_000 },
   })
   expect(await set($, { settings: { skipSmallTokens: null, customColor: null } })).toEqual({
@@ -792,4 +801,97 @@ test('a call is one dim line in the transcript, its answer not drawn', async ($:
   expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat: read the state'])
   expect(await draw($, toolRow('ToolResult', TOOL.set, change))).toEqual([''])
   expect(await draw($, toolRow('ToolResult', TOOL.state, {}))).toEqual([''])
+})
+
+// the cache's lifetime, by Claude Code's own order (code.claude.com/docs/en/prompt-caching)
+const TTL_CASES: [string, World, string, number][] = [
+  ['a subscription within its usage', {}, '1h', 50],
+  ['no subscription: an API key or a cloud provider', { isSubscription: false }, '5m', 4],
+  ['a subscription on usage credits', { percentUsed: 100, settings: { stopAtUsage: 100 } }, '5m', 4],
+  ['FORCE_PROMPT_CACHING_5M, over every other choice', { env: { FORCE_PROMPT_CACHING_5M: '1', CLAUDE_CODE_PROMPT_CACHE_TTL: '1h' } }, '5m', 4],
+  ['CLAUDE_CODE_PROMPT_CACHE_TTL, over the setting', { env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '5m' }, settingsFile: { promptCacheTtl: '1h' } }, '5m', 4],
+  ['the promptCacheTtl setting, off a subscription', { isSubscription: false, settingsFile: { promptCacheTtl: '1h' } }, '1h', 50],
+  ['the setting, over ENABLE_PROMPT_CACHING_1H', { env: { ENABLE_PROMPT_CACHING_1H: '1' }, settingsFile: { promptCacheTtl: '5m' } }, '5m', 4],
+  ['ENABLE_PROMPT_CACHING_1H, off a subscription', { isSubscription: false, env: { ENABLE_PROMPT_CACHING_1H: 'true' } }, '1h', 50],
+  ['a value Claude Code ignores', { isSubscription: false, env: { CLAUDE_CODE_PROMPT_CACHE_TTL: '2h' }, settingsFile: { promptCacheTtl: 'long' } }, '5m', 4],
+]
+for (const [name, world, ttl, minutes] of TTL_CASES) {
+  test(`auto reads the cache's lifetime: ${name}`, async ($: Engine, on: On) => {
+    await setup($, on, world)
+    const { session } = await stateNow($)
+    expect([session.cacheTtl, session.intervalMinutes]).toEqual([ttl, minutes])
+  })
+}
+
+test('auto beats at 4m on a five-minute cache', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on, { isSubscription: false })
+  expect(await cmd($, 'on')).toBe('on, every 4m idle · starts after your next turn')
+  await $.turn.complete(turn)
+  expect(await cmd($, '')).toBe('on, every 4m idle · 0 beats · next beat in 4m')
+  await clock.advance(8 * M)
+  expect(forks).toEqual([4 * M, 8 * M])
+})
+
+test('under auto, a cache gone before the hour beats every 4m from there, and stops if that misses too', async ($: Engine, on: On) => {
+  const miss = { ...ok, usage: usage(0, 90_000) }
+  const { clock, forks, logs } = await setup($, on, { fork: [miss, ok, miss] })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(logs.at(-1)).toBe("the cache was not served (0 read, 90,000 written): this session's cache lasts 5 minutes, so beats come every 4m")
+  expect(await cmd($, '')).toBe('on, every 4m idle · 0 beats · next beat in 4m')
+  expect((await stateNow($)).session.cacheTtl).toBe('5m')
+  await clock.advance(8 * M)
+  expect(forks).toEqual([IDLE, IDLE + 4 * M, IDLE + 8 * M])
+  expect(logs.at(-1)).toContain('stopped: the cache was not served')
+})
+
+const SWITCH = {
+  from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5', requested_model: 'sonnet', source: 'command', context_tokens: 90_000,
+  prompt_cache_warm: true, cache_ttl: '1h', estimated_cache_write_usd: 0.5, pricing: 'catalog',
+} as const
+
+test('after /model, beats wait for the next turn', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await $.classic.PostModelSwitch(SWITCH)
+  expect(logs.at(-1)).toBe('beats wait for your next turn: the new model has no cache yet')
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(forks.length).toBe(1)
+})
+
+test('after /model, keep warms the old model on', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on, { settings: { onModelSwitch: 'keep' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(IDLE)
+  expect(forks).toEqual([IDLE])
+})
+
+test('after a compaction between turns, beats wait for the next turn', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await $.session.compact({ messages: [said('user', 'hi'), said('assistant', 'ok')] } as never) // the transcript, which a session supplies
+  expect(logs.at(-1)).toBe('beats wait for your next turn: compaction replaced the conversation')
+  await clock.advance(IDLE * 2)
+  expect(forks.length).toBe(0)
+})
+
+test('on the desktop the countdown rides with the heart, and a beat logs no line for it', async ($: Engine, on: On) => {
+  const { clock, logs, tails } = await setup($, on, { settings: { animate: false } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  const desktop = { ...HINT, surface: 'desktop' } as const
+  await draw($, desktop)
+  expect(tails.at(-1)).toEndWith(' ×0 · next in 50m')
+  await clock.advance(IDLE)
+  expect(logs.some(l => l.startsWith('♥ cache renewed'))).toBe(false)
+  await draw($, desktop)
+  expect(tails.at(-1)).toEndWith(' ×1 · next in 50m')
 })
