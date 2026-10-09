@@ -70,7 +70,7 @@ export const STATE: ToolSpec = {
   name: 'state',
   description: [
     "cachebeat's state in this session and every setting with its value.",
-    "`intervalFrom` is `session` when this session has its own interval, `default` when it follows settings.interval. `skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum). `lastBeatReadTokens` is how much the last beat read from the cache. `defaults` has the default of each setting that differs from it.",
+    "`intervalFrom` is `session` when this session has its own interval, `default` when it follows settings.interval. `skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum). `lastBeatReadTokens` is how much the last beat read from the cache. `cacheTtl` is how long this session's cache lives, `1h` or `5m`, which an `auto` interval beats under. `paused`, when set, says why beats wait for the user's next turn (a model switch, a compaction). `defaults` has the default of each setting that differs from it.",
   ].join('\n\n'),
   inputSchema: object({}),
 }

@@ -675,7 +675,7 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
 type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) => $.tool.call({ tool: TOOL[name], ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'default', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'default', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null, paused: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
   plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
@@ -857,9 +857,11 @@ test('after /model, beats wait for the next turn', async ($: Engine, on: On) => 
   await $.turn.complete(turn)
   await $.classic.PostModelSwitch(SWITCH)
   expect(logs.at(-1)).toBe('beats wait for your next turn: the new model has no cache yet')
+  expect((await stateNow($)).session).toMatchObject({ nextBeat: 'after the next turn', paused: 'the model changed' })
   await clock.advance(IDLE * 2)
   expect(forks.length).toBe(0)
   await $.turn.complete(turn)
+  expect((await stateNow($)).session.paused).toBe(null)
   await clock.advance(IDLE)
   expect(forks.length).toBe(1)
 })
@@ -879,6 +881,7 @@ test('after a compaction between turns, beats wait for the next turn', async ($:
   await $.turn.complete(turn)
   await $.session.compact({ messages: [said('user', 'hi'), said('assistant', 'ok')] } as never) // the transcript, which a session supplies
   expect(logs.at(-1)).toBe('beats wait for your next turn: compaction replaced the conversation')
+  expect((await stateNow($)).session.paused).toBe('compaction replaced the conversation')
   await clock.advance(IDLE * 2)
   expect(forks.length).toBe(0)
 })
@@ -894,4 +897,14 @@ test('on the desktop the countdown rides with the heart, and a beat logs no line
   expect(logs.some(l => l.startsWith('♥ cache renewed'))).toBe(false)
   await draw($, desktop)
   expect(tails.at(-1)).toEndWith(' ×1 · next in 50m')
+})
+
+test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { settings: { interval: 30 } })
+  expect(await set($, { settings: { interval: 'auto', onModelSwitch: 'keep' } })).toMatchObject({
+    changed: ['settings.interval', 'settings.onModelSwitch'], session: { intervalMinutes: 50, cacheTtl: '1h' },
+  })
+  expect([stored(store).interval, stored(store).onModelSwitch]).toEqual(['auto', 'keep'])
+  expect((await call($, 'set', { settings: { onModelSwitch: 'later' } })).deny)
+    .toBe('nothing changed: settings.onModelSwitch takes one of wait, keep or null, not "later"')
 })

@@ -12,6 +12,7 @@ export type Saved = {
   row: string | null // the latest turn's closing row, which carries the status line
   small: string | null // why the context is not kept warm, while it is under the minimum
   isCacheShort: boolean // a beat found this session's cache lasts five minutes, whatever its settings say
+  paused: string | null // why beats wait for the next turn though the cache was warm: a model switch, a compaction
 }
 
 /** How long the main conversation's prompt cache lives. */

@@ -24,7 +24,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
-  isCacheShort: false,
+  isCacheShort: false, paused: null,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS
@@ -317,7 +317,7 @@ async function stateOf($: EngineInterface) {
   const session = {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle === null ? 'default' : 'session',
     cacheTtl: s.isCacheShort ? '5m' : ttl,
-    beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small,
+    beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small, paused: s.paused,
   }
   const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
   return { session, settings: cfg, defaults }
@@ -507,6 +507,7 @@ export const register: Register = on => {
     const r = await next(e)
     if (cfg.onModelSwitch === 'wait' && !busy && s.lastWarm !== null) {
       s.lastWarm = null
+      s.paused = 'the model changed'
       if (s.enabled) $.ui.log('beats wait for your next turn: the new model has no cache yet')
       await schedule($)
     }
@@ -520,6 +521,7 @@ export const register: Register = on => {
     const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
     if (isDone && !busy && s.lastWarm !== null) {
       s.lastWarm = null
+      s.paused = 'compaction replaced the conversation'
       if (s.enabled) $.ui.log('beats wait for your next turn: compaction replaced the conversation')
       await schedule($)
     }
@@ -540,6 +542,7 @@ export const register: Register = on => {
       busy = false
       rowPending = true
       s.lastReal = s.lastWarm = await $.clock.now()
+      s.paused = null
       await syncSettings($)
       await schedule($)
     }
