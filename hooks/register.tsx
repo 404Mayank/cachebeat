@@ -225,13 +225,13 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   else {
     const now = await $.clock.now()
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
-    if (since >= MAX_TTL) p = 'waiting' // nothing warm to keep; the next turn starts it
+    if (since >= MAX_TTL || s.paused) p = 'waiting' // nothing warm to keep, or none of use: the next turn starts it
     else {
       if (cfg.interval === 'auto' && s.idle === null) ttl = await cacheTtl($) // usage can cross into credits
       if (call !== scheduling) return undefined
       ms = Math.max(0, idle() - since)
       s.nextAt = now + ms
-      timer = $.clock.after(ms, () => void beat($))
+      timer = $.clock.after(ms, () => void scheduledBeat($))
     }
   }
   // a newer call, begun while this one awaited, sets the timer and the heart: two would each arm one
@@ -252,9 +252,19 @@ function announce($: EngineInterface, text: string) {
 
 /** Beats wait for the next turn, which will cache what a beat would have to write: says why, once. */
 async function pause($: EngineInterface, why: string, said: string) {
-  s.lastWarm = null
+  if (s.enabled && s.paused !== why) $.ui.log(`beats wait for your next turn: ${said}`)
   s.paused = why
-  if (s.enabled) $.ui.log(`beats wait for your next turn: ${said}`)
+  await schedule($)
+}
+
+const MODEL_CHANGED = 'the model changed'
+const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have settled
+
+/** Beats paused for a model switch go on once the model is back to the one the cache was warmed on. */
+async function resumeIfWarmed($: EngineInterface) {
+  if (s.paused !== MODEL_CHANGED || busy || (await $.session.model()) !== s.warmModel) return
+  s.paused = null
+  if (s.enabled) $.ui.log('beats go on: back on the model the cache was warmed on')
   await schedule($)
 }
 
@@ -269,7 +279,6 @@ function stop($: EngineInterface, why?: string) {
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
   if (busy) return 'a turn is running; the beat waits for it to end'
-  if (!s.enabled) return 'off'
   const now = await $.clock.now()
   if (now - (s.lastReal ?? now) >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
   if (now - (s.lastWarm ?? now) >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
@@ -287,8 +296,8 @@ async function beat($: EngineInterface): Promise<string> {
   const model = await $.session.model()
   const isNewModel = s.warmModel !== null && model !== s.warmModel
   if (isNewModel && cfg.onModelSwitch === 'wait') {
-    await pause($, 'the model changed', 'the new model has no cache yet')
-    return 'beats wait for your next turn: the model changed'
+    await pause($, MODEL_CHANGED, 'the new model has no cache yet')
+    return `beats wait for your next turn: ${MODEL_CHANGED}`
   }
 
   beating = true
@@ -297,7 +306,7 @@ async function beat($: EngineInterface): Promise<string> {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
     if (!isTransient) return stop($, r.error === 'rate_limit' ? 'rate limited' : `API error (${r.error})`)
-    if (!busy && s.enabled) timer = $.clock.after(RETRY, () => void beat($))
+    if (!busy && s.enabled) timer = $.clock.after(RETRY, () => void scheduledBeat($))
     return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
@@ -331,6 +340,9 @@ async function beat($: EngineInterface): Promise<string> {
   await schedule($)
   return renewed
 }
+
+/** A beat its timer brought: none once beating was turned off, whatever timer was still set. */
+const scheduledBeat = ($: EngineInterface) => (s.enabled ? beat($) : Promise.resolve('off'))
 
 /** A beat asked for by hand: never one that would switch cachebeat off for having nothing to fork. */
 const beatNow = ($: EngineInterface) => (s.lastReal === null ? Promise.resolve('nothing to keep warm until this session has a turn') : beat($))
@@ -448,6 +460,7 @@ function stopPaneTicker() {
 /** Shows a page of the pane and puts the focus on `key` there; `isLanding` as `focusOn` takes it. */
 async function goTo($: EngineInterface, page: PanePage, key: string, isLanding = false) {
   isResetArmed = false
+  notice = '' // the last outcome was about where the person was, not where they go
   await update($, pageAtom, () => page)
   await focusOn($, key, isLanding)
 }
@@ -571,8 +584,11 @@ export const register: Register = on => {
   on('classic.PostModelSwitch', async ($, e, next) => {
     const r = await next(e)
     if (!busy && s.lastWarm !== null) {
-      if (cfg.onModelSwitch === 'wait') await pause($, 'the model changed', 'the new model has no cache yet')
-      else if (s.enabled) $.ui.log("the next beat writes the new model's cache")
+      if (cfg.onModelSwitch === 'wait') {
+        await pause($, MODEL_CHANGED, 'the new model has no cache yet')
+        // the switch takes effect once this hook settles: a switch back finds the warmed model then
+        $.clock.after(SETTLE, () => void resumeIfWarmed($))
+      } else if (s.enabled) $.ui.log("the next beat writes the new model's cache")
     }
     return r
   })

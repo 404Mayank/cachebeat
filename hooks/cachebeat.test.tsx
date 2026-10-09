@@ -876,9 +876,10 @@ const SWITCH = {
 } as const
 
 test('after /model, beats wait for the next turn', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on)
+  const { clock, forks, logs, switchTo } = await setup($, on)
   await cmd($, 'on')
   await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
   await $.classic.PostModelSwitch(SWITCH)
   expect(logs.at(-1)).toBe('beats wait for your next turn: the new model has no cache yet')
   expect((await stateNow($)).session).toMatchObject({ nextBeat: 'after the next turn', paused: 'the model changed' })
@@ -1036,5 +1037,43 @@ test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and
   expect(moved().slice(before)).toEqual(['opt'])
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
   expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-6 tabs · esc closes')).toBe(true)
+  await ui.unmount()
+})
+
+test('switched to another model and back while idle, beats go on from the cache still warm', async ($: Engine, on: On) => {
+  const { clock, forks, logs, switchTo } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe('the model changed')
+  switchTo(OPUS)
+  await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
+  await clock.advance(2000)
+  expect(logs.at(-1)).toBe('beats go on: back on the model the cache was warmed on')
+  expect((await stateNow($)).session.paused).toBe(null)
+  await clock.advance(IDLE)
+  expect(forks).toEqual([IDLE]) // counted from the turn, which warmed it
+})
+
+test('a beat by hand works while beating is off, after a turn', async ($: Engine, on: On) => {
+  const { forks } = await setup($, on)
+  await $.turn.complete(turn)
+  expect(await cmd($, 'now')).toBe('♥ cache renewed (90,000 read, 0 written)')
+  expect(forks.length).toBe(1)
+  expect(await cmd($, '')).toBe('off') // and it stays off
+})
+
+test('a refusal in the footer goes once the person moves on', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:interval' })
+  await ui.input({ key: 'custom', text: '90' })
+  const refusal = { type: 'Text', text: 'Beat after idle takes 1–55 minutes, not "90"' } as const
+  expect(await ui.find(refusal)).toBeDefined()
+  await ui.press({ key: 'back' })
+  expect(await ui.find(refusal)).toBe(undefined)
   await ui.unmount()
 })
