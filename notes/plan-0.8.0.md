@@ -1,6 +1,6 @@
 # Plan: 0.8.0, where settings apply
 
-Status: a proposal, not started. The open questions at the end need answers before work begins.
+Status: a proposal, not started. Decided so far: the names (below). 0.8.0 gets built in a local session, where the menu can be seen in a terminal and the desktop app. A cloud session can run the tests, but nobody can look at the menu there.
 
 ## The problem
 
@@ -203,7 +203,7 @@ The Commands table gains the project rows. The Beating table loses `/cachebeat 3
 
 ## Open questions
 
-1. **Names.** Should the widest scope be "all projects", "everywhere" or "global"? Should `all` work as a command word beside `global`? This plan recommends "all projects" in text, with `global` kept as the command word.
+1. **Names. Decided:** the widest scope is "all projects" in the menu, answers, README and tools. `global` stays the command word, since it has already shipped.
 2. **Should more settings get a project scope?** For example **After /model**, **Stop at usage** or **Skip small chats**. This plan recommends no, until someone asks.
 3. **Should `/cachebeat project on` turn this session on too,** as `global on` does? This plan recommends yes, saying so in the answer.
 4. **Should a session that starts on because of its project say why** in a log line, once? Or should that be left to `/cachebeat`? This plan recommends leaving it to `/cachebeat`, so the transcript stays quiet.
