@@ -39,4 +39,11 @@ The report again named a ref and paths that don't exist (`main 15e2b3b` for `15a
 
 The summary ticked 5 of 7 checks. The unticked two were "MCP servers and directory match" and "Name and publisher checks". No finding named a name or publisher problem, and the report listed only one block and one hold.
 
+## Listing fields
+
+The submission form's listing step asks for a privacy policy and terms of service. Both are optional, and both are `plugin.json` fields that the directory reads and Claude Code ignores. `claude plugin validate --strict` accepts both on 2.1.287 and later, so CI passes.
+
+- `privacyPolicyUrl` (0.7.4) points to the README's Privacy section.
+- `termsOfServiceUrl` (0.7.5) points to its Disclaimer.
+
 The checklist also says that README images in Markdown syntax and the `icon` in `plugin.json` are fine. Don't name bundled images or fonts in commands, hooks or scripts, or in backticks or code blocks.
