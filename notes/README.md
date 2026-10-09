@@ -63,6 +63,14 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 - **0.7.0 split one look into two.** `color`, `customColor`, `effect`, `animate`, `speed` and `timing` became `heart*` and `line*` (`heartHex` and `lineHex` for the custom color). `normalize()` copies an old key into both parts unless a part already has its own, then drops it.
 - **Say a changed default in the release notes,** especially one that changes behavior, like stopping at 90% instead of 100%.
 
+### How 0.7.0 went out, as a pattern
+
+1. The work went on a branch (`v0.7`), pushed, with a PR into `main`. CI runs on the PR, on 2.1.287 and the latest version, without releasing.
+2. Once both legs passed, `main` was fast-forwarded to the branch and pushed (`git merge --ff-only`). That kept the commits the same, so `dev`'s history lines up. GitHub marks the PR merged.
+3. CI on `main` tagged `v<version>` and made the release with generated notes.
+4. The notes were edited with `gh release edit` to put a short summary and any changed defaults on top.
+5. `main` was merged into `dev`, and the release branch deleted.
+
 ### Where a release goes
 
 - **GitHub:** the `v<version>` tag and release, created by CI.

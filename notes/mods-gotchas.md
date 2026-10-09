@@ -75,6 +75,18 @@ Things about mods, the engine and the test kit that took time to work out. These
   - *Testing:* the test kit has no focus to move, but each try logs `focus <key>: …` at debug, so a test counts the tries from the log.
 - **Before 0.7.0, a desktop user saw only `♥ cache renewed (…)` per beat:** the fallback log for "no closing row seen".
 
+## Old versions (found in 0.7.0's CI)
+
+- **On 2.1.287 a `Button` needs a `label` or a single string child.** Newer builds also accept `Text` children ("a chip, a dim part"). For a dim button, use `<Button dimColor>` with a string. The test kit on the current build accepts both, so only CI's 2.1.287 leg catches it.
+- **A `Button` with a `hotkey` draws its own `r: ` before its label.** Don't write the key into the label too.
+- **Every API 0.7.0 added works on 2.1.287:** `$.env.get`, `$.settings.read`, `classic.PostModelSwitch`, `session.compact`, `AbovePrompt`, `Box` `minWidth`, and the kit's `$.classic`. CI's 2.1.287 leg passed, so the floor stays.
+- **Testing an old version locally:**
+  1. `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder.
+  2. npm blocks its install script until you approve it: `npm install-scripts approve @anthropic-ai/claude-code`.
+  3. `./node_modules/.bin/claude plugin test <repo>`.
+
+  Or push and let CI run both legs.
+
 ## Types
 
 - **`tool.call` matchers only take known tool names.** With MCP servers connected, the generated `McpToolInputs` lists only those servers' tools, so `{ tool: 'mcp__cachebeat__set' }` fails `tsc`. Declare the plugin's own tools in `types/index.d.ts` under `interface McpToolInputs`; that also types `e.session` and `e.settings`. Pinboard doesn't, and probably fails `tsc` once an MCP server is connected (a guess, not checked).
