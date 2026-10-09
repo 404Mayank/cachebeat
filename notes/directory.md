@@ -22,4 +22,19 @@ The report named a ref and file paths that didn't match the repo (`main@fb1066c`
 | Answers a tool call; hooks `command.run` | Warning | Our own tools and our own command. | README line under "What it sends". |
 | `EXTENSIONS`, `ASSETS_PASSED_UNREAD` | Note | | |
 
+## The second validation (0.7.0)
+
+The report again named a ref and paths that don't exist (`main 15e2b3b` for `15a263e`, `register.ts` and `cachebeat.test.ts` for the `.tsx` files). Of its line numbers (362, 508, 554, 561, 585, 620), only 554 lands on the hook it names. These are the findings, read against the source:
+
+| Finding | Result | What it is | Status |
+| --- | --- | --- | --- |
+| `MOD_CAPABILITY_USE_NOT_PLAIN` | Blocks | The report now spells the rule out: a `$` call is a bare `$.noun.method(…)`, with no parenthesis, cast, `!`, `??` or square brackets around it. 0.7.0 added four calls that break it: `(await $.settings.read()).promptCacheTtl` in `cacheTtl`, `(await $.session.model()) !== …` in `resumeIfWarmed`, and `(await $.store.get('customs')) as …` in `keepCustoms` and in `openSettings` (the second also with `?? {}`). Four older calls have the same shape: `(await $.clock.now())` three times, and `$.model.fork(…).finally(…)`. | Not fixed yet. Nobody recorded whether 0.6.1 passed with the four older calls, so fix all eight. |
+| `MCP_FORWARDS_CREDENTIAL_ENV` | Hold | Both halves are in the test file, which ships. "Reads the installer's keys" is the `env.get` stub (added in 0.7.0 for the cache TTL tests), which answers any variable name from the test's world. "A command assembled at run time" is `` `mcp__cachebeat__${…}` ``, the test's name for our two tools. | Not fixed. The scan raises a hold again on each version, so every release would wait for a reviewer. Pinning the stub to the three names `cacheTtl` reads, and spelling out the tool names, should clear it (untested). |
+| Unknown `plugin.json` fields | Warning | `documentationUrl`, `supportUrl` and `types`; `icon` as a field from another tool's manifest | Kept, as before. |
+| `MOD_ANSWERS_FOR_TOOL`, `MOD_HOOKS_OPERATION` | Warning | Our two tools, and `/cachebeat` | The README line under "What it sends" covers both. |
+| `MOD_HOOKS_POLICY_EVENT` | Warning | `classic.PostModelSwitch`, new in 0.7.0. It passes the switch on unchanged, then pauses beats or logs a line. | The README could say that it changes nothing. |
+| `MOD_REGISTERS_SURFACES`, `ASSETS_PASSED_UNREAD` | Note | | |
+
+The summary ticked 5 of 7 checks. The unticked two were "MCP servers and directory match" and "Name and publisher checks". No finding named a name or publisher problem, and the report listed only one block and one hold.
+
 The checklist also says that README images in Markdown syntax and the `icon` in `plugin.json` are fine. Don't name bundled images or fonts in commands, hooks or scripts, or in backticks or code blocks.
