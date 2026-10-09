@@ -60,6 +60,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
   - someone who picked another value keeps theirs
 - **Someone who explicitly picked the old default had nothing saved.** They move to the new default too, and nothing in the store tells them apart. Avoiding that would take versioning the store. 0.7.0 moved lub-dub timing, tokens kept, and stopping at 90% usage this way.
 - **Renamed or removed keys:** `normalize()` drops keys it doesn't know and replaces invalid values with the defaults, so an old store never breaks a new version. A renamed key loses its value unless `normalize()` carries it across.
+- **0.7.0 split one look into two.** `color`, `customColor`, `effect`, `animate`, `speed` and `timing` became `heart*` and `line*` (`heartHex` and `lineHex` for the custom color). `normalize()` copies an old key into both parts unless a part already has its own, then drops it.
 - **Say a changed default in the release notes,** especially one that changes behavior, like stopping at 90% instead of 100%.
 
 ### Where a release goes
