@@ -52,6 +52,8 @@ Things about mods, the engine and the test kit that took time to work out. These
 
 ## Surfaces: the desktop app (found live, 0.7.0)
 
+**Status: passable, left open.** The desktop app isn't the maintainer's main surface: cachebeat is built for the terminal. On desktop it works and looks acceptable, but it isn't polished. Line animations keep small gaps, and heart-heavy ones space wide (below). It's left as it is on purpose. Contributions to tighten it are welcome; the `Svg`-grid idea below is the likely route.
+
 - **Loading a dev copy into the desktop app:** set `"CLAUDE_CODE_PLUGIN_DIRS": "<repo path>"` in the `env` block of `~/.claude/settings.json`, then start a new Code-tab session. The app's plugin manager page lists marketplace installs only, so a folder-loaded plugin never shows there. Check with `/cachebeat`, or with `<bundled claude> plugin list`.
 - **The desktop app ships its own Claude Code,** at `~/.config/Claude/claude-code/<version>/claude` (2.1.293 at the time). Its logs in `~/.config/Claude/logs/` carry no hook dispatches.
 - **`TurnDuration`** (the closing row the status line hangs under) is raised on the terminal only.
