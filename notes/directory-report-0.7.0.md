@@ -75,13 +75,9 @@ if (s.paused !== MODEL_CHANGED || busy) return
 const model = await $.session.model()
 if (model !== s.warmModel) return
 
-// 345: ModelForkResult is exported from 'claude-code'
-let r: ModelForkResult
-try {
-  r = await $.model.fork({ prompt: 'Reply with a single period.' })
-} finally {
-  beating = false
-}
+// 345: the call plain, .finally on a variable (try/finally with a `let` lost tsc's narrowing)
+const forking = $.model.fork({ prompt: 'Reply with a single period.' })
+const r = await forking.finally(() => (beating = false))
 ```
 
 **If the block remains after all eight,** try two more. `scheduledBeat` (line 386) and `beatNow` (line 389) are `const` arrow functions, not `function` declarations, and the rule says `$` goes to "a function declared at the top level". Rewriting them as `function` declarations costs nothing. `beatNow` was also in 0.6.1.
@@ -113,17 +109,17 @@ The test file ships because the plugin folder is the repo root, and `claude plug
 - You can submit, and a reviewer reads the held version.
 - The checklist says the scan can raise the same hold again on each new version. Until this is cleared, every release would wait for a reviewer, and none would publish by itself.
 
-**How to clear it (untested):** only Re-validate tells whether this works.
+**How to clear it:** only Re-validate tells whether this works. 0.7.1 did both of these:
 
-1. Limit the fake environment to the three names `cacheTtl` reads: one hook each, `on('env.get', { name: 'FORCE_PROMPT_CACHING_5M' }, …)` and so on. The types call `name` the event's identity, so a matcher on it should work.
+1. Fake the environment with the kit's `mock.env(on, world.env ?? {})`, so the test file has no `env.get` hook of its own. It works on 2.1.287 too. (Limiting a hook to the three names, `on('env.get', { name: 'FORCE_PROMPT_CACHING_5M' }, …)`, was the other option.)
 2. Write out the tool names in the test file: `const TOOL = { state: 'mcp__cachebeat__state', set: 'mcp__cachebeat__set' } as const`. In the `tool.register` stub, answer `e.name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set'`.
 
-**If that's not enough:** move the plugin into a subfolder and keep the tests outside it. That's a large change:
+**If the hold stays:** move the plugin into a subfolder and keep the tests outside it. That's a large change:
 
 - the marketplace `source`, CI's paths and the directory's plugin path all change
 - the checklist applies stricter script checks to a plugin in a subfolder
 
-Leave it unless the hold stays after the two changes above.
+Leave it unless the hold stays after 0.7.1.
 
 ## Warnings
 
@@ -163,12 +159,10 @@ The [pre-submission checklist](https://claude.com/docs/plugins/pre-submission-ch
 
 They don't list the `MOD_` codes, and they don't explain the checks summary.
 
-## Next
+## What 0.7.1 did
 
-Release 0.7.1 on `main`, with no change to behavior:
+- rewrote the eight calls, and made `scheduledBeat` and `beatNow` `function` declarations
+- made the two test-file changes
+- added the README sentence about `/model`
 
-1. Rewrite the eight calls.
-2. Make the two test-file changes.
-3. Optionally, add the README sentence.
-
-Then run the three checks, push, and Re-validate.
+Its tests passed on 2.1.295 and on 2.1.287 before it was pushed, and `tsc` was clean. Whether the block and the hold clear is known only from Re-validate.

@@ -91,13 +91,14 @@ Things about mods, the engine and the test kit that took time to work out. These
 
 - **`tool.call` matchers only take known tool names.** With MCP servers connected, the generated `McpToolInputs` lists only those servers' tools, so `{ tool: 'mcp__cachebeat__set' }` fails `tsc`. Declare the plugin's own tools in `types/index.d.ts` under `interface McpToolInputs`; that also types `e.session` and `e.settings`. Pinboard doesn't, and probably fails `tsc` once an MCP server is connected (a guess, not checked).
 - **The generated `claude-code-mcp` types don't list the plugin's own tools** (checked once), so the declaration doesn't clash. If it ever does (TS2717), drop ours.
+- **Keep the fork's result a `const`.** In 0.7.1, `let r: ModelForkResult` assigned inside `try`/`finally` made `tsc` stop narrowing `r.error` after `r.reason === 'aborted' ||`. `const forking = $.model.fork(…)` then `const r = await forking.finally(…)` keeps the narrowing, and the original timing too.
 
 ## The test kit (`claude plugin test`)
 
 - **Register a test's own hooks before the first `$` call.** `setup()` starts the session, so a test hook goes above `await setup($, on)`. Otherwise it throws "after the test first called $".
 - **`$.tool.register` needs a stub beneath it** (`on('tool.register', …)` in `setup`). Nothing answers it otherwise.
 - **A `classic.PreToolUse` deny reaches the test's `$.tool.call` as an errored result** (`isError: true`, the reason as `text`), not as `{ deny }`. `{ deny }` is what a plugin's own `$.tool.call` gets.
-- **Stub `env.get` and `settings.read`** in `setup()`, as the cache lifetime is read through them. `World` has `env`, `settingsFile` and `isSubscription` for that.
+- **Fake the environment with `mock.env(on, world.env ?? {})`, and stub `settings.read`,** in `setup()`, as the cache lifetime is read through them. `World` has `env`, `settingsFile` and `isSubscription` for that. `mock.env` works on 2.1.287 too. Until 0.7.1 the test hooked `env.get` itself, answering any name, and the directory read that as reading the user's keys (0.7.0's credential hold).
 - **`$.session.compact()` in a test needs the transcript passed in:** `$.session.compact({ messages: […] } as never)`. Without it, the event's `messages` isn't a list and every hook on it is skipped. A session supplies it itself.
 - **Classic events are raised through `$.classic.<Event>(fields)`,** such as `$.classic.PostModelSwitch(SWITCH)`. Each needs a stub beneath it, like `on('classic.PostModelSwitch', () => ({}))`.
 - **A `$` call left running after a test ends rejects the whole file run** ("no hooks module of that name is loaded"). A `void schedule($)` from `stop()` is one such call, so `schedule()` makes its `$` calls only on the path that arms a beat.
@@ -107,4 +108,6 @@ Things about mods, the engine and the test kit that took time to work out. These
 
 - **`/code-review ultra` bundles tracked files only.** An untracked new file (`hooks/tools.ts`, before its first commit) shows up as "module does not exist". Commit, or at least `git add`, new files before an ultrareview.
 - **`claude plugin validate` shows a matcher built from a constant as `?`** (`tool=?`, `requestId=?`). A literal resolves (`tool=mcp__cachebeat__set`). The plugin directory reads the source the same way, so its tool matchers are literals.
+- **Type-checking without a loaded session (a cloud session):** `npx -p typescript tsc -p .` needs `.claude-plugin/types/`, which the engine lays only when a session loads the plugin. Instead, point a scratch tsconfig (the options are in the header of the types file) at the `plugin-authoring` skill's `types/claude-code.d.ts`, plus `hooks` and `types`. That checks against the running build's API.
+- **Running 2.1.287 in a cloud session:** `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder ran without the install-script approval step, and its `claude plugin test` and `validate` work there.
 - **CI already checks the oldest supported version.** It runs on 2.1.287 and latest, so a passing CI run means the API works on 2.1.287. That's how `$.tool.register` was confirmed there.
