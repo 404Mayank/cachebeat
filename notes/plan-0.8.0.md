@@ -1,6 +1,6 @@
 # Plan: 0.8.0, where settings apply
 
-Status: a proposal, not started. Decided so far: the names (below). 0.8.0 gets built in a local session, where the menu can be seen in a terminal and the desktop app. A cloud session can run the tests, but nobody can look at the menu there.
+Status: a proposal, not started. The questions it raised are decided, under "Decisions" at the end. 0.8.0 gets built in a local session, where the menu can be seen in a terminal and the desktop app. A cloud session can run the tests, but nobody can look at the menu there.
 
 ## The problem
 
@@ -201,10 +201,10 @@ The Commands table gains the project rows. The Beating table loses `/cachebeat 3
    5. README
    6. tests throughout
 
-## Open questions
+## Decisions
 
 1. **Names. Decided:** the widest scope is "all projects" in the menu, answers, README and tools. `global` stays the command word, since it has already shipped.
-2. **Should more settings get a project scope?** For example **After /model**, **Stop at usage** or **Skip small chats**. This plan recommends no, until someone asks.
-3. **Should `/cachebeat project on` turn this session on too,** as `global on` does? This plan recommends yes, saying so in the answer.
-4. **Should a session that starts on because of its project say why** in a log line, once? Or should that be left to `/cachebeat`? This plan recommends leaving it to `/cachebeat`, so the transcript stays quiet.
-5. **Should 0.7.1 ship on its own first,** or be folded into 0.8.0? This plan recommends shipping it on its own.
+2. **More settings with a project scope. Decided: no.** Only **New sessions start** and **Beat after idle** get one, for now. **After /model**, **Stop at usage**, **Skip small chats** and the rest stay all projects until someone asks. The store's `projects` entry can take more keys later without a redesign.
+3. **`/cachebeat project on` turns this session on too. Decided: yes,** as `global on` does, and the answer says it did both.
+4. **Saying why a session started on. Decided: no log line.** A session that starts on because of its project doesn't log it: `/cachebeat` says where it comes from, and the transcript stays quiet.
+5. **0.7.1 ships on its own first. Decided: yes.** It's built and shipped from a cloud session, since it changes nothing on screen and the tests cover it. 0.8.0 is built in a local session.
