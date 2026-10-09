@@ -249,8 +249,8 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
             <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset all' : 'Reset all'}</Button>
           )}
           {resettable && (
-            <Button plain hotkey="r" key="resetRow" onPress={() => act.resetRow(resettable.key)}>
-              <Text dimColor>{`back to ${shown(resettable, DEFAULTS[resettable.key], s)}`}</Text>
+            <Button plain dimColor hotkey="r" key="resetRow" onPress={() => act.resetRow(resettable.key)}>
+              {`back to ${shown(resettable, DEFAULTS[resettable.key], s)}`}
             </Button>
           )}
         </Box>
