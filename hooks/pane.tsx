@@ -242,16 +242,18 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       {tab.preview && rule}
       {tab.preview && preview(els, s, tab.preview, v.tick)}
       {rule}
-      {tab.id === 'beating' && (
+      {(tab.id === 'beating' || resettable) && (
         <Box gap={1}>
-          <Button key="beatNow" onPress={() => (act.at('beatNow'), act.beatNow())}>Beat now</Button>
-          <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset all' : 'Reset all'}</Button>
+          {tab.id === 'beating' && <Button key="beatNow" onPress={() => (act.at('beatNow'), act.beatNow())}>Beat now</Button>}
+          {tab.id === 'beating' && (
+            <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset all' : 'Reset all'}</Button>
+          )}
+          {resettable && (
+            <Button plain hotkey="r" key="resetRow" onPress={() => act.resetRow(resettable.key)}>
+              <Text dimColor>{`back to ${shown(resettable, DEFAULTS[resettable.key], s)}`}</Text>
+            </Button>
+          )}
         </Box>
-      )}
-      {resettable && (
-        <Button plain hotkey="r" key="resetRow" onPress={() => act.resetRow(resettable.key)}>
-          <Text dimColor>{`back to ${shown(resettable, DEFAULTS[resettable.key], s)}`}</Text>
-        </Button>
       )}
       {help && <Text dimColor>{help}</Text>}
       {v.notice && <Text dimColor>{v.notice}</Text>}
