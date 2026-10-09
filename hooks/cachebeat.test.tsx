@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { VARIANTS, cells, loopIndex, previewFrame, variant } from './animations'
+import { VARIANTS, cells, loopIndex, previewFrame, slotWidths, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
 import { DEFAULTS, EPISODE, accept, glyphs, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
@@ -966,13 +966,13 @@ test('the status line\'s heart beats as one glyph by default, and its setting ta
   }
   expect(seen).toEqual(new Set(['♡', '♥'])) // one glyph, never wider
   expect(normalize({ statusHeart: 'nope' }).statusHeart).toBe('beat')
-  // a wide animation on the desktop takes a cell per character, as the terminal's grid has it, and
-  // the space after it is kept from collapsing
+  // a wide animation on the desktop takes a cell per character, as the terminal's grid has it, with a
+  // cell's margin before the words
   await set($, { settings: { statusHeart: 'classic' } })
   const texts = await draw($, BAND('desktop'))
   expect(texts.length).toBe(6) // Classic's five cells, then the words
   expect(texts.slice(0, 5).every(t => glyphs(t).length === 1)).toBe(true)
-  expect(texts[5]).toBe('\u00a0next beat in 50m')
+  expect(texts[5]).toBe('next beat in 50m') // a cell's margin before it, not a space
   expect(normalize({ statusHeart: 'ecg' }).statusHeart).toBe('ecg')
 })
 
@@ -988,4 +988,11 @@ test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engin
   expect((await stateNow($)).session.intervalFrom).toBe('auto')
   await set($, { settings: { interval: 30 } })
   expect((await stateNow($)).session.intervalFrom).toBe('default')
+})
+
+test('on a proportional font a heart\'s slot is half again a cell, wherever any frame puts one', () => {
+  expect(slotWidths(variant('wave'))).toEqual([1.5, 1.5, 1.5, 1.5, 1.5])
+  expect(slotWidths(variant('ecg'))[1]).toBe(1) // a line character
+  expect(slotWidths(variant('ecg')).at(-1)).toBe(1.5) // the heart at its end
+  for (const x of VARIANTS) expect(slotWidths(x).length).toBe(cells(x.loop[0]!))
 })

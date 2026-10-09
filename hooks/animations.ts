@@ -111,3 +111,14 @@ export function statusFrame(id: string, tick: number, timing: Timing, isHeartLit
   const x = variant(id)
   return x.loop[loopIndex(x, tick, timing)]!
 }
+
+const HEARTS = /[♥♡❤❥❦❧☙]/
+
+/**
+ * How many cells each of an animation's slots needs where a font is proportional: a heart, wider than
+ * a cell, needs half again one wherever any frame puts one; every other character fits a cell.
+ */
+export function slotWidths(x: Variant): number[] {
+  const frames = [...x.loop, ...x.blast].map(f => f.replaceAll('\ufe0e', ''))
+  return [...frames[0]!].map((_, i) => (frames.some(f => HEARTS.test([...f][i] ?? '')) ? 1.5 : 1))
+}

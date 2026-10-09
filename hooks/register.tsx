@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { Alert, BeatSettings, PanePage, Pulse, Saved, Ttl } from '../types'
-import { cells, loopIndex, statusFrame, variant } from './animations'
+import { cells, loopIndex, slotWidths, statusFrame, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
 import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, normalize, rowOf, spans, tokens } from './settings'
 import type { Span } from './settings'
@@ -678,14 +678,18 @@ export const register: Register = on => {
     if (width <= 1) return <Box>{paint(Text, joined([...head, ...rest]))}</Box>
     // a wider animation, on this proportional font, would change width from frame to frame and carry
     // the words after it along: each of its characters gets a cell of its own, centered in it, as the
-    // terminal's grid has them. The space after it would collapse at the next box's start, as in HTML
-    if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '\u00a0') }
+    // terminal's grid has them, so it is as wide as its frames' cells. A cell's margin, not the space,
+    // keeps the words off it: that space would collapse at the next box's start, as in HTML
+    if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '') }
     const slots = head.flatMap(sp => glyphs(sp.text).map(ch => ({ ...sp, text: ch })))
+    const widths = slotWidths(variant(c.statusHeart)) // a heart's slot is wider, wherever any frame has one
     return (
       <Box flexDirection="row">
-        {slots.map(sp => (
-          <Box width={1} flexShrink={0} justifyContent="center">{paint(Text, [sp])}</Box>
-        ))}
+        <Box flexDirection="row" flexShrink={0} marginRight={1}>
+          {slots.map((sp, i) => (
+            <Box width={widths[i] ?? 1} flexShrink={0} justifyContent="center">{paint(Text, [sp])}</Box>
+          ))}
+        </Box>
         {paint(Text, rest)}
       </Box>
     )
