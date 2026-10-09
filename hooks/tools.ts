@@ -4,7 +4,7 @@ import type { ToolSpec } from 'claude-code'
 import type { BeatSettings } from '../types'
 import { shown } from './pane'
 import type { Reader, Value } from './settings'
-import { AUTO, DEFAULTS, TABS, accept, parseMinutes, rowOf } from './settings'
+import { AUTO, DEFAULTS, accept, parseMinutes, rowOf } from './settings'
 
 /** Each setting, for the model; the unit and range are added from its reader. */
 const ABOUT: Record<keyof BeatSettings, string> = {
@@ -148,13 +148,11 @@ export function parseSet(input: { session?: unknown; settings?: unknown }): SetC
   return bad.length ? { error: `nothing changed: ${bad.join('; ')}` } : change
 }
 
-/** A setting's name as the pane labels it, its tab's title beside a label two tabs share. */
+/** A setting's name as the pane labels it, or as it reads out of its tab. */
 function label(key: keyof BeatSettings) {
   if (key === 'customColor') return 'Color'
-  const { tab, row } = rowOf(key)!
-  const name = row.label.trim()
-  const isShared = TABS.some(t => t !== tab && t.rows.some(r => r.label.trim() === name))
-  return isShared ? `${tab.title} ${name.toLowerCase()}` : name
+  const { row } = rowOf(key)!
+  return row.name ?? row.label.trim()
 }
 
 /** A `set` call in one line, as the transcript shows it: `this session on, every 20m · Beat after idle 30m`. */

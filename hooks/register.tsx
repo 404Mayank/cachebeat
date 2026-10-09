@@ -733,7 +733,8 @@ export const register: Register = on => {
         const i = row.values.indexOf(c[key])
         void goTo($, { ...page, picker: key }, i >= 0 ? `opt:${i}` : row.custom ? 'custom' : 'opt:0', true)
       },
-      pick: (key, value) => void setSettings($, { [key]: value }).then(() => goTo($, { ...page, picker: null }, `row:${key}`)),
+      pick: (key, value) => void setSettings($, { [key]: value }).then(() => (say($, ''), goTo($, { ...page, picker: null }, `row:${key}`))),
+      refuse: text => say($, text),
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
       toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($, undefined).then(r => r.text)).then(t => say($, `this session: ${t}`)),
       beatNow: () => void beatNow($).then(t => say($, t)),

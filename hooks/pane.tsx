@@ -2,7 +2,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { BeatSettings, PanePage } from '../types'
 import { previewFrame, statusFrame, variant } from './animations'
 import type { Preview, Row, Span, Value } from './settings'
-import { TABS, isHex, isLit, isPicker, rowOf, spans, tokens } from './settings'
+import { SESSION_HELP, TABS, isFlip, isHex, isLit, rowOf, spans, tokens } from './settings'
 
 export const PANE = 'cachebeat-settings'
 
@@ -17,6 +17,7 @@ export type Actions = {
   toggleSession: () => void
   beatNow: () => void
   reset: () => void
+  refuse: (text: string) => void // a typed value the setting doesn't take: says why in the footer
 }
 /** What the pane draws from, besides the settings. */
 export type View = {
@@ -33,6 +34,12 @@ export type View = {
 }
 
 const LABEL = 22
+
+/** What the pane's buttons do, for the help line while one is focused. */
+const BUTTON_HELP: Record<string, string> = {
+  beatNow: 'Beats now, and counts the next from there.',
+  reset: 'Puts every setting back to its default; press twice.',
+}
 
 export function paint(Text: Els['Text'], list: Span[]) {
   return list.map(sp => (sp.color ? <Text color={sp.color} dimColor={sp.dim}>{sp.text}</Text> : <Text dimColor={sp.dim}>{sp.text}</Text>))
@@ -119,6 +126,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
           <Button plain key="back" onPress={() => act.back()}>‹</Button>
           <Text bold>{row.label.trim()}</Text>
         </Box>
+        <Text dimColor>{row.help}</Text>
         {rule}
         {row.values.map((val, i) => {
           const heartNow = previewFrame(variant(s.variant), v.tick, s.timing)
@@ -148,14 +156,16 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
             value={isCustom ? shown(row, s[key], s) : ''}
             submitLabel="set"
             onSubmit={text => {
-              const val = row.custom!.parse(text)
+              const r = row.custom!.parse
+              const val = r(text)
               if (val !== undefined) act.pick(key, val)
+              else act.refuse(`${row.label.trim()} takes ${r.min}–${r.max} ${r.unit}, not "${text.trim()}"`)
             }}
           />
         )}
         {tab.preview && !isVariant && rule}
         {tab.preview && !isVariant && preview(els, trial, tab.preview, v.tick)}
-        {row.note && <Text dimColor>{row.note}</Text>}
+        {v.notice && <Text dimColor>{v.notice}</Text>}
         <Text dimColor>{v.isTerminal ? '↑↓ move · enter picks · esc back' : 'enter or a click picks · esc back'}</Text>
       </Box>
     )
@@ -170,7 +180,12 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
     ring.push(`row:${r.key}`)
     if (r.key === 'color' && s.color === 'custom') ring.push('customColor')
   }
-  ring.push('beatNow', 'reset')
+  // the buttons sit where they belong: beating now with beating, resetting all at the end
+  if (tab.id === 'beating') ring.push('beatNow')
+  if (tab.id === TABS.at(-1)!.id) ring.push('reset')
+  const focusedRow = rows.find(r => v.focus === `row:${r.key}` || (r.key === 'color' && v.focus === 'customColor'))
+  const help = v.focus === 'session' ? SESSION_HELP : focusedRow?.help ?? BUTTON_HELP[v.focus] ?? ''
+  const keys = `1-${TABS.length}`
 
   const line = (label: string, value: string, more = '') => `${label.padEnd(LABEL)}${value}${more}`
   const tree = (
@@ -197,12 +212,12 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
           <Button
             plain
             key={`row:${r.key}`}
-            onPress={() => (isPicker(r) ? act.open(r.key) : (act.at(`row:${r.key}`), act.set({ [r.key]: r.values[r.values.indexOf(s[r.key]) === 0 ? 1 : 0] })))}
+            onPress={() => (isFlip(r) ? (act.at(`row:${r.key}`), act.set({ [r.key]: r.values[r.values.indexOf(s[r.key]) === 0 ? 1 : 0] })) : act.open(r.key))}
           >
             {line(
               r.label,
               shown(r, s[r.key], s) + (r.key === 'interval' ? intervalTail(s, v) : ''),
-              isPicker(r) ? ' ›' : '',
+              isFlip(r) ? '' : ' ›',
             )}
           </Button>
           {r.key === 'color' && s.color === 'custom' && (
@@ -212,24 +227,24 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
               placeholder="#rrggbb"
               value={s.customColor}
               submitLabel="set"
-              onSubmit={val => isHex(val.trim()) && act.set({ customColor: val.trim().toLowerCase() })}
+              onSubmit={val => (isHex(val.trim()) ? act.set({ customColor: val.trim().toLowerCase() }) : act.refuse(`hex takes #rrggbb, not "${val.trim()}"`))}
             />
           )}
         </Box>
       ))}
-      {tab.id === 'look' && s.heartPlacement === 'tail' && <Text dimColor>The heart is on the hint line, which draws it dim: color reaches the status line.</Text>}
       {tab.preview && rule}
       {tab.preview && preview(els, s, tab.preview, v.tick)}
       {rule}
-      <Box gap={1}>
-        <Button key="beatNow" onPress={() => (act.at('beatNow'), act.beatNow())}>Beat now</Button>
-        <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset' : 'Reset'}</Button>
-      </Box>
+      {tab.id === 'beating' && <Button key="beatNow" onPress={() => (act.at('beatNow'), act.beatNow())}>Beat now</Button>}
+      {tab.id === TABS.at(-1)!.id && (
+        <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset all' : 'Reset all'}</Button>
+      )}
+      {help && <Text dimColor>{help}</Text>}
       {v.notice && <Text dimColor>{v.notice}</Text>}
       <Text dimColor>
-        {!v.isTerminal ? 'tab moves · enter or a click changes · 1-5 tabs · esc closes'
-          : v.focus.startsWith('tab:') ? '↑↓ tabs · enter or 1-5 opens · esc closes'
-          : '↑↓ move · enter changes · 1-5 tabs · esc back to the tabs'}
+        {!v.isTerminal ? `tab moves · enter or a click changes · ${keys} tabs · esc closes`
+          : v.focus.startsWith('tab:') ? `↑↓ tabs · enter or ${keys} opens · esc closes`
+          : `↑↓ move · enter changes · ${keys} tabs · esc back to the tabs`}
       </Text>
     </Box>
   )

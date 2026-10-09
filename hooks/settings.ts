@@ -6,13 +6,13 @@ export const DEFAULTS: BeatSettings = {
   interval: 'auto',
   intervalScope: 'session',
   stopAfterHours: 8,
-  stopAtUsage: 100,
+  stopAtUsage: 90,
   skipSmall: false,
   skipSmallTokens: 20_000,
   animate: true,
   variant: 'classic',
   speed: 'normal',
-  timing: 'linear',
+  timing: 'lubdub',
   heartPlacement: 'tail',
   showCount: true,
   color: 'claude',
@@ -20,7 +20,7 @@ export const DEFAULTS: BeatSettings = {
   effect: 'steady',
   statusLine: 'spaced',
   showCountdown: true,
-  showTokens: false,
+  showTokens: true,
   statusHeart: 'beat',
   onBeat: 'none',
   onStop: 'log',
@@ -174,16 +174,18 @@ export const tokens = (n: number) =>
 
 export type Value = string | number | boolean
 /**
- * One row of the settings pane. An on/off row toggles in place on Enter; one of named choices opens
- * a picker, whose focused option the preview shows before it is picked.
+ * One row of the settings pane. A row of two choices (on/off among them) flips in place on Enter;
+ * one of more, or that takes a typed value, opens a list, whose focused choice the preview shows
+ * before it is picked. `help` is what the row does, shown while it is focused and above its list.
  */
 export type Row = {
   key: keyof BeatSettings
   label: string
+  name?: string // the label out of its tab, where it would be unclear: in Claude's transcript line
   values: readonly Value[]
+  help: string
   show?: (s: BeatSettings) => boolean
   fmt?: (v: Value, s: BeatSettings) => string
-  note?: string // a dim hint under the picker's choices
   custom?: { placeholder: string; parse: Reader } // a typed value besides the choices
 }
 
@@ -194,87 +196,115 @@ const onOff = (v: Value) => (v ? 'on' : 'off')
 const ALERTS = ['none', 'log', 'toast', 'both']
 const alert = (v: Value) => (v === 'both' ? 'log + toast' : `${v}`)
 
+/** The pane's own row on the Beating tab, not a setting: whether this session beats. */
+export const SESSION_HELP = "Beats for this session alone. New sessions start as 'New sessions start' says."
+
+const TERMINAL_ONLY = 'The desktop app draws no heart under the prompt: there the status line carries it.'
+
 export const TABS: readonly Tab[] = [
   {
     id: 'beating', title: 'Beating',
     rows: [
-      { key: 'defaultOn', label: 'New sessions start', values: [false, true], fmt: onOff },
+      { key: 'defaultOn', label: 'New sessions start', values: [false, true], fmt: onOff, help: 'Whether new sessions start beating. Open sessions keep what they have.' },
       {
-        key: 'interval', label: 'Beat after idle', values: ['auto', 4, 30, 50, 55], fmt: v => (v === 'auto' ? 'auto' : `${v}m`), // 4: under a five-minute cache
-        note: `auto fits your cache: every ${AUTO['1h']}m on a one-hour cache, every ${AUTO['5m']}m on a five-minute one.`,
+        key: 'interval', label: 'Beat after idle', values: ['auto', 4, 15, 30, 45, 55], fmt: v => (v === 'auto' ? 'auto' : `${v}m`),
+        help: `How long you're idle before a beat. auto fits your cache: every ${AUTO['1h']}m on a one-hour cache, every ${AUTO['5m']}m on a five-minute one.`,
         custom: { placeholder: 'e.g. 35m', parse: parseMinutes },
-      },
-      {
-        key: 'intervalScope', label: '/cachebeat <min> sets', values: ['session', 'global'],
-        fmt: v => (v === 'session' ? 'this session' : 'the default'),
-      },
-      {
-        key: 'stopAfterHours', label: 'Stop after idle', values: [1, 4, 8, 24], fmt: v => `${v}h`,
-        custom: { placeholder: 'e.g. 10h or 90m', parse: parseHours },
-      },
-      {
-        key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,
-        custom: { placeholder: 'e.g. 85%', parse: parsePercent },
-      },
-      { key: 'skipSmall', label: 'Skip small contexts', values: [false, true], fmt: onOff },
-      {
-        key: 'skipSmallTokens', label: '  smaller than', values: [10_000, 20_000, 50_000, 100_000],
-        show: s => s.skipSmall, fmt: v => `${tokens(Number(v))} tokens`,
-        custom: { placeholder: 'e.g. 35k', parse: parseTokens },
       },
       {
         key: 'onModelSwitch', label: 'After /model', values: ['wait', 'warm'],
         fmt: v => (v === 'wait' ? 'wait for your next turn' : 'warm the new model'),
-        note: "A beat always goes to the current model. Warming the new one costs the full cache write your next message would make, done before you're back.",
+        help: "After /model while you're idle: wait for your next message, or have the next beat write the new model's cache, at the cost your message would pay.",
+      },
+      {
+        key: 'intervalScope', label: '/cachebeat 30 changes', values: ['session', 'global'],
+        fmt: v => (v === 'session' ? 'this session' : 'the default'),
+        help: "What typing /cachebeat with a number changes: this session's interval, or the default for every session.",
+      },
+    ],
+  },
+  {
+    id: 'limits', title: 'Limits',
+    rows: [
+      {
+        key: 'stopAfterHours', label: 'Stop after idle', values: [1, 4, 8, 24], fmt: v => `${v}h`,
+        help: 'Beating stops after this long without a message from you.',
+        custom: { placeholder: 'e.g. 10h or 90m', parse: parseHours },
+      },
+      {
+        key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,
+        help: 'Beating stops once any of your usage limits reaches this.',
+        custom: { placeholder: 'e.g. 85%', parse: parsePercent },
+      },
+      { key: 'skipSmall', label: 'Skip small chats', values: [false, true], fmt: onOff, help: "Doesn't beat chats smaller than the size below." },
+      {
+        key: 'skipSmallTokens', label: '  smaller than', values: [10_000, 20_000, 50_000, 100_000],
+        show: s => s.skipSmall, fmt: v => `${tokens(Number(v))} tokens`,
+        help: 'The smallest chat kept warm.',
+        custom: { placeholder: 'e.g. 35k', parse: parseTokens },
       },
     ],
   },
   {
     id: 'heart', title: 'Heart', preview: 'heart',
     rows: [
-      { key: 'variant', label: 'Animation', values: VARIANTS.map(v => v.id), fmt: v => VARIANTS.find(x => x.id === v)?.name ?? `${v}` },
-      { key: 'animate', label: 'Animate', values: [true, false], fmt: onOff },
+      {
+        key: 'heartPlacement', label: 'Placement', name: 'Heart placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line'),
+        help: `At the end of the hint line under the prompt, drawn dim, or on a line of its own, in color. ${TERMINAL_ONLY}`,
+      },
+      {
+        key: 'variant', label: 'Animation', name: 'Heart animation', values: VARIANTS.map(v => v.id), fmt: v => VARIANTS.find(x => x.id === v)?.name ?? `${v}`,
+        help: `What the heart under the prompt plays. ${TERMINAL_ONLY}`,
+      },
+      { key: 'showCount', label: 'Beat count', values: [true, false], fmt: onOff, help: `Shows ×3, the beats so far, beside the heart. ${TERMINAL_ONLY}` },
+    ],
+  },
+  {
+    id: 'status', title: 'Status line', preview: 'status',
+    rows: [
+      {
+        key: 'statusLine', label: 'Show', name: 'Status line', values: ['spaced', 'below', 'off'],
+        fmt: v => ({ spaced: 'after a blank line', below: 'right below the turn row', off: 'off' })[v as string]!,
+        help: 'Where the line goes under your latest turn, or off. In the desktop app it sits above the prompt.',
+      },
+      { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows the time to the next beat.' },
+      { key: 'showTokens', label: 'Tokens kept', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows how much the last beat kept warm, as · 347k cached.' },
+      {
+        key: 'statusHeart', label: 'Animation', name: 'Status line animation', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.animate,
+        fmt: v => (v === 'beat' ? 'one heart, beating' : v === 'off' ? 'still' : VARIANTS.find(x => x.id === v)?.name ?? `${v}`),
+        help: 'What the heart starting the line plays. One heart beating keeps the words still; a wider animation moves them as it plays.',
+      },
+    ],
+  },
+  {
+    id: 'style', title: 'Style', preview: 'both',
+    rows: [
+      {
+        key: 'color', label: 'Color', values: COLORS, fmt: (v, s) => (v === 'custom' ? `custom ${s.customColor}` : `${v}`),
+        help: 'The status line, and the heart on a line of its own. On the hint line the heart is always dim.',
+      },
+      { key: 'animate', label: 'Animate', values: [true, false], fmt: onOff, help: 'Animates the heart and the status line. Off, both hold still.' },
+      {
+        key: 'effect', label: 'Effect', values: ['steady', 'flash', 'flow', 'mixed'], show: s => s.animate,
+        help: 'steady; flash on each beat; flow, a shimmer sweeping across; mixed switches between them.',
+      },
       {
         key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], show: s => s.animate,
         fmt: v => (typeof v === 'number' ? `${v}ms a frame` : `${v} · ${FRAME_MS[v as keyof typeof FRAME_MS]}ms`),
+        help: 'How fast the animations play: a speed, or a frame time.',
         custom: { placeholder: 'e.g. 65ms', parse: parseFrameMs },
       },
       {
-        key: 'timing', label: 'Timing', values: ['linear', 'lubdub'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear'),
-        note: `Linear suits the line animations (${VARIANTS.filter(x => x.isEndless).map(x => x.name).join(', ')}); lub-dub, the hearts.`,
-      },
-      { key: 'heartPlacement', label: 'Placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line') },
-      { key: 'showCount', label: 'Beat count', values: [true, false], fmt: onOff },
-    ],
-  },
-  {
-    id: 'look', title: 'Look', preview: 'both',
-    rows: [
-      { key: 'color', label: 'Color', values: COLORS, fmt: (v, s) => (v === 'custom' ? `custom ${s.customColor}` : `${v}`) },
-      { key: 'effect', label: 'Effect', values: ['steady', 'flash', 'flow', 'mixed'], show: s => s.animate },
-    ],
-  },
-  {
-    id: 'status', title: 'Status', preview: 'status',
-    rows: [
-      {
-        key: 'statusLine', label: 'Placement', values: ['spaced', 'below', 'off'],
-        fmt: v => ({ spaced: 'after a blank line', below: 'right below the turn row', off: 'off' })[v as string]!,
-      },
-      { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff },
-      { key: 'showTokens', label: 'Tokens kept', values: [false, true], show: s => s.statusLine !== 'off', fmt: onOff },
-      {
-        key: 'statusHeart', label: 'Animation', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.animate,
-        fmt: v => (v === 'beat' ? 'one heart, beating' : v === 'off' ? 'still' : VARIANTS.find(x => x.id === v)?.name ?? `${v}`),
-        note: 'One heart beating keeps the line still; the wider animations push the words after them as they play.',
+        key: 'timing', label: 'Timing', values: ['lubdub', 'linear'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear'),
+        help: `lub-dub beats twice, then rests, and suits the hearts; linear plays evenly, and suits the line animations (${VARIANTS.filter(x => x.isEndless).map(x => x.name).join(', ')}).`,
       },
     ],
   },
   {
     id: 'alerts', title: 'Alerts',
     rows: [
-      { key: 'onBeat', label: 'On a beat', values: ALERTS, fmt: alert },
-      { key: 'onStop', label: 'On stop', values: ALERTS, fmt: alert },
+      { key: 'onBeat', label: 'On a beat', values: ALERTS, fmt: alert, help: 'How a beat landing is told: a line in the transcript (log), a toast, both, or nothing.' },
+      { key: 'onStop', label: 'On stop', values: ALERTS, fmt: alert, help: 'How beating stopping on its own is told, and why.' },
     ],
   },
 ]
@@ -284,7 +314,8 @@ export const rowOf = (key: keyof BeatSettings) => {
   return undefined
 }
 
-export const isPicker = (row: Row) => typeof row.values[0] !== 'boolean'
+/** A row Enter flips in place: two choices and no typed value. Any other opens its list. */
+export const isFlip = (row: Row) => row.values.length === 2 && !row.custom
 
 /**
  * `value` as `key` takes it, the way the pane does: one of the row's choices, or a custom value its

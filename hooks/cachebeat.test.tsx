@@ -152,10 +152,13 @@ test('custom numbers through the pane: an interval, a frame time', async ($: Eng
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
   await ui.press({ key: 'row:interval' })
+  await ui.input({ key: 'custom', text: '90' }) // out of range: the footer says why, nothing changes
+  expect(await ui.find({ type: 'Text', text: 'Beat after idle takes 1–55 minutes, not "90"' })).toBeDefined()
+  expect(stored(store).interval).toBe('auto')
   await ui.input({ key: 'custom', text: '35' })
   expect(stored(store).interval).toBe(35)
   expect(await cmd($, 'on')).toBe('on, every 35m idle · starts after your next turn')
-  await ui.press({ key: 'tab:heart' })
+  await ui.press({ key: 'tab:style' })
   await ui.press({ key: 'row:speed' })
   await ui.input({ key: 'custom', text: '65ms' })
   expect(stored(store).speed).toBe(65)
@@ -167,6 +170,7 @@ test('smaller than takes a custom count', async ($: Engine, on: On) => {
   const { store } = await setup($, on, { settings: { skipSmall: true } })
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'tab:limits' })
   await ui.press({ key: 'row:skipSmallTokens' })
   await ui.input({ key: 'custom', text: 'lots' })
   expect(stored(store).skipSmallTokens).toBe(20_000)
@@ -316,7 +320,7 @@ test('off, a new turn and a subagent turn each keep it from beating', async ($: 
 })
 
 test('one status line, under the latest turn: counts the session\'s beats and down to the next', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { settings: { statusHeart: 'off' } }) // a still heart: the words are what's checked
+  const { clock, logs } = await setup($, on, { settings: { statusHeart: 'off', showTokens: false } }) // a still heart, no tokens: the countdown is what's checked
   await cmd($, '3')
   await $.turn.complete(turn)
   expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 3m']) // no beat yet
@@ -383,7 +387,7 @@ test('a beat can log and toast both, closing row or not', async ($: Engine, on: 
 })
 
 test('a stop can log and toast both', async ($: Engine, on: On) => {
-  const { clock, logs, toasts } = await setup($, on, { percentUsed: 100, settings: { onStop: 'both' } })
+  const { clock, logs, toasts } = await setup($, on, { percentUsed: 100, settings: { onStop: 'both', stopAtUsage: 100 } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(IDLE)
@@ -429,7 +433,7 @@ test('the deadline is a setting, and a stop can toast', async ($: Engine, on: On
 })
 
 test('stops without forking once a usage limit is used up', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { percentUsed: 100 })
+  const { clock, forks, logs } = await setup($, on, { percentUsed: 100, settings: { stopAtUsage: 100 } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(IDLE)
@@ -569,21 +573,25 @@ test('on its own line the heart takes the color', async ($: Engine, on: On) => {
 const buttons = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
   (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith(prefix))
 
-test('the settings pane: tabs, toggles in place, pickers for the rest', async ($: Engine, on: On) => {
+test('the settings pane: six tabs, two choices flip in place, more open a list, help for what\'s focused', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await cmd($, 'settings')).toBe('settings opened')
   expect(await cmd($, 'config')).toBe('settings opened') // unlisted, for the hand that types it
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:heart', 'tab:look', 'tab:status', 'tab:alerts'])
+  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:style', 'tab:alerts'])
+  expect([await ui.find({ key: 'beatNow' }), await ui.find({ key: 'reset' })].map(Boolean)).toEqual([true, false])
 
-  await ui.press({ key: 'row:defaultOn' }) // two values: toggles
+  await ui.press({ key: 'row:defaultOn' }) // two values: flips
   expect(stored(store).defaultOn).toBe(true)
-  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeUndefined() // shows only once skipping
-  await ui.press({ key: 'row:skipSmall' })
-  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeDefined()
+  await move($, 'row:defaultOn') // the kit moves no focus on a press: the person's arrows do
+  expect(await ui.find({ type: 'Text', text: /^Whether new sessions start beating/ })).toBeDefined() // the focused row's help
+  await ui.press({ key: 'row:onModelSwitch' }) // two named choices flip too
+  expect(stored(store).onModelSwitch).toBe('warm')
+  expect(await buttons(ui, 'opt:')).toHaveLength(0)
 
-  await ui.press({ key: 'row:interval' }) // more: a picker
-  expect(await buttons(ui, 'opt:')).toHaveLength(5)
+  await ui.press({ key: 'row:interval' }) // more: a list, its help above it
+  expect(await buttons(ui, 'opt:')).toHaveLength(6)
+  expect(await ui.find({ type: 'Text', text: /^How long you're idle before a beat/ })).toBeDefined()
   await ui.press({ key: 'opt:1' })
   expect(stored(store).interval).toBe(4)
   expect(await ui.find({ key: 'row:interval' })).toBeDefined() // back on the tab
@@ -591,20 +599,26 @@ test('the settings pane: tabs, toggles in place, pickers for the rest', async ($
   await ui.press({ key: 'session' })
   expect(await cmd($, '')).toContain('on, every 4m idle')
 
-  await ui.press({ key: 'tab:beating' }) // Enter on the open tab goes into it: the page stays
-  expect(await ui.find({ key: 'row:interval' })).toBeDefined()
-  await ui.press({ key: 'tab:heart' }) // another tab shows that one
-  expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  await ui.press({ key: 'tab:limits' })
+  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeUndefined() // shows only once skipping
+  await ui.press({ key: 'row:skipSmall' })
+  expect(await ui.find({ key: 'row:skipSmallTokens' })).toBeDefined()
+  expect(await ui.find({ key: 'beatNow' })).toBeUndefined()
+
+  await ui.press({ key: 'tab:heart' })
   await ui.press({ key: 'row:variant' })
   expect(await buttons(ui, 'opt:')).toHaveLength(19)
-  await ui.press({ key: 'back' })
-  await ui.press({ key: 'row:timing' }) // named choices open a picker, even two of them
-  expect(await buttons(ui, 'opt:')).toHaveLength(2)
-  expect(await ui.find({ type: 'Text', text: /^Linear suits the line animations \(ECG, Beam/ })).toBeDefined()
-  await ui.press({ key: 'back' })
-  await ui.press({ key: 'row:variant' })
   await ui.press({ key: 'opt:13' })
   expect(stored(store).variant).toBe('orbit')
+
+  await ui.press({ key: 'tab:style' })
+  await ui.press({ key: 'row:timing' }) // lub-dub, the default, flips to linear
+  expect(stored(store).timing).toBe('linear')
+  await move($, 'row:timing')
+  expect(await ui.find({ type: 'Text', text: /^lub-dub beats twice, then rests/ })).toBeDefined()
+
+  await ui.press({ key: 'tab:alerts' })
+  expect((await ui.find({ key: 'reset' }))?.text).toBe('Reset all')
   await ui.unmount()
 })
 
@@ -637,7 +651,7 @@ test('the focused option of a picker shows in the preview before it is picked', 
   const { store } = await setup($, on)
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
-  await ui.press({ key: 'tab:look' })
+  await ui.press({ key: 'tab:style' })
   await ui.press({ key: 'row:color' })
   await $.ui.focus({ component: 'Pane', requestId: PANE, element: 'opt:2', origin: { kind: 'person' } }) // permission
   const line = (await ui.findAll({ type: 'Text' })).find(t => t.text?.includes('cache kept warm'))
@@ -669,12 +683,14 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
   const ui = await $.ui.mount(SETTINGS_PANE)
   await ui.press({ key: 'row:defaultOn' })
   store.set('settings', { ...stored(store), interval: 10 }) // another session's change
+  await ui.press({ key: 'tab:limits' })
   await ui.press({ key: 'row:stopAtUsage' })
-  await ui.press({ key: 'opt:1' })
-  expect(stored(store)).toMatchObject({ interval: 10, stopAtUsage: 90, defaultOn: true })
+  await ui.press({ key: 'opt:0' })
+  expect(stored(store)).toMatchObject({ interval: 10, stopAtUsage: 80, defaultOn: true })
+  await ui.press({ key: 'tab:alerts' })
   await ui.press({ key: 'reset' })
   expect(stored(store).interval).toBe(10)
-  expect((await ui.find({ key: 'reset' }))?.text).toBe('Press again to reset')
+  expect((await ui.find({ key: 'reset' }))?.text).toBe('Press again to reset all')
   await ui.press({ key: 'reset' })
   expect(stored(store)).toEqual(DEFAULTS)
   await ui.unmount()
@@ -704,8 +720,8 @@ test('both tools register, every setting in the schema with the pane\'s ranges',
 test('state on a fresh session: off, at the default interval, the settings as they are', async ($: Engine, on: On) => {
   await setup($, on)
   expect(await stateNow($)).toEqual({ session: FRESH, settings: DEFAULTS, defaults: {} })
-  await call($, 'set', { settings: { interval: 30, showTokens: true } })
-  expect((await stateNow($)).defaults).toEqual({ interval: 'auto', showTokens: false })
+  await call($, 'set', { settings: { interval: 30, showTokens: false } })
+  expect((await stateNow($)).defaults).toEqual({ interval: 'auto', showTokens: true })
 })
 
 const set = async ($: Engine, args: Args) => JSON.parse((await call($, 'set', args)).result as string)
@@ -763,7 +779,7 @@ test('a call with any bad value is refused whole, saying what each takes', async
   expect(await deny({ settings: { skipSmallTokens: 5 } })).toBe('nothing changed: settings.skipSmallTokens takes 1000–1000000 tokens or null, not 5')
   expect(await deny({ settings: { bogus: 1 }, session: 'on' })).toBe('nothing changed: session is an object, not "on"; settings has no bogus')
   expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, timing: 'fast' } }))
-    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.timing takes linear, lubdub, or null, not "fast"')
+    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.timing takes lubdub, linear, or null, not "fast"')
   expect(store.has('settings')).toBe(false)
   expect((await stateNow($)).session).toEqual(FRESH)
 })
@@ -938,7 +954,7 @@ const BAND = (surface: 'terminal' | 'desktop') => ({
 }) as never
 
 test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
-  const { clock, logs, tails } = await setup($, on, { settings: { animate: false } })
+  const { clock, logs, tails } = await setup($, on, { settings: { animate: false, showTokens: false } })
   const band = async () => (await draw($, BAND('desktop'))).join('').replace('\u00a0', ' ') // the space after the heart can't collapse
   expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
   await cmd($, 'on')
@@ -1014,11 +1030,11 @@ test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and
   await ui.press({ key: 'tab:heart' })
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
   expect(moved().slice(before)).toEqual([]) // the focus stays where the person put it
-  await ui.press({ key: 'row:timing' }) // a list of choices opens: the focus lands in it
+  await ui.press({ key: 'row:variant' }) // a list of choices opens: the focus lands in it
   expect(moved().slice(before)).toEqual(['opt'])
   await ui.press({ key: 'opt:1' }) // picked: back on the tab, the focus left alone
   expect(moved().slice(before)).toEqual(['opt'])
-  expect(await ui.find({ key: 'row:timing' })).toBeDefined()
-  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-5 tabs · esc closes')).toBe(true)
+  expect(await ui.find({ key: 'row:variant' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-6 tabs · esc closes')).toBe(true)
   await ui.unmount()
 })
