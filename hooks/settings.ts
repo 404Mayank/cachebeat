@@ -264,7 +264,7 @@ export const TABS: readonly Tab[] = [
       { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff },
       { key: 'showTokens', label: 'Tokens kept', values: [false, true], show: s => s.statusLine !== 'off', fmt: onOff },
       {
-        key: 'statusHeart', label: 'Heart', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.animate,
+        key: 'statusHeart', label: 'Animation', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.animate,
         fmt: v => (v === 'beat' ? 'one heart, beating' : v === 'off' ? 'still' : VARIANTS.find(x => x.id === v)?.name ?? `${v}`),
         note: 'One heart beating keeps the line still; the wider animations push the words after them as they play.',
       },

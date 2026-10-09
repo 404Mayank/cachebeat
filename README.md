@@ -195,7 +195,7 @@ Theme colors follow your Claude Code theme, so they change when you switch theme
 | Placement | Under the turn after a blank line, directly under it, or off | after a blank line |
 | Countdown | Shows the time to the next beat | on |
 | Tokens kept | Shows how much the last beat kept warm, e.g. `· 184k cached` | off |
-| Heart | What the heart at the start of the line plays: one heart beating, a still one, or any of the 19 animations | one heart, beating |
+| Animation | What the heart at the start of the line plays: one heart beating, a still one, or any of the 19 animations | one heart, beating |
 
 </details>
 

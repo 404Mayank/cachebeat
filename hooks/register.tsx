@@ -676,12 +676,13 @@ export const register: Register = on => {
     const { head, rest, width } = liveLine(line, c, p, f)
     // one glyph keeps its width as it beats: the line is one run of text, spaced as written
     if (width <= 1) return <Box>{paint(Text, joined([...head, ...rest]))}</Box>
-    // a wider animation's frames vary on this proportional font: it gets a box of its own, and the
-    // space after it, which would collapse at the start of the next box as in HTML, can't
+    // a wider animation's frames vary on this proportional font, its hearts wider than a cell: a box
+    // at least half again its cells holds the words after it still, and grows rather than spill onto
+    // them. The space after it, which would collapse at the start of the next box as in HTML, can't
     if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '\u00a0') }
     return (
       <Box flexDirection="row">
-        <Box width={width} flexShrink={0}>{paint(Text, head)}</Box>
+        <Box minWidth={Math.ceil(width * 1.5)} flexShrink={0}>{paint(Text, head)}</Box>
         {paint(Text, rest)}
       </Box>
     )
