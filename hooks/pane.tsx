@@ -2,7 +2,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { BeatSettings, PanePage } from '../types'
 import { previewFrame, statusFrame, variant } from './animations'
 import type { Preview, Row, Span, Value } from './settings'
-import { SESSION_HELP, TABS, isFlip, isHex, isLit, rowOf, spans, tokens } from './settings'
+import { DEFAULTS, HEX_OF, SESSION_HELP, TABS, isFlip, isHex, isLit, lookOf, rowOf, spans, tokens } from './settings'
 
 export const PANE = 'cachebeat-settings'
 
@@ -18,6 +18,7 @@ export type Actions = {
   beatNow: () => void
   reset: () => void
   refuse: (text: string) => void // a typed value the setting doesn't take: says why in the footer
+  resetRow: (key: keyof BeatSettings) => void // one setting back to its default
 }
 /** What the pane draws from, besides the settings. */
 export type View = {
@@ -31,6 +32,7 @@ export type View = {
   isTerminal: boolean // the terminal's keys walk the pane; a desktop's Tab and clicks move its own focus
   notice: string // the last action's outcome, shown in the footer
   isResetArmed: boolean
+  customs: Partial<Record<keyof BeatSettings, Value>> // the custom value each setting last took, kept past a preset
 }
 
 const LABEL = 22
@@ -64,13 +66,15 @@ export const shown = (row: Row, v: Value, s: BeatSettings) => (row.fmt ? row.fmt
 function preview(els: Els, s: BeatSettings, kind: Preview, tick: number) {
   const { Box, Text } = els
   const x = variant(s.variant)
-  const frame = s.animate ? previewFrame(x, tick, s.timing) : x.loop[0]!
-  const lit = isLit(frame)
+  const heartLook = lookOf(s, 'heart')
+  const lineLook = lookOf(s, 'line')
+  const frame = heartLook.animate ? previewFrame(x, tick, heartLook.timing) : x.loop[0]!
   // the hint line takes text alone, drawn dim
-  const heart = s.heartPlacement === 'tail' ? [{ text: frame, dim: true }] : spans(frame, s, tick, lit)
+  const heart = s.heartPlacement === 'tail' ? [{ text: frame, dim: true }] : spans(frame, heartLook, tick, isLit(frame))
   const sample = statusText(s, 3, 184_000, '42m')
-  const lead = s.animate && s.statusHeart !== 'off' ? statusFrame(s.statusHeart, tick, s.timing, lit) : ''
-  const line = paint(Text, spans(lead ? sample.replace(/^[♥♡]/, lead) : sample, s, tick, lit))
+  const lead = lineLook.animate && s.statusHeart !== 'off' ? statusFrame(s.statusHeart, tick, lineLook.timing) : ''
+  const lineLit = isLit(lead || statusFrame('beat', tick, lineLook.timing))
+  const line = paint(Text, spans(lead ? sample.replace(/^[♥♡]/, lead) : sample, lineLook, tick, lineLit))
   const turn = <Text dimColor>✻ Brewed for 2s</Text>
   const status = s.statusLine === 'off' ? turn
     : (
@@ -129,14 +133,14 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
         <Text dimColor>{row.help}</Text>
         {rule}
         {row.values.map((val, i) => {
-          const heartNow = previewFrame(variant(s.variant), v.tick, s.timing)
-          const frame = isVariant ? previewFrame(variant(String(val)), v.tick, s.timing)
-            : isStatusHeart ? statusFrame(String(val), v.tick, s.timing, isLit(heartNow))
+          const look = lookOf(s, key === 'statusHeart' || key === 'lineColor' ? 'line' : 'heart')
+          const frame = isVariant ? previewFrame(variant(String(val)), v.tick, look.timing)
+            : isStatusHeart ? statusFrame(String(val), v.tick, look.timing)
             : ''
           const sample = frame
-            ? spans(frame, { ...s, animate: true }, v.tick, isLit(frame))
-            : key === 'color' && val !== 'dim'
-              ? spans('♥ ♥ ♥', { ...s, color: String(val), effect: 'steady' }, 0, false)
+            ? spans(frame, { ...look, animate: true }, v.tick, isLit(frame))
+            : HEX_OF[key] && val !== 'dim'
+              ? spans('♥ ♥ ♥', { ...look, color: String(val), effect: 'steady' }, 0, false)
               : []
           return (
             <Box>
@@ -153,7 +157,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
             key="custom"
             label={`${isCustom ? '●' : ' '} ${'custom'.padEnd(LABEL)}`}
             placeholder={row.custom.placeholder}
-            value={isCustom ? shown(row, s[key], s) : ''}
+            value={isCustom ? shown(row, s[key], s) : v.customs[key] !== undefined ? shown(row, v.customs[key]!, s) : ''}
             submitLabel="set"
             onSubmit={text => {
               const r = row.custom!.parse
@@ -176,15 +180,17 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
   const rows = tab.rows.filter(r => !r.show || r.show(s))
   // the tab's own ring: the tab bar above it is a level of its own, reached by Esc
   if (tab.id === 'beating') ring.push('session')
+  const hexOf = (r: Row) => (HEX_OF[r.key] && s[r.key] === 'custom' ? HEX_OF[r.key] : undefined)
   for (const r of rows) {
     ring.push(`row:${r.key}`)
-    if (r.key === 'color' && s.color === 'custom') ring.push('customColor')
+    const hex = hexOf(r)
+    if (hex) ring.push(hex)
   }
-  // the buttons sit where they belong: beating now with beating, resetting all at the end
-  if (tab.id === 'beating') ring.push('beatNow')
-  if (tab.id === TABS.at(-1)!.id) ring.push('reset')
-  const focusedRow = rows.find(r => v.focus === `row:${r.key}` || (r.key === 'color' && v.focus === 'customColor'))
+  if (tab.id === 'beating') ring.push('beatNow', 'reset') // the buttons sit with beating
+  const focusedRow = rows.find(r => v.focus === `row:${r.key}` || v.focus === hexOf(r))
   const help = v.focus === 'session' ? SESSION_HELP : focusedRow?.help ?? BUTTON_HELP[v.focus] ?? ''
+  // r takes the focused setting back to its default, its custom value kept in its list
+  const resettable = focusedRow && s[focusedRow.key] !== DEFAULTS[focusedRow.key] ? focusedRow : undefined
   const keys = `1-${TABS.length}`
 
   const line = (label: string, value: string, more = '') => `${label.padEnd(LABEL)}${value}${more}`
@@ -204,6 +210,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
         ))}
       </Box>
       {rule}
+      <Text dimColor>{tab.id === 'beating' ? 'This session is this session alone; every other setting applies to every session.' : 'These apply to every session.'}</Text>
       {tab.id === 'beating' && (
         <Button plain key="session" onPress={() => (act.at('session'), act.toggleSession())}>{line('This session', v.isOn ? 'on' : 'off')}</Button>
       )}
@@ -220,14 +227,14 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
               isFlip(r) ? '' : ' ›',
             )}
           </Button>
-          {r.key === 'color' && s.color === 'custom' && (
+          {hexOf(r) && (
             <Input
-              key="customColor"
+              key={hexOf(r)!}
               label={'  hex'.padEnd(LABEL)}
               placeholder="#rrggbb"
-              value={s.customColor}
+              value={String(s[hexOf(r)!])}
               submitLabel="set"
-              onSubmit={val => (isHex(val.trim()) ? act.set({ customColor: val.trim().toLowerCase() }) : act.refuse(`hex takes #rrggbb, not "${val.trim()}"`))}
+              onSubmit={val => (isHex(val.trim()) ? act.set({ [hexOf(r)!]: val.trim().toLowerCase() }) : act.refuse(`hex takes #rrggbb, not "${val.trim()}"`))}
             />
           )}
         </Box>
@@ -235,9 +242,16 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       {tab.preview && rule}
       {tab.preview && preview(els, s, tab.preview, v.tick)}
       {rule}
-      {tab.id === 'beating' && <Button key="beatNow" onPress={() => (act.at('beatNow'), act.beatNow())}>Beat now</Button>}
-      {tab.id === TABS.at(-1)!.id && (
-        <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset all' : 'Reset all'}</Button>
+      {tab.id === 'beating' && (
+        <Box gap={1}>
+          <Button key="beatNow" onPress={() => (act.at('beatNow'), act.beatNow())}>Beat now</Button>
+          <Button key="reset" onPress={() => (act.at('reset'), act.reset())}>{v.isResetArmed ? 'Press again to reset all' : 'Reset all'}</Button>
+        </Box>
+      )}
+      {resettable && (
+        <Button plain hotkey="r" key="resetRow" onPress={() => act.resetRow(resettable.key)}>
+          <Text dimColor>{`r: back to ${shown(resettable, DEFAULTS[resettable.key], s)}`}</Text>
+        </Button>
       )}
       {help && <Text dimColor>{help}</Text>}
       {v.notice && <Text dimColor>{v.notice}</Text>}

@@ -1,4 +1,4 @@
-import type { BeatSettings, Ttl } from '../types'
+import type { BeatSettings, Look, Ttl } from '../types'
 import { STATUS_HEARTS, VARIANTS } from './animations'
 
 export const DEFAULTS: BeatSettings = {
@@ -9,19 +9,25 @@ export const DEFAULTS: BeatSettings = {
   stopAtUsage: 90,
   skipSmall: false,
   skipSmallTokens: 20_000,
-  animate: true,
-  variant: 'classic',
-  speed: 'normal',
-  timing: 'lubdub',
   heartPlacement: 'tail',
+  variant: 'classic',
   showCount: true,
-  color: 'claude',
-  customColor: '#e6a8b9',
-  effect: 'steady',
+  heartColor: 'claude',
+  heartHex: '#e6a8b9',
+  heartAnimate: true,
+  heartEffect: 'steady',
+  heartSpeed: 'normal',
+  heartTiming: 'lubdub',
   statusLine: 'spaced',
   showCountdown: true,
   showTokens: true,
   statusHeart: 'beat',
+  lineColor: 'claude',
+  lineHex: '#e6a8b9',
+  lineAnimate: true,
+  lineEffect: 'steady',
+  lineSpeed: 'normal',
+  lineTiming: 'lubdub',
   onBeat: 'none',
   onStop: 'log',
   onModelSwitch: 'wait',
@@ -34,20 +40,40 @@ export const AUTO: Record<Ttl, number> = { '1h': 50, '5m': 4 }
 export const changed = (s: BeatSettings): Partial<BeatSettings> =>
   Object.fromEntries(Object.entries(s).filter(([k, v]) => v !== DEFAULTS[k as keyof BeatSettings]))
 
+/** The parts that draw, and the settings each of them looks by. */
+export type Part = 'heart' | 'line'
+const LOOK_KEYS = {
+  heart: { color: 'heartColor', customColor: 'heartHex', effect: 'heartEffect', animate: 'heartAnimate', speed: 'heartSpeed', timing: 'heartTiming' },
+  line: { color: 'lineColor', customColor: 'lineHex', effect: 'lineEffect', animate: 'lineAnimate', speed: 'lineSpeed', timing: 'lineTiming' },
+} as const satisfies Record<Part, Record<keyof Look, keyof BeatSettings>>
+
+/** How a part draws and moves: its own color, effect, animation, speed and timing. */
+export const lookOf = (s: BeatSettings, part: Part): Look => {
+  const k = LOOK_KEYS[part]
+  return { color: s[k.color], customColor: s[k.customColor], effect: s[k.effect], animate: s[k.animate], speed: s[k.speed], timing: s[k.timing] }
+}
+
 /** Store values from an older or hand-edited store fall back to the default one by one. */
 export function normalize(stored: unknown): BeatSettings {
   const s: Record<string, unknown> = { ...DEFAULTS }
-  if (stored && typeof stored === 'object') {
-    for (const [k, v] of Object.entries(stored)) {
-      const isNumberFor = (key: string) => k === key && typeof v === 'number'
-      if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('speed') || isNumberFor('interval'))) s[k] = v
-    }
+  const from: Record<string, unknown> = stored && typeof stored === 'object' ? { ...stored } : {}
+  // before 0.7.0 one look served both parts: each part takes it, unless it has its own
+  for (const old of ['color', 'customColor', 'effect', 'animate', 'speed', 'timing'] as const) {
+    if (!(old in from)) continue
+    for (const part of ['heart', 'line'] as const) from[LOOK_KEYS[part][old]] ??= from[old]
+    delete from[old]
+  }
+  for (const [k, v] of Object.entries(from)) {
+    const isNumberFor = (...keys: string[]) => keys.includes(k) && typeof v === 'number'
+    if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval'))) s[k] = v
   }
   const out = s as BeatSettings
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
   if (!STATUS_HEARTS.includes(out.statusHeart)) out.statusHeart = DEFAULTS.statusHeart
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
-  if (typeof out.speed === 'number' && parseFrameMs(`${out.speed}`) === undefined) out.speed = DEFAULTS.speed
+  for (const key of ['heartSpeed', 'lineSpeed'] as const) {
+    if (typeof out[key] === 'number' && parseFrameMs(`${out[key]}`) === undefined) out[key] = DEFAULTS[key]
+  }
   if (out.interval !== 'auto' && (typeof out.interval !== 'number' || parseMinutes(`${out.interval}`) === undefined)) out.interval = DEFAULTS.interval
   if (!['wait', 'warm'].includes(out.onModelSwitch)) out.onModelSwitch = DEFAULTS.onModelSwitch
   return out
@@ -55,7 +81,7 @@ export function normalize(stored: unknown): BeatSettings {
 
 export const FRAME_MS = { slow: 120, normal: 80, fast: 50 } as const
 /** A frame's time: a named speed's, or the milliseconds typed in. */
-export const frameMs = (s: BeatSettings) => (typeof s.speed === 'number' ? s.speed : FRAME_MS[s.speed])
+export const frameMs = (look: Look) => (typeof look.speed === 'number' ? look.speed : FRAME_MS[look.speed])
 
 // theme keys with a shimmer pair in Claude Code's themes, so they follow the active theme
 export const THEME_COLORS = ['claude', 'permission', 'warning', 'fastMode', 'inactive'] as const
@@ -81,11 +107,11 @@ export type Span = { text: string; color?: string; dim: boolean }
 type Tone = { color?: string; dim: boolean }
 
 /** The color's resting tone and its highlight: the theme's shimmer, a bright preset, a lighter hex. */
-export function tones(s: BeatSettings): { base: Tone; hi: Tone } {
+export function tones(s: Look): { base: Tone; hi: Tone } {
   const c = s.color
   if (c === 'dim') return { base: { dim: true }, hi: { dim: false } }
   if ((THEME_COLORS as readonly string[]).includes(c)) return { base: { color: c, dim: false }, hi: { color: `${c}Shimmer`, dim: false } }
-  const hex = c === 'custom' ? (isHex(s.customColor) ? s.customColor : DEFAULTS.customColor) : (PRESETS[c] ?? PRESETS.red!)
+  const hex = c === 'custom' ? (isHex(s.customColor) ? s.customColor : DEFAULTS.heartHex) : (PRESETS[c] ?? PRESETS.red!)
   return { base: { color: hex, dim: false }, hi: { color: lighten(hex), dim: false } }
 }
 
@@ -125,7 +151,7 @@ export function mixedMode(tick: number): Mode {
  * shimmer does. Both does the two at once, the sweep dipping to the resting tone while lit;
  * mixed plays flash, flow or both, a few seconds of each.
  */
-export function spans(text: string, s: BeatSettings, tick: number, lit: boolean): Span[] {
+export function spans(text: string, s: Look, tick: number, lit: boolean): Span[] {
   const { base, hi } = tones(s)
   if (s.effect === 'steady' || !s.animate) return [{ text, ...base }]
   const mode = s.effect === 'mixed' ? mixedMode(tick) : s.effect
@@ -199,7 +225,42 @@ const alert = (v: Value) => (v === 'both' ? 'log + toast' : `${v}`)
 /** The pane's own row on the Beating tab, not a setting: whether this session beats. */
 export const SESSION_HELP = "Beats for this session alone. New sessions start as 'New sessions start' says."
 
-const TERMINAL_ONLY = 'The desktop app draws no heart under the prompt: there the status line carries it.'
+const TERMINAL_ONLY = 'The desktop app draws no heart under the prompt: there the turn line carries it.'
+
+/** The settings a part looks by, each its own: color, animation, effect, speed, timing. */
+function lookRows(part: Part, what: string, shown: (s: BeatSettings) => boolean): Row[] {
+  const k = LOOK_KEYS[part]
+  const title = part === 'heart' ? 'Prompt heart' : 'Turn line'
+  const moving = (s: BeatSettings) => shown(s) && (s[k.animate] as boolean)
+  // the heart on the hint line is drawn dim, whatever its color
+  const colored = part === 'heart' ? shown : (s: BeatSettings) => s.statusLine !== 'off'
+  return [
+    {
+      key: k.color, label: 'Color', name: `${title} color`, values: COLORS, show: colored, fmt: (v, s) => (v === 'custom' ? `custom ${s[k.customColor]}` : `${v}`),
+      help: `The color of ${what}: dim, your theme's, a preset, or any hex color.`,
+    },
+    {
+      key: k.animate, label: 'Animate', name: `${title} animate`, values: [true, false], fmt: onOff,
+      show: part === 'heart' ? () => true : (s: BeatSettings) => s.statusLine !== 'off',
+      help: `Animates ${what}. Off, it holds still.`,
+    },
+    {
+      key: k.effect, label: 'Effect', name: `${title} effect`, values: ['steady', 'flash', 'flow', 'mixed'], show: s => moving(s) && colored(s),
+      help: 'steady; flash on each beat; flow, a shimmer sweeping across; mixed switches between them.',
+    },
+    {
+      key: k.speed, label: 'Speed', name: `${title} speed`, values: ['slow', 'normal', 'fast'], show: part === 'heart' ? (s: BeatSettings) => s[k.animate] as boolean : moving,
+      fmt: v => (typeof v === 'number' ? `${v}ms a frame` : `${v} · ${FRAME_MS[v as keyof typeof FRAME_MS]}ms`),
+      help: `How fast ${what} plays: a speed, or a frame time.`,
+      custom: { placeholder: 'e.g. 65ms', parse: parseFrameMs },
+    },
+    {
+      key: k.timing, label: 'Timing', name: `${title} timing`, values: ['lubdub', 'linear'], show: part === 'heart' ? (s: BeatSettings) => s[k.animate] as boolean : moving,
+      fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear'),
+      help: `lub-dub beats twice, then rests, and suits the hearts; linear plays evenly, and suits the line animations (${VARIANTS.filter(x => x.isEndless).map(x => x.name).join(', ')}).`,
+    },
+  ]
+}
 
 export const TABS: readonly Tab[] = [
   {
@@ -246,58 +307,36 @@ export const TABS: readonly Tab[] = [
     ],
   },
   {
-    id: 'heart', title: 'Heart', preview: 'heart',
+    id: 'heart', title: 'Prompt heart', preview: 'heart',
     rows: [
       {
-        key: 'heartPlacement', label: 'Placement', name: 'Heart placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line'),
+        key: 'heartPlacement', label: 'Placement', name: 'Prompt heart placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line'),
         help: `At the end of the hint line under the prompt, drawn dim, or on a line of its own, in color. ${TERMINAL_ONLY}`,
       },
       {
-        key: 'variant', label: 'Animation', name: 'Heart animation', values: VARIANTS.map(v => v.id), fmt: v => VARIANTS.find(x => x.id === v)?.name ?? `${v}`,
+        key: 'variant', label: 'Animation', name: 'Prompt heart animation', values: VARIANTS.map(v => v.id), fmt: v => VARIANTS.find(x => x.id === v)?.name ?? `${v}`,
         help: `What the heart under the prompt plays. ${TERMINAL_ONLY}`,
       },
       { key: 'showCount', label: 'Beat count', values: [true, false], fmt: onOff, help: `Shows ×3, the beats so far, beside the heart. ${TERMINAL_ONLY}` },
+      ...lookRows('heart', 'the heart', s => s.heartPlacement === 'line'),
     ],
   },
   {
-    id: 'status', title: 'Status line', preview: 'status',
+    id: 'status', title: 'Turn line', preview: 'status',
     rows: [
       {
-        key: 'statusLine', label: 'Show', name: 'Status line', values: ['spaced', 'below', 'off'],
+        key: 'statusLine', label: 'Show', name: 'Turn line', values: ['spaced', 'below', 'off'],
         fmt: v => ({ spaced: 'after a blank line', below: 'right below the turn row', off: 'off' })[v as string]!,
         help: 'Where the line goes under your latest turn, or off. In the desktop app it sits above the prompt.',
       },
       { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows the time to the next beat.' },
       { key: 'showTokens', label: 'Tokens kept', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows how much the last beat kept warm, as · 347k cached.' },
       {
-        key: 'statusHeart', label: 'Animation', name: 'Status line animation', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.animate,
+        key: 'statusHeart', label: 'Its heart', name: 'Turn line heart', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.lineAnimate,
         fmt: v => (v === 'beat' ? 'one heart, beating' : v === 'off' ? 'still' : VARIANTS.find(x => x.id === v)?.name ?? `${v}`),
         help: 'What the heart starting the line plays. One heart beating keeps the words still; a wider animation moves them as it plays.',
       },
-    ],
-  },
-  {
-    id: 'style', title: 'Style', preview: 'both',
-    rows: [
-      {
-        key: 'color', label: 'Color', values: COLORS, fmt: (v, s) => (v === 'custom' ? `custom ${s.customColor}` : `${v}`),
-        help: 'The status line, and the heart on a line of its own. On the hint line the heart is always dim.',
-      },
-      { key: 'animate', label: 'Animate', values: [true, false], fmt: onOff, help: 'Animates the heart and the status line. Off, both hold still.' },
-      {
-        key: 'effect', label: 'Effect', values: ['steady', 'flash', 'flow', 'mixed'], show: s => s.animate,
-        help: 'steady; flash on each beat; flow, a shimmer sweeping across; mixed switches between them.',
-      },
-      {
-        key: 'speed', label: 'Speed', values: ['slow', 'normal', 'fast'], show: s => s.animate,
-        fmt: v => (typeof v === 'number' ? `${v}ms a frame` : `${v} · ${FRAME_MS[v as keyof typeof FRAME_MS]}ms`),
-        help: 'How fast the animations play: a speed, or a frame time.',
-        custom: { placeholder: 'e.g. 65ms', parse: parseFrameMs },
-      },
-      {
-        key: 'timing', label: 'Timing', values: ['lubdub', 'linear'], show: s => s.animate, fmt: v => (v === 'lubdub' ? 'lub-dub' : 'linear'),
-        help: `lub-dub beats twice, then rests, and suits the hearts; linear plays evenly, and suits the line animations (${VARIANTS.filter(x => x.isEndless).map(x => x.name).join(', ')}).`,
-      },
+      ...lookRows('line', 'the line', s => s.statusLine !== 'off'),
     ],
   },
   {
@@ -321,8 +360,12 @@ export const isFlip = (row: Row) => row.values.length === 2 && !row.custom
  * `value` as `key` takes it, the way the pane does: one of the row's choices, or a custom value its
  * reader accepts (35000, or '35k'); a hex for the custom color. Undefined when it takes no such value.
  */
+/** The hex each color row takes when it is custom. */
+export const HEX_OF: Partial<Record<keyof BeatSettings, keyof BeatSettings>> = { heartColor: 'heartHex', lineColor: 'lineHex' }
+export const HEX_KEYS: readonly string[] = Object.values(HEX_OF)
+
 export function accept(key: string, value: unknown): Value | undefined {
-  if (key === 'customColor') return typeof value === 'string' && isHex(value) ? value.toLowerCase() : undefined
+  if (HEX_KEYS.includes(key)) return typeof value === 'string' && isHex(value) ? value.toLowerCase() : undefined
   const row = rowOf(key as keyof BeatSettings)?.row
   if (!row) return undefined
   if (row.values.includes(value as Value)) return value as Value

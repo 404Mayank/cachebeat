@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, slotText, slotWidths, variant } from './animations'
 import { PANE } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
-import { DEFAULTS, EPISODE, accept, glyphs, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
+import { DEFAULTS, EPISODE, accept, glyphs, lookOf, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
 
 /** The tools as the model calls them: `mcp__<plugin>__<name>`. */
@@ -158,11 +158,11 @@ test('custom numbers through the pane: an interval, a frame time', async ($: Eng
   await ui.input({ key: 'custom', text: '35' })
   expect(stored(store).interval).toBe(35)
   expect(await cmd($, 'on')).toBe('on, every 35m idle · starts after your next turn')
-  await ui.press({ key: 'tab:style' })
-  await ui.press({ key: 'row:speed' })
+  await ui.press({ key: 'tab:heart' })
+  await ui.press({ key: 'row:heartSpeed' })
   await ui.input({ key: 'custom', text: '65ms' })
-  expect(stored(store).speed).toBe(65)
-  expect((await ui.find({ key: 'row:speed' }))?.text).toContain('65ms a frame')
+  expect(stored(store).heartSpeed).toBe(65)
+  expect((await ui.find({ key: 'row:heartSpeed' }))?.text).toContain('65ms a frame')
   await ui.unmount()
 })
 
@@ -186,7 +186,7 @@ test('settings from an older store fall back to the defaults one by one', () => 
 })
 
 test('flow sweeps a highlight across the text; flash lights it on a full heart', () => {
-  const s = { ...DEFAULTS, color: 'claude', effect: 'flow' as const }
+  const s = { ...lookOf(DEFAULTS, 'line'), color: 'claude', effect: 'flow' as const }
   expect(spans('abcdefgh', s, 5, false)).toEqual([
     { text: 'a', color: 'claude', dim: false },
     { text: 'bcd', color: 'claudeShimmer', dim: false },
@@ -206,7 +206,7 @@ test('mixed holds a mode for an episode, never repeats one, and plays all three'
 })
 
 test('both flashes and flows at once: lit, the sweep dips to the resting tone', () => {
-  const s = { ...DEFAULTS, color: 'claude', effect: 'mixed' as const }
+  const s = { ...lookOf(DEFAULTS, 'line'), color: 'claude', effect: 'mixed' as const }
   const start = Array.from({ length: 30 }, (_, n) => n * EPISODE).find(k => mixedMode(k) === 'both')!
   const t = start + ((5 - (start % 14)) + 14) % 14 // the sweep centred on 'c', as at tick 5 in an 8-glyph text
   expect(spans('abcdefgh', s, t, true)).toEqual([
@@ -545,7 +545,7 @@ test('the variant picks the frames; the count can hide; still when not animated'
   await clock.advance(3 * TICK)
   await draw($, HINT)
   expect(variant('ecg').loop).toContain(tails.at(-1))
-  store.set('settings', { ...DEFAULTS, variant: 'ecg', animate: false })
+  store.set('settings', { ...DEFAULTS, variant: 'ecg', heartAnimate: false })
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await $.turn.complete(turn)
   await clock.advance(7 * TICK)
@@ -554,11 +554,11 @@ test('the variant picks the frames; the count can hide; still when not animated'
 })
 
 test('a preset is drawn as hex, lit a lighter shade', () => {
-  expect(spans('x', { ...DEFAULTS, color: 'red', effect: 'flash' }, 0, true)).toEqual([{ text: 'x', color: '#f1a09c', dim: false }])
+  expect(spans('x', { ...lookOf(DEFAULTS, 'line'), color: 'red', effect: 'flash' }, 0, true)).toEqual([{ text: 'x', color: '#f1a09c', dim: false }])
 })
 
 test('on its own line the heart takes the color', async ($: Engine, on: On) => {
-  await setup($, on, { settings: { heartPlacement: 'line', color: 'claude' } })
+  await setup($, on, { settings: { heartPlacement: 'line', heartColor: 'claude' } })
   await cmd($, 'on')
   await $.turn.complete(turn)
   const ui = await $.ui.mount(HINT)
@@ -578,8 +578,9 @@ test('the settings pane: six tabs, two choices flip in place, more open a list, 
   expect(await cmd($, 'settings')).toBe('settings opened')
   expect(await cmd($, 'config')).toBe('settings opened') // unlisted, for the hand that types it
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:style', 'tab:alerts'])
-  expect([await ui.find({ key: 'beatNow' }), await ui.find({ key: 'reset' })].map(Boolean)).toEqual([true, false])
+  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:alerts'])
+  expect([(await ui.find({ key: 'beatNow' }))?.text, (await ui.find({ key: 'reset' }))?.text]).toEqual(['Beat now', 'Reset all'])
+  expect(await ui.find({ type: 'Text', text: /^This session is this session alone; every other setting applies to every session/ })).toBeDefined()
 
   await ui.press({ key: 'row:defaultOn' }) // two values: flips
   expect(stored(store).defaultOn).toBe(true)
@@ -611,14 +612,15 @@ test('the settings pane: six tabs, two choices flip in place, more open a list, 
   await ui.press({ key: 'opt:13' })
   expect(stored(store).variant).toBe('orbit')
 
-  await ui.press({ key: 'tab:style' })
-  await ui.press({ key: 'row:timing' }) // lub-dub, the default, flips to linear
-  expect(stored(store).timing).toBe('linear')
-  await move($, 'row:timing')
+  await ui.press({ key: 'row:heartTiming' }) // lub-dub, the default, flips to linear
+  expect(stored(store).heartTiming).toBe('linear')
+  await move($, 'row:heartTiming')
   expect(await ui.find({ type: 'Text', text: /^lub-dub beats twice, then rests/ })).toBeDefined()
+  expect(await ui.find({ key: 'row:heartColor' })).toBe(undefined) // on the hint line the heart is dim: no color to pick
+  expect(await ui.find({ type: 'Text', text: 'These apply to every session.' })).toBeDefined()
 
   await ui.press({ key: 'tab:alerts' })
-  expect((await ui.find({ key: 'reset' }))?.text).toBe('Reset all')
+  expect(await ui.find({ key: 'reset' })).toBe(undefined)
   await ui.unmount()
 })
 
@@ -651,12 +653,12 @@ test('the focused option of a picker shows in the preview before it is picked', 
   const { store } = await setup($, on)
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
-  await ui.press({ key: 'tab:style' })
-  await ui.press({ key: 'row:color' })
+  await ui.press({ key: 'tab:status' })
+  await ui.press({ key: 'row:lineColor' })
   await $.ui.focus({ component: 'Pane', requestId: PANE, element: 'opt:2', origin: { kind: 'person' } }) // permission
   const line = (await ui.findAll({ type: 'Text' })).find(t => t.text?.includes('cache kept warm'))
   expect(line?.props).toMatchObject({ color: 'permission' })
-  expect(stored(store).color).toBe('claude')
+  expect(stored(store).lineColor).toBe('claude')
   await ui.unmount()
 })
 
@@ -687,7 +689,7 @@ test('settings changes keep another session\'s; reset asks twice', async ($: Eng
   await ui.press({ key: 'row:stopAtUsage' })
   await ui.press({ key: 'opt:0' })
   expect(stored(store)).toMatchObject({ interval: 10, stopAtUsage: 80, defaultOn: true })
-  await ui.press({ key: 'tab:alerts' })
+  await ui.press({ key: 'tab:beating' })
   await ui.press({ key: 'reset' })
   expect(stored(store).interval).toBe(10)
   expect((await ui.find({ key: 'reset' }))?.text).toBe('Press again to reset all')
@@ -714,7 +716,7 @@ test('both tools register, every setting in the schema with the pane\'s ranges',
   const settings = props(props(SET.inputSchema).settings)
   expect(Object.keys(settings).sort()).toEqual(Object.keys(DEFAULTS).sort())
   expect((settings.interval as Args).anyOf).toEqual([{ enum: ['auto'] }, { type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }])
-  expect((settings.speed as Args).anyOf).toEqual([{ enum: ['slow', 'normal', 'fast'] }, { type: 'number', minimum: 20, maximum: 500 }, { type: 'null' }])
+  expect((settings.heartSpeed as Args).anyOf).toEqual([{ enum: ['slow', 'normal', 'fast'] }, { type: 'number', minimum: 20, maximum: 500 }, { type: 'null' }])
 })
 
 test('state on a fresh session: off, at the default interval, the settings as they are', async ($: Engine, on: On) => {
@@ -742,7 +744,7 @@ test('set answers with what changed and those settings alone; null resets a sett
   expect(await set($, { settings: { skipSmall: true, skipSmallTokens: 35_000, interval: 'auto' } })).toEqual({
     changed: ['settings.skipSmall', 'settings.skipSmallTokens'], session: FRESH, settings: { skipSmall: true, skipSmallTokens: 35_000 },
   })
-  expect(await set($, { settings: { skipSmallTokens: null, customColor: null } })).toEqual({
+  expect(await set($, { settings: { skipSmallTokens: null, heartHex: null } })).toEqual({
     changed: ['settings.skipSmallTokens'], session: FRESH, settings: { skipSmallTokens: 20_000 },
   })
   expect(stored(store)).toEqual({ ...DEFAULTS, skipSmall: true })
@@ -763,12 +765,12 @@ test('a default interval is saved, and a session that follows it beats at it', a
 
 test('settings take the pane\'s values: named or custom, with units', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
-  await call($, 'set', { settings: { skipSmall: true, skipSmallTokens: 35_000, speed: 65 } })
-  expect([stored(store).skipSmall, stored(store).skipSmallTokens, stored(store).speed]).toEqual([true, 35_000, 65])
-  await call($, 'set', { settings: { speed: 'fast', skipSmall: false } })
-  expect([stored(store).speed, stored(store).skipSmall]).toEqual(['fast', false])
-  expect([accept('skipSmallTokens', '35k'), accept('skipSmall', false), accept('customColor', '#AABBCC')]).toEqual([35_000, false, '#aabbcc'])
-  expect([accept('customColor', 'red'), accept('interval', 56), accept('timing', 3), accept('nope', 1)]).toEqual([undefined, undefined, undefined, undefined])
+  await call($, 'set', { settings: { skipSmall: true, skipSmallTokens: 35_000, lineSpeed: 65 } })
+  expect([stored(store).skipSmall, stored(store).skipSmallTokens, stored(store).lineSpeed]).toEqual([true, 35_000, 65])
+  await call($, 'set', { settings: { lineSpeed: 'fast', skipSmall: false } })
+  expect([stored(store).lineSpeed, stored(store).skipSmall]).toEqual(['fast', false])
+  expect([accept('skipSmallTokens', '35k'), accept('skipSmall', false), accept('heartHex', '#AABBCC')]).toEqual([35_000, false, '#aabbcc'])
+  expect([accept('lineHex', 'red'), accept('interval', 56), accept('heartTiming', 3), accept('nope', 1)]).toEqual([undefined, undefined, undefined, undefined])
 })
 
 test('a call with any bad value is refused whole, saying what each takes', async ($: Engine, on: On) => {
@@ -778,8 +780,8 @@ test('a call with any bad value is refused whole, saying what each takes', async
   expect(await deny({ settings: { variant: 'nope' } })).toStartWith('nothing changed: settings.variant takes classic, pulse,')
   expect(await deny({ settings: { skipSmallTokens: 5 } })).toBe('nothing changed: settings.skipSmallTokens takes 1000–1000000 tokens or null, not 5')
   expect(await deny({ settings: { bogus: 1 }, session: 'on' })).toBe('nothing changed: session is an object, not "on"; settings has no bogus')
-  expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, timing: 'fast' } }))
-    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.timing takes lubdub, linear, or null, not "fast"')
+  expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, heartTiming: 'fast' } }))
+    .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.heartTiming takes lubdub, linear, or null, not "fast"')
   expect(store.has('settings')).toBe(false)
   expect((await stateNow($)).session).toEqual(FRESH)
 })
@@ -821,7 +823,7 @@ test('a subagent can read, never change', async ($: Engine, on: On) => {
 test('a call is one dim line in the transcript, its answer not drawn', async ($: Engine, on: On) => {
   await setup($, on)
   const change = { session: { enabled: true, intervalMinutes: 20 }, settings: { interval: 30, heartPlacement: 'line' } }
-  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat: this session on, every 20m · Beat after idle 30m, Heart placement own line'])
+  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat: this session on, every 20m · Beat after idle 30m, Prompt heart placement own line'])
   expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat: read the state'])
   expect(await draw($, toolRow('ToolResult', TOOL.set, change))).toEqual([''])
   expect(await draw($, toolRow('ToolResult', TOOL.state, {}))).toEqual([''])
@@ -955,7 +957,7 @@ const BAND = (surface: 'terminal' | 'desktop') => ({
 }) as never
 
 test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
-  const { clock, logs, tails } = await setup($, on, { settings: { animate: false, showTokens: false } })
+  const { clock, logs, tails } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false, showTokens: false } })
   const band = async () => (await draw($, BAND('desktop'))).join('').replace('\u00a0', ' ') // the space after the heart can't collapse
   expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
   await cmd($, 'on')
@@ -1036,7 +1038,7 @@ test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and
   await ui.press({ key: 'opt:1' }) // picked: back on the tab, the focus left alone
   expect(moved().slice(before)).toEqual(['opt'])
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
-  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-6 tabs · esc closes')).toBe(true)
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-5 tabs · esc closes')).toBe(true)
   await ui.unmount()
 })
 
@@ -1075,5 +1077,44 @@ test('a refusal in the footer goes once the person moves on', async ($: Engine, 
   expect(await ui.find(refusal)).toBeDefined()
   await ui.press({ key: 'back' })
   expect(await ui.find(refusal)).toBe(undefined)
+  await ui.unmount()
+})
+
+test('settings saved before the parts had their own look carry over to both, a part\'s own kept', () => {
+  const old = { color: 'red', customColor: '#112233', effect: 'flow', animate: false, speed: 65, timing: 'linear', lineColor: 'cyan' }
+  const s = normalize(old)
+  expect([s.heartColor, s.heartHex, s.heartEffect, s.heartAnimate, s.heartSpeed, s.heartTiming]).toEqual(['red', '#112233', 'flow', false, 65, 'linear'])
+  expect([s.lineColor, s.lineHex, s.lineEffect, s.lineAnimate, s.lineSpeed, s.lineTiming]).toEqual(['cyan', '#112233', 'flow', false, 65, 'linear'])
+  expect('color' in s).toBe(false)
+})
+
+test('the prompt heart and the turn line each take their own color', async ($: Engine, on: On) => {
+  await setup($, on, { settings: { heartPlacement: 'line', heartColor: 'claude', lineColor: 'red', heartAnimate: false, lineAnimate: false } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  const ui = await $.ui.mount(row('r1'))
+  expect((await ui.findAll({ type: 'Text' })).find(t => t.text?.includes('next beat'))?.props).toMatchObject({ color: '#e5534b' })
+  await ui.unmount()
+  const hint = await $.ui.mount(HINT)
+  expect((await hint.findAll({ type: 'Text' })).find(t => t.props?.color)?.props).toMatchObject({ color: 'claude' })
+  await hint.unmount()
+})
+
+test('r takes the focused setting back to its default; a custom value stays in its list', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:interval' })
+  await ui.input({ key: 'custom', text: '35' })
+  expect(stored(store).interval).toBe(35)
+  await move($, 'row:interval')
+  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('r: back to auto')
+  await ui.press({ key: 'resetRow' })
+  expect(stored(store).interval).toBe('auto')
+  expect(await ui.find({ key: 'resetRow' })).toBe(undefined) // at its default: nothing to reset
+  await ui.press({ key: 'row:interval' })
+  expect((await ui.find({ key: 'custom' }))?.props).toMatchObject({ value: '35m' }) // kept, one Enter from back
+  await ui.input({ key: 'custom', text: '35m' })
+  expect(stored(store).interval).toBe(35)
   await ui.unmount()
 })

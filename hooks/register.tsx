@@ -3,8 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Alert, BeatSettings, PanePage, Pulse, Saved, Ttl } from '../types'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, paint, settingsPane, statusText } from './pane'
-import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, normalize, rowOf, spans, tokens } from './settings'
-import type { Span } from './settings'
+import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, lookOf, normalize, rowOf, spans, tokens } from './settings'
+import type { Span, Value } from './settings'
 import { SET, STATE, parseSet, summary } from './tools'
 
 const MIN = 60_000
@@ -16,6 +16,7 @@ export const MAX_TTL = 60 * MIN // past this since the last cache read, the cach
 const pulse = atom({ plugin: 'cachebeat', key: 'pulse' } as const, 'hidden' as Pulse)
 const saved = atom({ plugin: 'cachebeat', key: 'saved' } as const, null as Saved | null)
 const frameAtom = atom({ plugin: 'cachebeat', key: 'frame' } as const, 0)
+const lineFrameAtom = atom({ plugin: 'cachebeat', key: 'lineFrame' } as const, 0)
 const lineAtom = atom({ plugin: 'cachebeat', key: 'line' } as const, '')
 const settingsAtom = atom({ plugin: 'cachebeat', key: 'settings' } as const, DEFAULTS)
 const tickAtom = atom({ plugin: 'cachebeat', key: 'tick' } as const, 0)
@@ -29,13 +30,15 @@ const fresh: Saved = {
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS
 let timer: { cancel: () => void } | undefined
-let ticker: { cancel: () => void } | undefined
+let ticker: { cancel: () => void } | undefined // the prompt heart's animation clock
+let lineTicker: { cancel: () => void } | undefined // the turn line's, at its own speed
 let paneTicker: { cancel: () => void } | undefined
 let paneTick = 0
 let ring: string[] = [] // the pane's focusable keys as last drawn, in order
 let notice = '' // the pane's footer line
 let isResetArmed = false
 let frame = 0
+let lineFrame = 0
 let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let beating = false
@@ -79,7 +82,24 @@ function save($: EngineInterface) {
   void update($, saved, () => copy)
 }
 
+/**
+ * The custom value each setting last took, in its own store key: a preset or a reset leaves it in the
+ * setting's list, one Enter from coming back.
+ */
+let customs: Partial<Record<keyof BeatSettings, Value>> = {}
+
+async function keepCustoms($: EngineInterface, patch: Partial<BeatSettings>) {
+  const kept = Object.entries(patch).filter(([k, v]) => {
+    const row = rowOf(k as keyof BeatSettings)?.row
+    return row?.custom && !row.values.includes(v as Value)
+  })
+  if (!kept.length) return
+  customs = { ...((await $.store.get('customs')) as typeof customs | undefined), ...Object.fromEntries(kept) }
+  await $.store.set('customs', customs)
+}
+
 async function setSettings($: EngineInterface, patch: Partial<BeatSettings>) {
+  await keepCustoms($, patch)
   // from the store, not this session's copy: another session may have changed it since
   cfg = { ...normalize(await $.store.get('settings')), ...patch }
   const copy = { ...cfg }
@@ -105,10 +125,10 @@ async function syncSettings($: EngineInterface) {
 
 /** The animation clocks restart at the settings' speed, or stay stopped, as the next drawing finds them. */
 function restartClocks($: EngineInterface) {
-  ticker?.cancel()
-  ticker = undefined
+  stopClocks()
   stopPaneTicker()
   void update($, frameAtom, f => f + 1)
+  void update($, lineFrameAtom, f => f + 1)
   void update($, tickAtom, t => t + 1)
 }
 
@@ -124,10 +144,10 @@ async function refreshLine($: EngineInterface) {
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
 }
 
-/** The animation clock: runs while the heart is drawn beating (the hint row draws it, or the desktop's band). */
+/** The prompt heart's animation clock: runs while the hint row draws the heart beating. */
 function animate($: EngineInterface) {
   if (ticker) return
-  const ms = frameMs(cfg)
+  const ms = frameMs(lookOf(cfg, 'heart'))
   const perSecond = Math.round(1000 / ms)
   ticker = $.clock.every(ms, () => {
     frame++
@@ -137,12 +157,31 @@ function animate($: EngineInterface) {
   })
 }
 
+/** The turn line's animation clock, at the line's own speed: runs while the line is drawn moving. */
+function animateLine($: EngineInterface) {
+  if (lineTicker) return
+  const ms = frameMs(lookOf(cfg, 'line'))
+  const perSecond = Math.round(1000 / ms)
+  lineTicker = $.clock.every(ms, () => {
+    lineFrame++
+    void update($, lineFrameAtom, () => lineFrame)
+    if (lineFrame % perSecond === 0) void refreshLine($)
+  })
+}
+
+function stopClocks() {
+  ticker?.cancel()
+  ticker = undefined
+  lineTicker?.cancel()
+  lineTicker = undefined
+}
+
 /** The heart as drawn now: the blast after a beat, the loop while armed, else the loop's first frame. */
 function heartFrame(c: BeatSettings, p: Pulse, f: number) {
   const x = variant(c.variant)
-  if (!c.animate) return x.loop[0]!
+  if (!c.heartAnimate) return x.loop[0]!
   if (blast >= 0) return x.blast[blast]!
-  return p === 'armed' ? x.loop[loopIndex(x, f, c.timing)]! : x.loop[0]!
+  return p === 'armed' ? x.loop[loopIndex(x, f, c.heartTiming)]! : x.loop[0]!
 }
 
 /**
@@ -150,10 +189,13 @@ function heartFrame(c: BeatSettings, p: Pulse, f: number) {
  * the heart's spans, then the rest's, and the cells the heart takes at its widest.
  */
 function liveLine(line: string, c: BeatSettings, p: Pulse, f: number): { head: Span[]; rest: Span[]; width: number } {
-  const isPlaying = c.animate && p === 'armed' && c.statusHeart !== 'off'
+  const look = lookOf(c, 'line')
+  const isPlaying = look.animate && p === 'armed' && c.statusHeart !== 'off'
   const lead = /^[♥♡]/.test(line) ? line[0]! : ''
-  const heart = lead && isPlaying ? statusFrame(c.statusHeart, f, c.timing, isLit(heartFrame(c, p, f))) : lead
-  const all = spans(heart + line.slice(lead.length), c.animate && c.effect !== 'steady' ? c : { ...c, effect: 'steady' }, f, isLit(heart || heartFrame(c, p, f)))
+  const heart = lead && isPlaying ? statusFrame(c.statusHeart, f, look.timing) : lead
+  // a flash lights the line as its heart fills, or as one would beat, the heart still or none
+  const lit = isLit(isPlaying ? heart : statusFrame('beat', f, look.timing))
+  const all = spans(heart + line.slice(lead.length), look.animate && look.effect !== 'steady' ? look : { ...look, effect: 'steady' }, f, lit)
   // the spans split where the heart ends, so it can sit in a box of its own
   const head: Span[] = []
   const rest: Span[] = []
@@ -177,8 +219,7 @@ const joined = (list: Span[]) => list.reduce<Span[]>((out, sp) => {
 
 function setPulse($: EngineInterface, p: Pulse) {
   if (p !== 'armed') {
-    ticker?.cancel()
-    ticker = undefined
+    stopClocks()
     blast = -1
   }
   void update($, pulse, () => p)
@@ -333,7 +374,7 @@ async function beat($: EngineInterface): Promise<string> {
   s.lastWarm = await $.clock.now()
   s.lastRead = got
   s.beats++
-  if (cfg.animate) blast = 0
+  if (cfg.heartAnimate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
   if (logs(cfg.onBeat) || (s.row === null && !isStatusOnBand)) $.ui.log(renewed) // else no line at all says it
   if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
@@ -417,6 +458,7 @@ const PANE_OPEN = { id: PANE, title: 'cachebeat', focus: true, closeOnEscape: tr
 
 async function openSettings($: EngineInterface) {
   await syncSettings($)
+  customs = ((await $.store.get('customs')) as typeof customs | undefined) ?? {}
   ttl = await cacheTtl($)
   notice = ''
   isResetArmed = false
@@ -642,9 +684,10 @@ export const register: Register = on => {
     const line = isLive ? await read($, lineAtom) : '' // one line, under the latest turn alone
     const c = await read($, settingsAtom)
     if (!line || c.statusLine === 'off') return next(e)
-    const moving = c.animate && (c.effect !== 'steady' || c.statusHeart !== 'off')
-    const f = moving ? await read($, frameAtom) : 0
+    const moving = c.lineAnimate && (c.lineEffect !== 'steady' || c.statusHeart !== 'off')
+    const f = moving ? await read($, lineFrameAtom) : 0
     const p = moving ? await read($, pulse) : 'hidden'
+    if (isLive && p === 'armed') animateLine($)
     const { Box, Text } = $.ui.resolve(e)
     const { head, rest } = liveLine(line, c, p, f)
     const painted = paint(Text, joined([...head, ...rest])) // monospace: the heart needs no box
@@ -663,14 +706,14 @@ export const register: Register = on => {
     const p = await read($, pulse)
     if (e.surface === 'desktop' || e.props.isWorking || p === 'hidden') return next(e)
     const c = await read($, settingsAtom)
-    if (p === 'armed' && c.animate) animate($)
+    if (p === 'armed' && c.heartAnimate) animate($)
     const f = await read($, frameAtom)
     const heart = heartFrame(c, p, f)
     // a space past the frame's own blank edge: the heart sits as far from the count as from the ' · ' before it
     const count = c.showCount ? ` ×${s.beats}` : ''
     if (c.heartPlacement === 'tail') return next({ ...e, props: { ...e.props, tail: `${heart}${count}` } })
     const { Box, Text } = $.ui.resolve(e)
-    const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, c, f, isLit(heart))
+    const look = p === 'waiting' ? [{ text: heart, dim: true }] : spans(heart, lookOf(c, 'heart'), f, isLit(heart))
     return (
       <Box flexDirection="column">
         {await next(e)}
@@ -691,8 +734,8 @@ export const register: Register = on => {
     const line = await read($, lineAtom)
     if (!isStatusOnBand || !line || e.props.hasSurvey || e.props.isWorking) return next(e)
     const p = await read($, pulse)
-    if (p === 'armed' && c.animate) animate($)
-    const f = c.animate ? await read($, frameAtom) : 0
+    if (p === 'armed' && c.lineAnimate) animateLine($)
+    const f = c.lineAnimate ? await read($, lineFrameAtom) : 0
     const { Box, Text } = $.ui.resolve(e)
     // the band's font is proportional: the heart's frames differ in width, so it gets a box of its own
     // and the words after it never move
@@ -729,14 +772,16 @@ export const register: Register = on => {
     // the preview's clock runs only while there is a preview to move
     const picked = page.picker ? rowOf(page.picker) : undefined
     const isMoving = picked ? picked.row.key === 'variant' || !!picked.tab.preview : !!TABS.find(t => t.id === page.tab)?.preview
+    // at the speed of the part on show: the turn line's on its tab, the heart's elsewhere
+    const part = (picked?.tab.id ?? page.tab) === 'status' ? 'line' : 'heart'
     if (!isMoving) stopPaneTicker()
-    else if (!paneTicker) paneTicker = $.clock.every(frameMs(c), () => void update($, tickAtom, () => ++paneTick))
+    else if (!paneTicker) paneTicker = $.clock.every(frameMs(lookOf(c, part)), () => void update($, tickAtom, () => ++paneTick))
     const els = $.ui.resolve(e)
     paneSurface = e.surface
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
     const view = {
       page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN,
-      autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal',
+      autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal', customs,
     }
     const { tree, ring: walk } = settingsPane(els, c, view, {
       set: patch => void setSettings($, patch),
@@ -751,6 +796,7 @@ export const register: Register = on => {
       },
       pick: (key, value) => void setSettings($, { [key]: value }).then(() => (say($, ''), goTo($, { ...page, picker: null }, `row:${key}`))),
       refuse: text => say($, text),
+      resetRow: key => void setSettings($, { [key]: DEFAULTS[key] }).then(() => say($, `${rowOf(key)!.row.label.trim()} back to its default`)),
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
       toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($, undefined).then(r => r.text)).then(t => say($, `this session: ${t}`)),
       beatNow: () => void beatNow($).then(t => say($, t)),

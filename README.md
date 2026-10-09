@@ -20,7 +20,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 
 - **Background beats** keep the cache warm while you're idle, timed to how long your cache lasts, and stay out of the conversation
 - **A live heart** under the prompt, with 19 animations to choose from
-- **A status line** under your latest turn shows the beats so far and the time until the next one
+- **A turn line** under your latest turn shows the beats so far and the time until the next one
 - **A settings menu** with live previews, driven by keyboard or mouse
 - **Ask Claude** to turn it on, change the interval, or change any setting, in your own words
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
@@ -29,7 +29,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 ## Requirements
 
 - **Claude Code 2.1.287 or later.** Check your version with `claude --version` and update with `claude update`.
-- **Claude Code in the terminal**, which cachebeat is built for. In the Claude desktop app beating works the same, the status line sits above the prompt and the settings menu opens beside the chat, but the wider heart animations and the menu's keyboard controls are rougher there: you can just ask Claude to change settings for you. Nothing is drawn in `claude -p`.
+- **Claude Code in the terminal**, which cachebeat is built for. In the Claude desktop app beating works the same, the turn line sits above the prompt and the settings menu opens beside the chat, but the wider heart animations and the menu's keyboard controls are rougher there: you can just ask Claude to change settings for you. Nothing is drawn in `claude -p`.
 
 ## Install
 
@@ -110,7 +110,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 **The heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next turn.
 
-**The status line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · next in 42m`. Its heart beats too, with an animation of its own under **Status**. While beats wait for your next message, after `/model` or `/compact`, it says so. When you send a new message, the line moves down to the new turn. In the desktop app it stays above the prompt instead.
+**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`. Its heart beats too, with an animation of its own under **Turn line**. While beats wait for your next message, after `/model` or `/compact`, it says so. When you send a new message, the line moves down to the new turn. In the desktop app it stays above the prompt instead.
 
 ```
 ✻ Cogitated for 12s · done 3:09 PM
@@ -125,13 +125,16 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings are saved once and apply to every session.
 
-- On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–6 jump straight into a tab.
+- On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
 - Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
+- **r** puts the focused setting back to its default.
 - In a list, ↑↓ preview each choice and Enter picks it.
 - Esc goes back one step, and closes the menu from the tab bar.
 - The mouse works too: click to pick, scroll to scroll.
 
-Settings with numbers also take a custom value at the bottom of their list, such as `35` minutes, `90m`, or `35k` tokens. A value out of range is refused, with what the setting takes.
+Settings with numbers also take a custom value at the bottom of their list, such as `35` minutes, `90m`, or `35k` tokens. A value out of range is refused, with what the setting takes. Your last custom value stays in the list after you pick another, so it's one Enter from coming back.
+
+Everything in the menu applies to every session, except **This session** at the top of Beating.
 
 <details>
 <summary><b>Beating</b>: whether it's on, and how often</summary>
@@ -144,7 +147,7 @@ Settings with numbers also take a custom value at the bottom of their list, such
 | After /model | Wait for your next message, or have the next beat warm the new model's cache | wait |
 | `/cachebeat 30` changes | Whether `/cachebeat 30` changes this session only, or the default for all | this session |
 
-**Beat now** sends a beat right away.
+**Beat now** sends a beat right away, and **Reset all** puts every setting back to its default.
 
 </details>
 
@@ -157,18 +160,23 @@ Settings with numbers also take a custom value at the bottom of their list, such
 | Stop at usage | Stops once any of your usage limits reaches this percentage | 90% |
 | Skip small chats | Skips beating chats under a minimum size | off, 20k tokens |
 
-With **Skip small chats** on, cachebeat tells you up front when a chat is under your minimum, once in the log and in the status line: `♡ beats skip · this chat is 38k tokens, under your 50k minimum`. It starts beating as soon as the chat grows past the minimum.
+With **Skip small chats** on, cachebeat tells you up front when a chat is under your minimum, once in the log and in the turn line: `♡ beats skip · this chat is 38k tokens, under your 50k minimum`. It starts beating as soon as the chat grows past the minimum.
 
 </details>
 
 <details>
-<summary><b>Heart</b>: the heart under the prompt</summary>
+<summary><b>Prompt heart</b>: the heart under the prompt</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| Placement | At the end of the hint line, or on its own line below it | hint line |
+| Placement | At the end of the hint line, drawn dim, or on its own line, in color | hint line |
 | Animation | Which of the 19 animations the heart plays | Classic |
 | Beat count | Shows the `×3` beside the heart | on |
+| Color | On its own line: dim, a color from your theme, a preset, or any hex color | claude, your theme's accent |
+| Animate | Turns its animation on or off | on |
+| Effect | On its own line: steady; flash on each beat; flow, a shimmer sweeping across; or mixed, which switches between them | steady |
+| Speed | Slow, normal, fast, or a custom frame time | normal |
+| Timing | Lub-dub beats twice, then rests, and suits the hearts; linear plays evenly, and suits the line animations | lub-dub |
 
 The Animation list plays every animation at once, so you can watch them side by side before you pick: Classic, Pulse, Triplet, Sparkle, Fleuron, Wave, ECG, Beam, Dash, Sine, Charge, Converge, Twins, Orbit, Static, Garland, Equalizer, Cupid and Bounce.
 
@@ -178,32 +186,23 @@ Sparkle    ✦ ♥ ✦            Sine    ⠒⠉⠒⠤⣀⠤⠒⠉⠒⠤⣀⠤�
 Orbit       •♥              Cupid       ─➤ ♡
 ```
 
+The desktop app draws no heart under the prompt.
+
 </details>
 
 <details>
-<summary><b>Status line</b>: the line under your latest turn</summary>
+<summary><b>Turn line</b>: the line under your latest turn</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
 | Show | Under the turn after a blank line, directly under it, or off | after a blank line |
 | Countdown | Shows the time to the next beat | on |
 | Tokens kept | Shows how much the last beat kept warm, e.g. `· 184k cached` | on |
-| Animation | What the heart at the start of the line plays: one heart beating, a still one, or any of the 19 animations | one heart, beating |
-
-</details>
-
-<details>
-<summary><b>Style</b>: how the heart and the line look and move</summary>
-
-| Setting | What it does | Default |
-| --- | --- | --- |
+| Its heart | What the heart at the start of the line plays: one heart beating, a still one, or any of the 19 animations | one heart, beating |
 | Color | Dim, a color from your theme, a preset, or any hex color | claude, your theme's accent |
-| Animate | Turns all the animation on or off | on |
-| Effect | Steady; flash on each beat; flow, a shimmer sweeping across; or mixed, which switches between them | steady |
-| Speed | Slow, normal, fast, or a custom frame time | normal |
-| Timing | Lub-dub beats twice, then rests, and suits the hearts; linear plays evenly, and suits the line animations | lub-dub |
+| Animate · Effect · Speed · Timing | As for the prompt heart, for the line on its own | on · steady · normal · lub-dub |
 
-Theme colors follow your Claude Code theme, so they change when you switch themes. A heart at the end of the hint line is always dim; put it on its own line to give it color. The status line takes the color either way.
+Theme colors follow your Claude Code theme, so they change when you switch themes. In the desktop app the line sits above the prompt.
 
 </details>
 
@@ -214,8 +213,6 @@ Theme colors follow your Claude Code theme, so they change when you switch theme
 | --- | --- | --- |
 | On a beat | Log, toast, both, or nothing when a beat lands | nothing |
 | On stop | Log, toast, both, or nothing when beating stops by itself | log |
-
-**Reset all** puts every setting back to its default.
 
 </details>
 

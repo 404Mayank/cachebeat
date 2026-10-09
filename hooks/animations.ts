@@ -102,14 +102,14 @@ export function previewFrame(x: Variant, tick: number, timing: Timing) {
 export const STATUS_HEARTS: readonly string[] = ['beat', 'off', ...VARIANTS.map(x => x.id)]
 
 /**
- * The status line's heart at `tick`. `beat` is one glyph, filled while the heart under the prompt is
- * lit, so the line never shifts; an animation plays its own loop.
+ * The turn line's heart at `tick`, by the line's own timing. `beat` is one glyph, filled as Classic's
+ * loop lights, so the line never shifts; an animation plays its own loop.
  */
-export function statusFrame(id: string, tick: number, timing: Timing, isHeartLit: boolean) {
+export function statusFrame(id: string, tick: number, timing: Timing) {
   if (id === 'off') return '♥'
-  if (id === 'beat') return isHeartLit ? '♥' : '♡'
-  const x = variant(id)
-  return x.loop[loopIndex(x, tick, timing)]!
+  const x = variant(id === 'beat' ? 'classic' : id)
+  const frame = x.loop[loopIndex(x, tick, timing)]!
+  return id === 'beat' ? (/[♥❤]/.test(frame) ? '♥' : '♡') : frame
 }
 
 const HEARTS = /[♥♡❤❥❦❧☙]/

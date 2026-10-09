@@ -22,6 +22,13 @@ export type Ttl = '5m' | '1h'
 /** How an event is told: a line in the transcript, a toast, both, or not at all. */
 export type Alert = 'none' | 'log' | 'toast' | 'both'
 
+export type Effect = 'steady' | 'flash' | 'flow' | 'mixed'
+export type Speed = 'slow' | 'normal' | 'fast' | number // a number: ms a frame
+export type Timing = 'linear' | 'lubdub'
+
+/** How one part draws and moves: the heart under the prompt, or the turn line. */
+export type Look = { color: string; customColor: string; effect: Effect; animate: boolean; speed: Speed; timing: Timing }
+
 /** The settings, global: kept in the plugin's store, shared by every session. */
 export type BeatSettings = {
   defaultOn: boolean // new sessions start beating
@@ -31,19 +38,27 @@ export type BeatSettings = {
   stopAtUsage: number // percent of any rate-limit window
   skipSmall: boolean
   skipSmallTokens: number
-  animate: boolean
-  variant: string
-  speed: 'slow' | 'normal' | 'fast' | number // a number: ms a frame
-  timing: 'linear' | 'lubdub'
+  // the heart under the prompt
   heartPlacement: 'tail' | 'line'
+  variant: string
   showCount: boolean
-  color: string // 'dim', a theme key, a preset, or 'custom'
-  customColor: string // #rrggbb
-  effect: 'steady' | 'flash' | 'flow' | 'mixed'
+  heartColor: string // 'dim', a theme key, a preset, or 'custom'
+  heartHex: string // #rrggbb, when heartColor is custom
+  heartAnimate: boolean
+  heartEffect: Effect
+  heartSpeed: Speed
+  heartTiming: Timing
+  // the line under the latest turn
   statusLine: 'below' | 'spaced' | 'off'
   showCountdown: boolean
   showTokens: boolean
-  statusHeart: string // what the heart starting the status line plays: beat, off, or an animation's id
+  statusHeart: string // what the heart starting the line plays: beat, off, or an animation's id
+  lineColor: string
+  lineHex: string
+  lineAnimate: boolean
+  lineEffect: Effect
+  lineSpeed: Speed
+  lineTiming: Timing
   onBeat: Alert
   onStop: Alert
   onModelSwitch: 'wait' | 'warm' // after /model while idle: wait for the next turn, or have the next beat write the new model's cache
@@ -67,6 +82,7 @@ declare module 'claude-code' {
       saved: Saved | null
       frame: number
       line: string
+      lineFrame: number // the turn line's own animation clock
       settings: BeatSettings
       tick: number // the settings pane's preview clock
       page: PanePage
