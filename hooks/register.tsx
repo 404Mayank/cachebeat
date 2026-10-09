@@ -672,6 +672,8 @@ export const register: Register = on => {
     // the band's font is proportional: the heart's frames differ in width, so it gets a box of its own
     // and the words after it never move
     const { head, rest, width } = liveLine(line, c, p, f)
+    // a space starting a box is collapsed there, as HTML does: the one after the heart can't be
+    if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '\u00a0') }
     return (
       <Box flexDirection="row">
         <Box width={width} flexShrink={0}>{paint(Text, head)}</Box>

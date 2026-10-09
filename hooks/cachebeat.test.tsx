@@ -939,10 +939,11 @@ const BAND = (surface: 'terminal' | 'desktop') => ({
 
 test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
   const { clock, logs, tails } = await setup($, on, { settings: { animate: false } })
-  const band = async () => (await draw($, BAND('desktop'))).join('')
+  const band = async () => (await draw($, BAND('desktop'))).join('').replace('\u00a0', ' ') // the space after the heart can't collapse
   expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
   await cmd($, 'on')
   await $.turn.complete(turn)
+  expect((await draw($, BAND('desktop'))).join('')).toBe('♡\u00a0next beat in 50m')
   expect(await band()).toBe('♡ next beat in 50m')
   await draw($, { ...HINT, surface: 'desktop' } as never)
   expect(tails.at(-1)).toBe(undefined) // the desktop draws no tail: nothing is added there
