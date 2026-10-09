@@ -495,26 +495,16 @@ async function openSettings($: EngineInterface) {
 async function focusOn($: EngineInterface, key: string, isLanding = false) {
   if (paneSurface !== 'terminal' && !isLanding) return
   // a focus that cannot move leaves the page as it is (`claude plugin test` has no focus to move)
-  let deny: string | undefined
-  try {
-    const moved = await $.ui.focus({ requestId: PANE, key })
-    deny = moved.deny
-  } catch (err) {
-    deny = String(err)
-  }
-  if (deny) {
-    $.ui.log(`focus ${key}: ${deny}`, { to: 'debug' })
+  const focusing = $.ui.focus({ requestId: PANE, key })
+  const moved = await focusing.catch((err: unknown) => ({ deny: String(err) }))
+  if (moved.deny) {
+    $.ui.log(`focus ${key}: ${moved.deny}`, { to: 'debug' })
     return
   }
   await update($, focusAtom, () => key)
-  let stuck: string | undefined
-  try {
-    const scrolled = await $.ui.scroll({ to: { key }, in: PANE })
-    stuck = scrolled.deny
-  } catch (err) {
-    stuck = String(err)
-  }
-  if (stuck) $.ui.log(`scroll to ${key}: ${stuck}`, { to: 'debug' })
+  const scrolling = $.ui.scroll({ to: { key }, in: PANE })
+  const scrolled = await scrolling.catch((err: unknown) => ({ deny: String(err) }))
+  if (scrolled.deny) $.ui.log(`scroll to ${key}: ${scrolled.deny}`, { to: 'debug' })
 }
 
 function stopPaneTicker() {
