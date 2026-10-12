@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, slotText, slotWidths, variant } from './animations'
-import { PANE } from './pane'
+import { PANE, cut } from './pane'
 import { DEADLINE, IDLE, RETRY, fmt } from './register'
 import { DEFAULTS, EPISODE, accept, glyphs, lookOf, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
@@ -17,6 +17,8 @@ const usage = (read: number, wrote: number) => ({
   input_tokens: 5, output_tokens: 1, cache_read_input_tokens: read, cache_creation_input_tokens: wrote,
 })
 const OPUS = 'claude-opus-5-5'
+const HOME = '/home/me/code/api' // the session's folder
+const OTHER = '/home/me/code/web'
 // a turn that sent its requests on Opus; one without usage sent none
 const turn = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage: { ...usage(90_000, 0), model: OPUS } } as const
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
@@ -24,11 +26,13 @@ const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 type World = {
   fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS>
   env?: Record<string, string>; settingsFile?: Record<string, unknown>; isSubscription?: boolean
+  folders?: Record<string, unknown> // the store's folders, by path
 }
 
 const setup = async ($: Engine, on: On, world: World = {}) => {
   const clock = mock.clock(on)
   const store = new Map<string, unknown>(world.settings ? [['settings', { ...DEFAULTS, ...world.settings }]] : [])
+  if (world.folders) store.set('folders', world.folders)
   on('store.get', (_$, e) => ({ value: store.get(e.key) }) as never)
   on('store.set', (_$, e) => (store.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never)
   const forks: number[] = []
@@ -48,6 +52,8 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   }) as never)
   let model: string = OPUS
   on('session.model', () => ({ value: model }) as never)
+  let root = HOME
+  on('session.root', () => ({ value: root }) as never)
   mock.env(on, world.env ?? {})
   on('settings.read', () => ({ value: world.settingsFile ?? {} }) as never)
   on('model.fork', () => {
@@ -78,7 +84,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('classic.PostModelSwitch', () => ({}))
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  return { clock, forks, logs, toasts, tails, store, specs, switchTo: (m: string) => (model = m) }
+  return { clock, forks, logs, toasts, tails, store, specs, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r) }
 }
 
 const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
@@ -157,7 +163,7 @@ test('custom numbers through the pane: an interval, a frame time', async ($: Eng
   expect(stored(store).interval).toBe('auto')
   await ui.input({ key: 'custom', text: '35' })
   expect(stored(store).interval).toBe(35)
-  expect(await cmd($, 'on')).toBe('on, every 35m idle · starts after your next turn')
+  expect(await cmd($, 'on')).toBe('this session: on, every 35m idle · starts after your next turn')
   await ui.press({ key: 'tab:heart' })
   await ui.press({ key: 'row:heartSpeed' })
   await ui.input({ key: 'custom', text: '65ms' })
@@ -225,13 +231,13 @@ test('off by default: no beats', async ($: Engine, on: On) => {
 
 test('commands answer for the state they find', async ($: Engine, on: On) => {
   await setup($, on)
-  expect(await cmd($, 'off')).toBe('already off')
-  expect(await cmd($, 'on')).toBe('on, every 50m idle · starts after your next turn')
-  expect(await cmd($, 'on')).toBe('already on, every 50m idle · starts after your next turn')
-  expect(await cmd($, '5')).toBe('interval 50m → 5m · starts after your next turn')
-  expect(await cmd($, 'on 5')).toBe('already on, every 5m idle · starts after your next turn')
-  expect(await cmd($, 'off')).toBe('off')
-  expect(await cmd($, 'bogus')).toBe('usage: /cachebeat [on|off|<minutes>|now|global on|off|settings]')
+  expect(await cmd($, 'off')).toBe('this session: already off')
+  expect(await cmd($, 'on')).toBe('this session: on, every 50m idle · starts after your next turn')
+  expect(await cmd($, 'on')).toBe('this session: already on, every 50m idle · starts after your next turn')
+  expect(await cmd($, '5')).toBe('this session: interval 50m → 5m · starts after your next turn')
+  expect(await cmd($, 'on 5')).toBe('this session: already on, every 5m idle · starts after your next turn')
+  expect(await cmd($, 'off')).toBe('this session: off')
+  expect(await cmd($, 'bogus')).toBe('usage: /cachebeat [on|off|<minutes>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]')
 })
 
 test('a global default on starts a new session beating', async ($: Engine, on: On) => {
@@ -243,29 +249,29 @@ test('a global default on starts a new session beating', async ($: Engine, on: O
 
 test('global on sets the default and turns this session on; global off the reverse', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
-  expect(await cmd($, 'global')).toBe('new sessions start off · usage: /cachebeat [on|off|<minutes>|now|global on|off|settings]')
-  expect(await cmd($, 'global on')).toBe('new sessions start on · this session: on, every 50m idle · starts after your next turn')
+  expect(await cmd($, 'global')).toBe('all folders: New sessions start off, Beat after idle auto · usage: /cachebeat global on|off|<minutes>')
+  expect(await cmd($, 'global on')).toBe('all folders: new sessions start on · this session: on, every 50m idle')
   expect(stored(store).defaultOn).toBe(true)
-  expect(await cmd($, 'global off')).toBe('new sessions start off · this session: off')
+  expect(await cmd($, 'global off')).toBe('all folders: new sessions start off · this session: off')
   expect(stored(store).defaultOn).toBe(false)
 })
 
-test('an interval set for the session leaves the global one; set globally, it changes it', async ($: Engine, on: On) => {
-  const { store } = await setup($, on)
+test('minutes alone set this session\'s interval; global minutes set all folders\', which this session follows from then', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { settings: { intervalScope: 'global' } as never }) // 0.7's "the default" is gone
   await cmd($, '7')
   expect(stored(store).interval).toBe('auto')
-  await cmd($, 'off')
-  store.set('settings', { ...DEFAULTS, intervalScope: 'global' })
-  await $.turn.complete(turn) // picks up the store
-  expect(await cmd($, '9')).toBe('on, every 9m idle · next beat in 9m')
+  await $.turn.complete(turn)
+  expect(await cmd($, 'global 9')).toBe('all folders: every 9m idle · this session: on, every 9m idle')
   expect(stored(store).interval).toBe(9)
+  expect(await cmd($, '')).toBe('on, every 9m idle · 0 beats · next beat in 9m') // its own 7m dropped
+  expect(store.get('settings')).toEqual({ interval: 9 })
 })
 
 test('on mid-idle beats at lastTurn + IDLE, then every IDLE', async ($: Engine, on: On) => {
   const { clock, forks } = await setup($, on)
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect(await cmd($, 'on')).toBe('on, every 50m idle · next beat in 40m')
+  expect(await cmd($, 'on')).toBe('this session: on, every 50m idle · next beat in 40m')
   await clock.advance(40 * M)
   expect(forks).toEqual([IDLE])
   await clock.advance(IDLE)
@@ -290,7 +296,7 @@ test('a new interval reschedules from the last cache read', async ($: Engine, on
   await $.turn.complete(turn)
   await cmd($, '3')
   await clock.advance(3 * M) // beat 1 at 3
-  expect(await cmd($, '4')).toBe('interval 3m → 4m · next beat in 4m')
+  expect(await cmd($, '4')).toBe('this session: interval 3m → 4m · next beat in 4m')
   await clock.advance(4 * M)
   expect(forks).toEqual([3 * M, 7 * M])
 })
@@ -299,7 +305,7 @@ test('turned on within the hour after a turn but past the interval, it beats at 
   const { clock, forks } = await setup($, on)
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect(await cmd($, '3')).toBe('on, every 3m idle · beating now')
+  expect(await cmd($, '3')).toBe('this session: on, every 3m idle · beating now')
   await clock.settle()
   expect(forks).toEqual([10 * M])
 })
@@ -358,9 +364,9 @@ test('a /clear starts the count afresh, still on at the same interval', async ($
   await cmd($, '3')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
-  expect(await cmd($, '')).toBe('on, every 3m idle · 1 beats · next beat in 3m')
+  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 1 beat · next beat in 3m')
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  expect(await cmd($, '')).toBe('on, every 3m idle · 0 beats · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 0 beats · starts after your next turn')
   await clock.advance(10 * M)
   expect(forks).toHaveLength(1) // nothing to fork until the new conversation has a turn
   await $.turn.complete(turn)
@@ -454,7 +460,7 @@ test('under the minimum context it says beats will skip, once, and arms when a t
   const world = { contextTokens: 8_000, settings: { skipSmall: true } }
   const { clock, forks, logs } = await setup($, on, world)
   await $.turn.complete(turn)
-  expect(await cmd($, '3')).toBe('on, every 3m idle · beats skip: this chat is 8k tokens, under your 20k minimum')
+  expect(await cmd($, '3')).toBe('this session: on, every 3m idle · beats skip: this chat is 8k tokens, under your 20k minimum')
   expect(logs).toEqual(['beats will skip: this chat is 8k tokens, under your 20k minimum'])
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await $.turn.complete(turn)
@@ -478,7 +484,7 @@ test('the chat\'s size counts the last reply, which a beat reads too', async ($:
   const world = { contextTokens: 45_000, lastUsage: reply(6_000), settings: { skipSmall: true, skipSmallTokens: 50_000 } }
   const { logs } = await setup($, on, world)
   await $.turn.complete(turn)
-  expect(await cmd($, 'on')).toBe('on, every 50m idle · next beat in 50m')
+  expect(await cmd($, 'on')).toBe('this session: on, every 50m idle · next beat in 50m')
   world.lastUsage = reply(4_000) // 49k
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await $.turn.complete(turn)
@@ -580,7 +586,7 @@ test('the settings pane: six tabs, two choices flip in place, more open a list, 
   const ui = await $.ui.mount(SETTINGS_PANE)
   expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:alerts'])
   expect([(await ui.find({ key: 'beatNow' }))?.text, (await ui.find({ key: 'reset' }))?.text]).toEqual(['Beat now', 'Reset all'])
-  expect(await ui.find({ type: 'Text', text: /^This session is this session alone; every other setting applies to every session/ })).toBeDefined()
+  expect((await ui.find({ key: 'folder' }))?.text).toBe('Settings for          all folders')
 
   await ui.press({ key: 'row:defaultOn' }) // two values: flips
   expect(stored(store).defaultOn).toBe(true)
@@ -617,7 +623,7 @@ test('the settings pane: six tabs, two choices flip in place, more open a list, 
   await move($, 'row:heartTiming')
   expect(await ui.find({ type: 'Text', text: /^lub-dub beats twice, then rests/ })).toBeDefined()
   expect(await ui.find({ key: 'row:heartColor' })).toBe(undefined) // on the hint line the heart is dim: no color to pick
-  expect(await ui.find({ type: 'Text', text: 'These apply to every session.' })).toBeDefined()
+  expect(await ui.find({ key: 'folder' })).toBeDefined() // on every tab
 
   await ui.press({ key: 'tab:alerts' })
   expect(await ui.find({ key: 'reset' })).toBe(undefined)
@@ -723,7 +729,7 @@ test('both tools register, every setting in the schema with the pane\'s ranges',
 
 test('state on a fresh session: off, at the default interval, the settings as they are', async ($: Engine, on: On) => {
   await setup($, on)
-  expect(await stateNow($)).toEqual({ session: FRESH, settings: DEFAULTS, defaults: {} })
+  expect(await stateNow($)).toEqual({ session: FRESH, settings: DEFAULTS, folder: { path: HOME, own: {} }, defaults: {} })
   await call($, 'set', { settings: { interval: 30, showTokens: false } })
   expect((await stateNow($)).defaults).toEqual({ interval: 'auto', showTokens: true })
 })
@@ -752,7 +758,7 @@ test('set answers with what changed and those settings alone; null resets a sett
   expect(stored(store)).toEqual({ ...DEFAULTS, skipSmall: true })
   // a session that follows the default moves with it, but the call changed the default alone
   expect(await set($, { settings: { interval: 30 } })).toEqual({
-    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30, intervalFrom: 'default' }, settings: { interval: 30 },
+    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30, intervalFrom: 'all folders' }, settings: { interval: 30 },
   })
 })
 
@@ -825,8 +831,8 @@ test('a subagent can read, never change', async ($: Engine, on: On) => {
 test('a call is one dim line in the transcript, its answer not drawn', async ($: Engine, on: On) => {
   await setup($, on)
   const change = { session: { enabled: true, intervalMinutes: 20 }, settings: { interval: 30, heartPlacement: 'line' } }
-  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat: this session on, every 20m · Beat after idle 30m, Prompt heart placement own line'])
-  expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat: read the state'])
+  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat · this session on, every 20m · all folders: Beat after idle 30m, Prompt heart placement own line'])
+  expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat · read the state'])
   expect(await draw($, toolRow('ToolResult', TOOL.set, change))).toEqual([''])
   expect(await draw($, toolRow('ToolResult', TOOL.state, {}))).toEqual([''])
 })
@@ -853,7 +859,7 @@ for (const [name, world, ttl, minutes] of TTL_CASES) {
 
 test('auto beats at 4m on a five-minute cache', async ($: Engine, on: On) => {
   const { clock, forks } = await setup($, on, { isSubscription: false })
-  expect(await cmd($, 'on')).toBe('on, every 4m idle · starts after your next turn')
+  expect(await cmd($, 'on')).toBe('this session: on, every 4m idle · starts after your next turn')
   await $.turn.complete(turn)
   expect(await cmd($, '')).toBe('on, every 4m idle · 0 beats · next beat in 4m')
   await clock.advance(8 * M)
@@ -909,7 +915,7 @@ test('after /model set to warm, the next beat writes the new model\'s cache and 
   expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · next beat in 50m')
   await clock.advance(IDLE)
   expect(forks).toEqual([IDLE, 2 * IDLE])
-  expect(await cmd($, '')).toBe('on, every 50m idle · 1 beats · next beat in 50m')
+  expect(await cmd($, '')).toBe('on, every 50m idle · 1 beat · next beat in 50m')
 })
 
 test('a model changed with no event in between is caught when the beat comes: it waits, never forks', async ($: Engine, on: On) => {
@@ -1008,7 +1014,7 @@ test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engin
   expect((await call($, 'set', { settings: { interval: 0 } })).deny).toBe('nothing changed: settings.interval takes auto, 1–55 minutes, or null, not 0')
   expect((await stateNow($)).session.intervalFrom).toBe('auto')
   await set($, { settings: { interval: 30 } })
-  expect((await stateNow($)).session.intervalFrom).toBe('default')
+  expect((await stateNow($)).session.intervalFrom).toBe('all folders')
 })
 
 test('on a proportional font a heart\'s slot is half again a cell, and line characters overlap into one line', () => {
@@ -1119,4 +1125,182 @@ test('r takes the focused setting back to its default; a custom value stays in i
   await ui.input({ key: 'custom', text: '35m' })
   expect(stored(store).interval).toBe(35)
   await ui.unmount()
+})
+
+const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
+
+test('a folder\'s own settings win over all folders\', for starting on and the interval; a session\'s own interval wins over both', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on, { folders: { [HOME]: { defaultOn: true, interval: 5 } } })
+  expect(await cmd($, '')).toBe('on, every 5m idle (this folder\'s) · 0 beats · starts after your next turn')
+  expect((await stateNow($)).session.intervalFrom).toBe('folder')
+  await $.turn.complete(turn)
+  await clock.advance(5 * M)
+  expect(forks).toEqual([5 * M])
+  expect(await cmd($, '7')).toBe('this session: interval 5m → 7m · next beat in 7m')
+  expect(await cmd($, '')).toBe('on, every 7m idle (this session\'s) · 1 beat · next beat in 7m')
+})
+
+test('another folder\'s settings don\'t apply', async ($: Engine, on: On) => {
+  await setup($, on, { folders: { [OTHER]: { defaultOn: true } } })
+  expect(await cmd($, '')).toBe('off')
+})
+
+test('moved to another folder, a session takes its settings at the next turn, and stays on', async ($: Engine, on: On) => {
+  const { moveTo } = await setup($, on, { folders: { [OTHER]: { interval: 5, defaultOn: false } } })
+  await cmd($, 'on')
+  moveTo(OTHER)
+  await $.turn.complete(turn)
+  expect(await cmd($, '')).toBe('on, every 5m idle (this folder\'s) · 0 beats · next beat in 5m')
+})
+
+test('another session\'s change to the interval moves the next beat at once', async ($: Engine, on: On) => {
+  const { clock, forks, store } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  store.set('folders', { [HOME]: { interval: 5 } })
+  expect((await stateNow($)).session.nextBeat).toBe('in 5m') // read when Claude asks, between turns
+  await clock.advance(5 * M)
+  expect(forks).toEqual([5 * M])
+})
+
+test('local and global commands save for this folder or all folders, and apply here too', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  store.set('folders', { [OTHER]: { interval: 9 } }) // another session's
+  expect(await cmd($, 'local')).toBe(`this folder (${HOME}): follows all folders · usage: /cachebeat local on|off|<minutes>|reset`)
+  expect(await cmd($, 'local on')).toBe(`this folder (${HOME}): new sessions start on · this session: on, every 50m idle`)
+  expect(stored(store).defaultOn).toBe(false)
+  expect(await cmd($, 'local 45')).toBe(`this folder (${HOME}): every 45m idle · this session: on, every 45m idle`)
+  expect(store.get('folders')).toEqual({ [OTHER]: { interval: 9 }, [HOME]: { defaultOn: true, interval: 45 } })
+  expect(await cmd($, 'local')).toBe(`this folder (${HOME}): New sessions start on, Beat after idle 45m · usage: /cachebeat local on|off|<minutes>|reset`)
+  expect(await cmd($, 'global 30')).toBe('all folders: every 30m idle · this folder keeps 45m · this session: on, every 45m idle')
+  expect(stored(store).interval).toBe(30)
+  expect(await cmd($, 'local off')).toBe(`this folder (${HOME}): new sessions start off · this session: off`)
+  expect(await cmd($, 'local reset')).toBe(`this folder (${HOME}) follows all folders again · this session: off`)
+  expect(store.get('folders')).toEqual({ [OTHER]: { interval: 9 } })
+})
+
+test('a long folder path is cut from the left, whole folders kept', async ($: Engine, on: On) => {
+  const { moveTo } = await setup($, on)
+  moveTo('/home/me/work/clients/acme/services/billing-api')
+  await $.turn.complete(turn)
+  expect(await cmd($, 'local')).toStartWith('this folder (…/acme/services/billing-api): follows all folders')
+})
+
+test('Settings for picks where menu changes save; this folder\'s own are marked, and r or Reset folder drop them', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect(await buttons(ui, '')).toContain('folder')
+  expect((await ui.find({ key: 'folder' }))?.props).toMatchObject({ dimColor: true }) // all folders, the usual: out of the way
+  await ui.press({ key: 'folder' })
+  expect((await ui.find({ key: 'folder' }))?.text).toBe(`Settings for          this folder · ${HOME}`)
+  await ui.press({ key: 'row:defaultOn' }) // saved for this folder alone
+  await ui.press({ key: 'row:onModelSwitch' })
+  expect(store.has('settings')).toBe(false)
+  expect(store.get('folders')).toEqual({ [HOME]: { defaultOn: true, onModelSwitch: 'warm' } })
+  expect((await ui.find({ key: 'row:defaultOn' }))?.text).toBe('New sessions start    on · this folder')
+  expect((await ui.find({ key: 'row:interval' }))?.text).toBe('Beat after idle       auto · 50m now ›') // follows all folders: unmarked
+
+  await ui.press({ key: 'folder' }) // all folders' settings, editable without turning this folder's off
+  expect((await ui.find({ key: 'row:defaultOn' }))?.text).toBe('New sessions start    off · here: on')
+  await ui.press({ key: 'row:onModelSwitch' })
+  expect(stored(store).onModelSwitch).toBe('warm')
+  expect(store.get('folders')).toEqual({ [HOME]: { defaultOn: true, onModelSwitch: 'warm' } }) // this folder's untouched
+
+  store.set('settings', { stopAtUsage: 80 }) // another session changes all folders: it reaches what this folder didn't set
+  await $.turn.complete(turn)
+  await ui.press({ key: 'folder' })
+  await ui.press({ key: 'tab:limits' })
+  expect((await ui.find({ key: 'row:stopAtUsage' }))?.text).toBe('Stop at usage         80% ›')
+  await ui.press({ key: 'tab:beating' })
+
+  await move($, 'row:defaultOn')
+  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('back to off (all folders)')
+  await ui.press({ key: 'resetRow' })
+  expect(store.get('folders')).toEqual({ [HOME]: { onModelSwitch: 'warm' } })
+  await move($, 'row:interval')
+  expect(await ui.find({ key: 'resetRow' })).toBe(undefined) // nothing of its own to drop
+
+  expect((await ui.find({ key: 'reset' }))?.text).toBe('Reset folder')
+  await ui.press({ key: 'reset' })
+  await ui.press({ key: 'reset' })
+  expect(store.get('folders')).toEqual({})
+  expect(stored(store).stopAtUsage).toBe(80) // all folders' untouched
+  await ui.unmount()
+})
+
+test('the menu opens on this folder\'s settings when it has its own; This session sits above the switch', async ($: Engine, on: On) => {
+  await setup($, on, { folders: { [HOME]: { interval: 5 } } })
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect((await ui.find({ key: 'folder' }))?.text).toBe(`Settings for          this folder · ${HOME}`)
+  const order = await buttons(ui, '')
+  expect(order.indexOf('session')).toBeLessThan(order.indexOf('folder'))
+  expect((await ui.find({ key: 'row:interval' }))?.text).toBe('Beat after idle       5m · this folder ›')
+  await ui.unmount()
+})
+
+test('a session\'s own interval shows on its row, r drops it, and picking an interval does too', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, '7')
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect((await ui.find({ key: 'row:interval' }))?.text).toBe('Beat after idle       7m · this session ›')
+  await move($, 'row:interval')
+  expect(await ui.find({ type: 'Text', text: '7m for this session only; otherwise auto. r drops it.' })).toBeDefined()
+  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('back to auto')
+  await ui.press({ key: 'resetRow' })
+  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · starts after your next turn')
+  await cmd($, '7')
+  await ui.press({ key: 'row:interval' })
+  await ui.press({ key: 'opt:3' }) // 30m, for all folders: this session follows it
+  expect(await cmd($, '')).toBe('on, every 30m idle · 0 beats · starts after your next turn')
+  await ui.unmount()
+})
+
+test('a session\'s own interval gives way to a saved one by every route, and stays dropped across a reload, on or off', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, '7')
+  await cmd($, 'off')
+  await set($, { settings: { interval: 30 } }) // Claude, as the menu and global <minutes> do
+  expect((await stateNow($)).session.intervalFrom).toBe('all folders')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true }) // a reload reads what was saved
+  expect(await cmd($, 'on')).toBe('this session: on, every 30m idle · starts after your next turn')
+})
+
+test('Claude sets this folder\'s own settings, names it, drops one, and drops them all', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  let r = await set($, { folder: { interval: 20, defaultOn: true } })
+  expect(r.changed).toEqual(['folder.interval', 'folder.defaultOn'])
+  expect(r.folder).toEqual({ interval: 20, defaultOn: true })
+  expect(r.session.intervalFrom).toBe('folder')
+  let state = await stateNow($)
+  expect(state.folder).toEqual({ path: HOME, own: { interval: 20, defaultOn: true } })
+  expect([state.settings.interval, state.allFolders.interval]).toEqual([20, 'auto'])
+  r = await set($, { folder: { interval: null } })
+  expect([r.changed, r.folder]).toEqual([['folder.interval'], { interval: null }])
+  expect(r.session.intervalFrom).toBe('auto')
+  r = await set($, { folder: null })
+  expect(r.changed).toEqual(['folder.defaultOn'])
+  state = await stateNow($)
+  expect([state.folder.own, state.allFolders]).toEqual([{}, undefined])
+  expect(store.get('folders')).toEqual({})
+  expect((await call($, 'set', { folder: { interval: 90 }, settings: { showTokens: false } })).deny)
+    .toBe('nothing changed: folder.interval takes auto, 1–55 minutes, or null, not 90')
+  expect((await call($, 'set', { folder: 'here' })).deny).toBe('nothing changed: folder is an object or null, not "here"')
+  expect(store.has('settings')).toBe(false)
+  expect(await draw($, toolRow('ToolUse', TOOL.set, { folder: { interval: 20, defaultOn: null } })))
+    .toEqual([`cachebeat · this folder (${HOME}): Beat after idle 20m, New sessions start as all folders`])
+  expect(await draw($, toolRow('ToolUse', TOOL.set, { folder: null }))).toEqual([`cachebeat · this folder (${HOME}) follows all folders again`])
+})
+
+test('a hand-edited folder entry keeps only what the menu would take', async ($: Engine, on: On) => {
+  await setup($, on, { folders: { [HOME]: { interval: 90, defaultOn: 'yes', stopAtUsage: 80, bogus: 1 } } })
+  expect((await stateNow($)).folder.own).toEqual({ stopAtUsage: 80 })
+})
+
+test('a path is cut at its own separator, on Windows too', () => {
+  expect(cut('C:\\Users\\me\\work\\clients\\acme\\api', 20)).toBe('…\\clients\\acme\\api')
+  expect(cut('/home/me/code/api', 30)).toBe('/home/me/code/api')
+  expect(cut('/x/a-very-long-folder-name-indeed', 12)).toBe('…name-indeed')
 })

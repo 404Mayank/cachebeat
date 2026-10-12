@@ -3,7 +3,7 @@ export type Pulse = 'hidden' | 'waiting' | 'armed'
 /** What survives a reload of the module (a file save). */
 export type Saved = {
   enabled: boolean
-  idle: number | null // this session's interval in ms; null follows the global one
+  idle: number | null // this session's interval in ms; null follows the settings
   lastReal: number | null
   lastWarm: number | null
   lastRead: number | null // tokens the last beat read from the cache
@@ -29,11 +29,10 @@ export type Timing = 'linear' | 'lubdub'
 /** How one part draws and moves: the heart under the prompt, or the turn line. */
 export type Look = { color: string; customColor: string; effect: Effect; animate: boolean; speed: Speed; timing: Timing }
 
-/** The settings, global: kept in the plugin's store, shared by every session. */
+/** The settings: kept in the plugin's store for all folders, and a folder may have its own of any of them. */
 export type BeatSettings = {
   defaultOn: boolean // new sessions start beating
   interval: number | 'auto' // minutes of idle before a beat; auto fits the cache's lifetime
-  intervalScope: 'session' | 'global' // what `/cachebeat <minutes>` changes
   stopAfterHours: number // since the last real turn
   stopAtUsage: number // percent of any rate-limit window
   skipSmall: boolean
@@ -64,6 +63,9 @@ export type BeatSettings = {
   onModelSwitch: 'wait' | 'warm' // after /model while idle: wait for the next turn, or have the next beat write the new model's cache
 }
 
+/** A session's folder, and the settings it has of its own: those win over the ones for all folders there. */
+export type Folder = { root: string; own: Partial<BeatSettings> }
+
 /** Where the settings pane is: a tab, and the row whose picker is open over it. */
 export type PanePage = { tab: string; picker: keyof BeatSettings | null }
 
@@ -74,6 +76,7 @@ declare module 'claude-code' {
     mcp__cachebeat__set: {
       session?: { enabled?: boolean; intervalMinutes?: number | null }
       settings?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } // null resets to the default
+      folder?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } | null // null follows all folders; the whole null drops every one
     }
   }
   interface PluginState {
@@ -83,7 +86,8 @@ declare module 'claude-code' {
       frame: number
       line: string
       lineFrame: number // the turn line's own animation clock
-      settings: BeatSettings
+      settings: BeatSettings // as they apply here: this folder's own over those for all folders
+      folder: Folder // this session's folder and its own settings
       tick: number // the settings pane's preview clock
       page: PanePage
       focus: string // the key of the pane's focused element, or ''

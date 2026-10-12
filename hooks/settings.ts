@@ -4,7 +4,6 @@ import { STATUS_HEARTS, VARIANTS } from './animations'
 export const DEFAULTS: BeatSettings = {
   defaultOn: false,
   interval: 'auto',
-  intervalScope: 'session',
   stopAfterHours: 8,
   stopAtUsage: 90,
   skipSmall: false,
@@ -53,10 +52,12 @@ export const lookOf = (s: BeatSettings, part: Part): Look => {
   return { color: s[k.color], customColor: s[k.customColor], effect: s[k.effect], animate: s[k.animate], speed: s[k.speed], timing: s[k.timing] }
 }
 
+export const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x)
+
 /** Store values from an older or hand-edited store fall back to the default one by one. */
 export function normalize(stored: unknown): BeatSettings {
   const s: Record<string, unknown> = { ...DEFAULTS }
-  const from: Record<string, unknown> = stored && typeof stored === 'object' ? { ...stored } : {}
+  const from: Record<string, unknown> = isObject(stored) ? { ...stored } : {}
   // before 0.7.0 one look served both parts: each part takes it, unless it has its own
   for (const old of ['color', 'customColor', 'effect', 'animate', 'speed', 'timing'] as const) {
     if (!(old in from)) continue
@@ -277,11 +278,6 @@ export const TABS: readonly Tab[] = [
         fmt: v => (v === 'wait' ? 'wait for your next turn' : 'warm the new model'),
         help: "After /model while you're idle: wait for your next message, or have the next beat write the new model's cache, at the cost your message would pay.",
       },
-      {
-        key: 'intervalScope', label: '/cachebeat 30 changes', values: ['session', 'global'],
-        fmt: v => (v === 'session' ? 'this session' : 'the default'),
-        help: "What typing /cachebeat with a number changes: this session's interval, or the default for every session.",
-      },
     ],
   },
   {
@@ -372,3 +368,11 @@ export function accept(key: string, value: unknown): Value | undefined {
   return row.custom && (typeof value === 'number' || typeof value === 'string') ? row.custom.parse(String(value)) : undefined
 }
 
+/** A folder's own settings from the store: those of them the menu would take. */
+export function normalizeOwn(stored: unknown): Partial<BeatSettings> {
+  const kept = Object.entries(isObject(stored) ? stored : {}).flatMap(([k, v]) => {
+    const value = accept(k, v)
+    return value === undefined ? [] : [[k, value]]
+  })
+  return Object.fromEntries(kept)
+}
