@@ -66,6 +66,16 @@ Things about mods, the engine and the test kit that took time to work out. These
 
 ## Beats during a turn, and beats that can't reach the cache (0.9.0)
 
+- **Code review of the first 0.9.0 draft found these, all fixed and covered by tests that fail without the fix:**
+  - **Tool results land mid-turn,** one row per tool as each finishes. The rewind check counted that growth as a rewind, so it now runs between turns only.
+  - **A fork writes the message before its cache mark.** Mid-turn that is the previous answer or tool call, often over 1,000 tokens, so "out of reach" fired on ordinary beats. It's now judged only for an idle beat after a conversation's first turn.
+  - **"Stop after idle" counted a long quiet turn from the previous turn's end,** and switched the session off. It now counts from the user's last message (`s.asked`, set at the turn's start).
+  - **A failed mid-turn beat was never retried.**
+  - **A message sent during an idle beat's flight was ignored** by `turn.start`'s `beating` guard. A fork's own turn is now told apart by its prompt text.
+- **Left as is:**
+  - **A real 5-minute expiry after a first turn can read as "out of reach".** That happens when the chat is no bigger than the shared system prompt, and it pauses rather than switching `auto` to 4m beats. The cost is no worse than before; 0.8.1 called it "renewed".
+  - **`turn.complete` keeps `!beating || (busy && e.turnId === turnId)`.** The stricter `busy ? e.turnId === turnId : !beating` broke tests whose turn ids differ between start and end. Real turns match.
+  - **Not covered by a test:** a turn ending while a mid-turn beat is in flight, because the test kit runs dispatches one at a time.
 - **Idle beats need the same care as mid-turn ones.**
   - **The waste:** after a session's plain-text first turn, an idle beat read 31,772 and wrote 10,661, and the second turn didn't use it. A second idle beat 345s later wrote the same 10,659 again: a fork's own writes seem to last 5 minutes.
   - **The rule since 0.9.0:** a beat that reads less than the last request cached (`cached`), and writes more than `MISSED` (1,000 tokens, far above a beat's own line), makes beats wait for the next turn ("Claude Code cached this conversation anew, out of a beat's reach").
