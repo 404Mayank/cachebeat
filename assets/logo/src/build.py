@@ -217,6 +217,32 @@ def logo():
     return svg((x - m, y - m, s + 2*m, s + 2*m), (256, 256), body)
 
 
+def tile(uid, r):
+    """The icon full bleed: the dark tile is the whole image, with corners of radius `r` and no shadow or margin."""
+    s = 420
+    x, y = 381 - s/2, 394 - s/2
+    body = f'''<defs>
+    <linearGradient id="{uid}-card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{CARD[0]}"/><stop offset="1" stop-color="{CARD[1]}"/></linearGradient>
+    <linearGradient id="{uid}-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset=".5" stop-color="#fff" stop-opacity=".07"/><stop offset="1" stop-color="#fff" stop-opacity=".05"/></linearGradient>
+    <clipPath id="{uid}-clip"><rect x="{num(x)}" y="{num(y)}" width="{s}" height="{s}" rx="{num(r)}"/></clipPath>
+  </defs>
+  <rect x="{num(x)}" y="{num(y)}" width="{s}" height="{s}" rx="{num(r)}" fill="url(#{uid}-card)"/>
+  ''' + defs(uid) + f'\n  <g clip-path="url(#{uid}-clip)">' + mark(uid) + '\n  </g>'
+    if r:
+        body += '\n  ' + edge(uid, x, y, s, s, r)
+    return svg((x, y, s, s), (256, 256), body)
+
+
+def logo_square():
+    """The tile full bleed with square corners, for places that frame or round an icon themselves."""
+    return tile('cbs', 0)
+
+
+def logo_rounded():
+    """The tile full bleed with the icon's rounded corners: no shadow, and no margin around it."""
+    return tile('cbr', 420*0.225)
+
+
 def logo_wordmark():
     """The mark and the name on a dark card. Works on any background."""
     uid = 'cbw'
@@ -259,13 +285,17 @@ def social_preview():
 
 FORMS = {
     'logo.svg': logo,
+    'logo-square.svg': logo_square,
+    'logo-rounded.svg': logo_rounded,
     'logo-wordmark.svg': logo_wordmark,
     'logo-mark-on-dark.svg': logo_mark_on_dark,
     'logo-wordmark-on-dark.svg': logo_wordmark_on_dark,
     'social-preview.svg': social_preview,
 }
 WINDOW_SPARE = 200  # px of window beyond the image, more than the browser keeps for itself
-PNGS = {'logo.png': ('logo.svg', 512, 512), 'social-preview.png': ('social-preview.svg', 1280, 640)}
+PNGS = {'logo.png': ('logo.svg', 512, 512), 'logo-square.png': ('logo-square.svg', 1024, 1024),
+        'logo-rounded.png': ('logo-rounded.svg', 1024, 1024),
+        'social-preview.png': ('social-preview.svg', 1280, 640)}
 
 
 def chrome():

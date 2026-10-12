@@ -7,6 +7,8 @@ Three cache layers seen from above. The top one holds the prompt, lying flat on 
 | File | What it is | Where it works |
 | --- | --- | --- |
 | `logo.svg`, `logo.png` | The icon: the mark on its own dark tile (the PNG is 512px) | Any background |
+| `logo-square.svg`, `logo-square.png` | The icon full bleed: the tile fills the square to its edges, square-cornered, with no shadow or margin (the PNG is 1024px) | Places that round or frame an icon themselves, such as a plugin directory or an app icon |
+| `logo-rounded.svg`, `logo-rounded.png` | The icon full bleed with its rounded corners: the tile reaches the image's edges, with no shadow or margin (the PNG is 1024px) | Anywhere an icon is shown as is, without a frame of its own |
 | `logo-wordmark.svg` | The mark and the name on a dark card | Any background |
 | `logo-mark-on-dark.svg` | The mark alone, with no background | Dark backgrounds only |
 | `logo-wordmark-on-dark.svg` | The mark and the name, with no background | Dark backgrounds only |
