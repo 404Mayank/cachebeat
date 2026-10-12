@@ -54,9 +54,14 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.model', () => ({ value: model }) as never)
   let root = HOME
   on('session.root', () => ({ value: root }) as never)
+  // the conversation as a turn leaves it; /rewind takes it back, and a turn adds to it
+  let chat = [said('user', 'hi'), said('assistant', 'ok')]
+  on('session.messages', () => ({ value: chat }) as never)
   mock.env(on, world.env ?? {})
   on('settings.read', () => ({ value: world.settingsFile ?? {} }) as never)
-  on('model.fork', () => {
+  const prompts: string[] = []
+  on('model.fork', (_$, e) => {
+    prompts.push(e.prompt)
     forks.push(clock.now())
     return { value: replies[forks.length - 1] ?? replies.at(-1) ?? ok } as never
   })
@@ -84,7 +89,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('classic.PostModelSwitch', () => ({}))
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  return { clock, forks, logs, toasts, tails, store, specs, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r) }
+  return {
+    clock, forks, prompts, logs, toasts, tails, store, specs, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
+  }
 }
 
 const said = (role: 'user' | 'assistant', text: string) => ({ role, text, toolUses: [] })
@@ -1319,3 +1327,27 @@ test('a /clear keeps this session on, at its own interval; Reset all drops that 
   await ui.unmount()
 })
 
+test('a beat is tagged, so a request log tells it from the user\'s messages', async ($: Engine, on: On) => {
+  const { clock, prompts } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(prompts).toEqual(['[cachebeat] Automated prompt cache keep-alive, not a message from the user. Do not continue any task or use any tool. Reply with a single period and nothing else.'])
+})
+
+test('after /rewind, beats wait for the next turn instead of warming the conversation as it was', async ($: Engine, on: On) => {
+  const { clock, forks, logs, rewind, talk } = await setup($, on)
+  await cmd($, '3')
+  talk('long question')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(forks).toEqual([3 * M]) // beats keep warm what the turn sent
+  rewind(2) // /rewind to before the last question: no event says so
+  await clock.advance(3 * M)
+  expect(forks).toHaveLength(1) // the beat would re-send the conversation from before the rewind
+  expect(logs).toContain('beats wait for your next turn: the conversation was rewound')
+  talk('another question')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(forks).toHaveLength(2) // the next turn sends the rewound conversation, and beats follow it
+})

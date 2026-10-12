@@ -92,7 +92,7 @@ Beats fit your cache by themselves: every 50 minutes on a Claude subscription's 
 
 ## What it sends, and what it costs
 
-Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript.
+Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript. The beat's one line starts with `[cachebeat]` and says it isn't from you, so a request log or a proxy can tell beats from your own messages.
 
 - A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would.
 - Beats happen only while the session is idle, at most once per interval (50 minutes by default).
@@ -126,7 +126,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 **The heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next turn.
 
-**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`. Its heart beats too, with an animation of its own under **Turn line**. While beats wait for your next message, after `/model` or `/compact`, it says so. When you send a new message, the line moves down to the new turn. In the desktop app it stays above the prompt instead.
+**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`. Its heart beats too, with an animation of its own under **Turn line**. While beats wait for your next message, after `/model`, `/compact` or `/rewind`, it says so. When you send a new message, the line moves down to the new turn. In the desktop app it stays above the prompt instead.
 
 ```
 ✻ Cogitated for 12s · done 3:09 PM
@@ -257,7 +257,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 ## Good to know
 
 - Sending a message restarts the countdown.
-- After `/compact`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
+- After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.
 - Settings you change in one session reach your other open sessions at their next turn. A session moved to another folder takes that folder's settings at its next turn, and stays on or off as it was.

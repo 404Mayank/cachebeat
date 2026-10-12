@@ -14,6 +14,7 @@ export type Saved = {
   isCacheShort: boolean // a beat found this session's cache lasts five minutes, whatever its settings say
   paused: string | null // why beats wait for the next turn though the cache was warm: a model switch, a compaction
   warmModel: string | null // the model the last request ran on, whose cache a beat keeps warm
+  tail: string | null // how the conversation ended after the last turn: another ending means /rewind took it back
 }
 
 /** How long the main conversation's prompt cache lives. */

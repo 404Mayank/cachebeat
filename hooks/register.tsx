@@ -27,7 +27,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
-  isCacheShort: false, paused: null, warmModel: null,
+  isCacheShort: false, paused: null, warmModel: null, tail: null,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS // as they apply here: this folder's own over those for all folders
@@ -369,6 +369,20 @@ async function pause($: EngineInterface, why: string, said: string) {
 }
 
 const MODEL_CHANGED = 'the model changed'
+const REWOUND = 'the conversation was rewound'
+
+/**
+ * How the conversation ends, in short: its length and a hash of its last messages. A beat re-sends the
+ * request the last turn sent, so an ending other than the one that turn left means /rewind took the
+ * conversation back, and the beat would keep warm what the next turn no longer sends.
+ */
+async function tailOf($: EngineInterface) {
+  const messages = await $.session.messages()
+  const last = messages.slice(-3).map(m => `${m.role}\u0000${m.text}\u0000${m.toolUses.length}`).join('\u0001')
+  let h = 0x811c9dc5 // FNV-1a
+  for (let i = 0; i < last.length; i++) h = Math.imul(h ^ last.charCodeAt(i), 0x01000193)
+  return `${messages.length}:${(h >>> 0).toString(36)}`
+}
 const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have settled
 
 /** Beats paused for a model switch go on once the model is back to the one the cache was warmed on. */
@@ -405,6 +419,12 @@ async function beat($: EngineInterface): Promise<string> {
     await schedule($) // says so, and waits for a turn to grow it
     return `beats skip: ${s.small}`
   }
+  // no event marks /rewind: the conversation's ending tells it
+  const tail = await tailOf($)
+  if (s.tail !== null && tail !== s.tail) {
+    await pause($, REWOUND, REWOUND)
+    return `beats wait for your next turn: ${REWOUND}`
+  }
   // a beat goes to the current model, whose cache is not the one warmed if the model changed since
   const model = await $.session.model()
   const isNewModel = s.warmModel !== null && model !== s.warmModel
@@ -414,7 +434,8 @@ async function beat($: EngineInterface): Promise<string> {
   }
 
   beating = true
-  const forking = $.model.fork({ prompt: 'Reply with a single period.' })
+  // tagged, so a request log or a proxy tells a beat from the user's own messages, and the model too
+  const forking = $.model.fork({ prompt: '[cachebeat] Automated prompt cache keep-alive, not a message from the user. Do not continue any task or use any tool. Reply with a single period and nothing else.' })
   const r = await forking.finally(() => (beating = false))
   if (!r.isAnswered && r.reason !== 'empty-reply') {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
@@ -799,6 +820,7 @@ export const register: Register = on => {
       if (e.usage) {
         s.lastWarm = s.lastReal
         s.warmModel = await $.session.model()
+        s.tail = await tailOf($)
         s.paused = null
       }
       await syncSettings($)
