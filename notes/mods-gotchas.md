@@ -69,15 +69,26 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **`turn.step` fires once per request a turn sends**, with `turnId`, `index` and `messageCount`, and `agentId` for a subagent's. It's a streaming event: the hook is `async function* ($, e, next)`, and `yield* next(e)` returns once the response is complete.
 - **A fork runs fine during a turn,** for example while a tool runs. The turn carries on and completes as usual.
 - **On 2.1.295, a fork raises no turn events at all:** no `turn.start`, `turn.step` or `turn.complete`, idle or mid-turn. The `beating` guard in `turn.start`/`turn.complete` is a precaution from 0.3.0. On the branch, `turn.complete` also accepts the running turn's own id while a beat is on its way.
-- **The beat's prompt has to say not to carry on.** Mid-turn, the request a fork re-sends ends with the user's own instruction:
-  - With "Reply with a single period." the model went on with the task and tried a tool, which forks deny. That made a second request (91,726 read in all) and a long reply.
-  - With "Do not continue any task or use any tool…" it made one request and replied "." (one probe run on Haiku, 6s into the tool).
-- **Open: what a mid-turn beat costs.** Beats every 1m during an 80s tool call, on Haiku:
-  - **tmux run 1:** read 32,136, wrote 12,417 (conversation about 44.5k).
-  - **tmux run 2:** read 44,783, wrote 0, the same as an idle beat.
-  - **compuse's screenshot run:** read 78,397, wrote 13,812 (conversation about 46k). That looks like two requests: about 32k read with 14k written, then 46k read.
-  - **The pattern:** the first mid-turn beat in a session partly rewrites the cache, and sometimes the model still makes a second request. The turn line then shows the inflated "78k cached".
-  - **Status:** unexplained. Held back from 0.8.2.
+- **What a mid-turn fork sends** (read in the 2.1.295 bundle, borne out by the numbers below):
+  - `$.model.fork` strips `tool_use` blocks from the trailing assistant message and drops it if nothing is left. A reply that only called a tool leaves the request ending with the user's own message, which the beat's prompt then joins.
+  - With `skipCacheWrite`, the fork's cache mark steps back a whole message, so it lands at the end of the previous turn. The `input` count (137 to 2,618) is this turn's message, never cached.
+  - It runs with `maxTurns: 2`. A tool attempt is denied, and a second request follows.
+- **The beat's prompt has to say the task is under way.** The model sees the user's instruction with no tool call made for it:
+  - With "Reply with a single period." it went on with the task and tried a tool. That made a second request (91,726 read in all) and a long reply.
+  - With "Do not continue any task or use any tool…" it still tried Bash in 3 of 5 forks in one turn 2, and in 1 more turn 2. Each made two requests: 84,866 read, about 3.7k written, 9,092 input, 1,350 to 1,600 output, and a reply starting "I couldn't run `primes80.py`".
+  - With "The request above is already being carried out elsewhere: do not start or continue it, and do not use any tool…" it made one request and replied "." in 5 of 5 forks in the same turn. Mid-turn beats use this one, idle beats the old one.
+  - **Small sample.** Every two-request fork seen came in a turn 2, or the first turn after a rewind, and the hold below now skips those. From turn 3 on, the old prompt also made one request each time. If a fork does make two, the turn line still shows both requests' reads summed.
+- **The 12k a mid-turn beat wrote is the session's second turn re-rendering its history.** The main thread pays it too:
+  - 9 sessions had a plain one-word reply as turn 1. In all of them, turn 2's first request read only 31,772 to 33,045 and wrote 10,657 to 12,416 of what turn 1 had cached again.
+  - In the 2 sessions whose turn 1 thought or called tools, it read everything.
+  - What changes isn't known, and the `prompt_snapshot` attachments don't show it.
+  - A fork made then can't reach turn 2's new entry, which ends after turn 2's message. It writes its own: 32,043 read / 12,413 written at 6s, from a timer. 32,136 / 12,417 at 60s, and 76,509 / 12,843 in two requests at 70s, from `command.run`. Timing and dispatch path make no difference.
+  - The turn's next request reads its own entry (44,524, 44,533, 44,622), never the beat's.
+  - From turn 3 on, the fork's mark lands on what the last turn cached. At 60s: 44,671 read, 12 written. With the fix: 44,774 read, 12 written, one request.
+  - An idle fork right after such a turn 1 pays it too: 31,772 read, 10,661 written. Turn 2 still read only 31,772 after it, so that write went unused.
+  - **This is on main as well, and recurs.** A second idle fork 345s later wrote the same 10,659 again. A fork's own write seems to last 5 minutes: in the bundle, `hook_prompt` isn't on the 1h allowlist, which a server flag can change. So until turn 2, an idle beat at the real interval rewrites about 10k each time and keeps only the shared ~32k warm. The same signal, a beat reading less than `cached`, could make beats wait for the next turn.
+- **Untested:** a mid-turn beat during turn 1, when `cached` is still 0.
+- **So a turn whose request read less than the last one cached gets no mid-turn beat.** Its `turn.step` usage shows it (`resent` in `register.tsx`), and beats wait for the turn's next request or its end. Live: no beat during turn 2's 80s tool, then one at 1m into turn 3's.
 - **The test kit raises `turn.step` as `$.turn.step({ turnId, index, model, messageCount })`.** It returns a stream: read it to its end, then `await stream.result`. A test registers a stub generator beneath it, in `setup()`.
 
 ## Surfaces: the desktop app (found live, 0.7.0)

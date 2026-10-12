@@ -41,9 +41,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   const replies = world.fork ?? []
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
-  // one request of a turn: it read the cache, then called a tool
+  // one request of a turn: it read the cache (as `reads` says, else all 90k), then called a tool
+  const reads: ReturnType<typeof usage>[] = []
   on('turn.step', async function* (_$, e) {
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { ...usage(90_000, 0), model: OPUS } } as never
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { ...(reads.shift() ?? usage(90_000, 0)), model: OPUS } } as never
   })
   on('ui.log', (_$, e) => (logs.push(e.text), { value: undefined }) as never)
   on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }) as never)
@@ -94,7 +95,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return {
-    clock, forks, prompts, logs, toasts, tails, store, specs, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    clock, forks, prompts, logs, toasts, tails, store, specs, reads, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
   }
 }
@@ -1381,6 +1382,35 @@ test('a turn gone quiet for the interval gets a beat, counted from its last requ
   await step($, 't2', 1) // the tool ends, the next request goes out at 8m
   await $.turn.complete({ ...turn, turnId: 't2' })
   expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 2 beats · next beat in 3m')
+})
+
+test('a mid-turn beat says the task is under way', async ($: Engine, on: On) => {
+  const { clock, prompts } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(3 * M)
+  expect(prompts).toEqual(['[cachebeat] Automated prompt cache keep-alive, not a message from the user. The request above is already being carried out elsewhere: do not start or continue it, and do not use any tool. Reply with a single period and nothing else.'])
+})
+
+test('a turn whose request sent the conversation anew gets no beat until its next request', async ($: Engine, on: On) => {
+  const { clock, forks, reads } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  reads.push(usage(30_000, 14_000)) // the session's first request: 44k cached
+  await step($, 't1', 0)
+  await $.turn.complete({ ...turn, turnId: 't1' })
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  reads.push(usage(32_000, 12_500)) // read 32k of the 44k: the rest written again, through this turn's message
+  await step($, 't2', 0)
+  await clock.advance(10 * M)
+  expect(forks).toEqual([]) // a beat would write the 12k again, where this turn's next request can't use it
+  reads.push(usage(44_500, 300)) // the tool ends: this request read all the last one cached
+  await step($, 't2', 1)
+  await clock.advance(3 * M)
+  expect(forks).toEqual([13 * M]) // the next quiet stretch gets its beat
+  await $.turn.complete({ ...turn, turnId: 't2' })
 })
 
 test('a turn whose requests keep coming needs no beat', async ($: Engine, on: On) => {

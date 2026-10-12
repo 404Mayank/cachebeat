@@ -49,6 +49,8 @@ let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let turnId = '' // that turn's id: its end is told from a fork's by it
 let stepping = false // a request of that turn is on its way, which keeps the cache warm itself
+let cached = 0 // tokens the main conversation's last request read from the cache or wrote to it
+let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
 let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
@@ -334,6 +336,7 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   let p: Pulse = 'armed'
   if (!s.enabled) s.small = null
   if (!s.enabled || stepping) p = 'hidden' // a request on its way keeps the cache warm; its end counts again
+  else if (resent) p = 'hidden' // a beat would write the conversation again: the turn's next request or its end counts
   else if (!busy && await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
@@ -407,6 +410,11 @@ function stop($: EngineInterface, why?: string) {
   return `stopped: ${why}`
 }
 
+const ASK = '[cachebeat] Automated prompt cache keep-alive, not a message from the user. Do not continue any task or use any tool. Reply with a single period and nothing else.'
+// mid-turn, the request a beat re-sends ends with the user's message, the tool call made for it left out: told
+// only not to continue, the model took the task up again and tried the tool, which a fork denies, then asked again
+const ASK_MID_TURN = '[cachebeat] Automated prompt cache keep-alive, not a message from the user. The request above is already being carried out elsewhere: do not start or continue it, and do not use any tool. Reply with a single period and nothing else.'
+
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
   if (stepping) return 'a request is on its way; the beat waits for it'
@@ -439,7 +447,7 @@ async function beat($: EngineInterface): Promise<string> {
 
   beating = true
   // tagged, so a request log or a proxy tells a beat from the user's own messages, and the model too
-  const forking = $.model.fork({ prompt: '[cachebeat] Automated prompt cache keep-alive, not a message from the user. Do not continue any task or use any tool. Reply with a single period and nothing else.' })
+  const forking = $.model.fork({ prompt: busy ? ASK_MID_TURN : ASK })
   const r = await forking.finally(() => (beating = false))
   if (!r.isAnswered && r.reason !== 'empty-reply') {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
@@ -830,6 +838,12 @@ export const register: Register = on => {
     if (isMain) {
       stepping = false
       if (r.usage) {
+        const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
+        // reading less than the last request cached, it sent the conversation anew (as a session's second turn
+        // can) and cached it through this turn's message. A beat re-sends it short of that message, so it would
+        // write it all again: beats wait for the turn's next request, or its end
+        resent = got < cached
+        cached = got + wrote
         s.lastWarm = await $.clock.now()
         s.warmModel = await $.session.model()
         s.tail = await tailOf($) // the conversation as this request left it: what a beat would re-send
@@ -845,6 +859,7 @@ export const register: Register = on => {
     if (e.agentId === undefined && (!beating || (busy && e.turnId === turnId))) {
       busy = false
       stepping = false
+      resent = false // after the turn, a beat reaches what its last request cached
       rowPending = true
       s.lastReal = await $.clock.now()
       // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
