@@ -979,11 +979,12 @@ const BAND = (surface: 'terminal' | 'desktop') => ({
 
 test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
   const { clock, logs, tails } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false, showTokens: false } })
-  const band = async () => (await draw($, BAND('desktop'))).join('').replace('\u00a0', ' ') // the space after the heart can't collapse
+  const band = async () => (await draw($, BAND('desktop'))).filter(t => t !== 'engine').join('').replace('\u00a0', ' ') // the space after the heart can't collapse
   expect(await draw($, BAND('terminal'))).toEqual(['engine']) // the terminal has the hint row and the status line
   await cmd($, 'on')
   await $.turn.complete(turn)
-  expect(await draw($, BAND('desktop'))).toEqual(['♡ next beat in 50m']) // one glyph: one run of text, its space kept
+  // what's drawn beneath (here the engine; on a desktop, perhaps another mod's band) stays, the line after it
+  expect(await draw($, BAND('desktop'))).toEqual(['engine', '♡ next beat in 50m']) // one glyph: one run of text, its space kept
   await draw($, { ...HINT, surface: 'desktop' } as never)
   expect(tails.at(-1)).toBe(undefined) // the desktop draws no tail: nothing is added there
   await clock.advance(IDLE)
@@ -1009,7 +1010,8 @@ test('the status line\'s heart beats as one glyph by default, and its setting ta
   // a wide animation on the desktop takes a cell per character, as the terminal's grid has it, with a
   // cell's margin before the words
   await set($, { settings: { statusHeart: 'classic' } })
-  const texts = await draw($, BAND('desktop'))
+  const [beneath, ...texts] = await draw($, BAND('desktop'))
+  expect(beneath).toBe('engine') // what's drawn beneath stays with a wide animation too
   expect(texts.length).toBe(6) // Classic's five cells, then the words
   expect(texts.slice(0, 5).every(t => glyphs(t).length === 1)).toBe(true)
   expect(texts[5]).toBe('next beat in 50m') // a cell's margin before it, not a space

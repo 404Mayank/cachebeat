@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderElement } from 'claude-code'
 import type { Alert, BeatSettings, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
@@ -957,11 +957,19 @@ export const register: Register = on => {
     if (p === 'armed' && c.lineAnimate) animateLine($)
     const f = c.lineAnimate ? await read($, lineFrameAtom) : 0
     const { Box, Text } = $.ui.resolve(e)
+    // the band is shared: what the other mods and the engine draw on it stays, the line after it
+    const below = await next(e)
+    const band = (line: RenderElement) => (
+      <Box flexDirection="column">
+        {below}
+        {line}
+      </Box>
+    )
     // the band's font is proportional: the heart's frames differ in width, so it gets a box of its own
     // and the words after it never move
     const { head, rest, width } = liveLine(line, c, p, f)
     // one glyph keeps its width as it beats: the line is one run of text, spaced as written
-    if (width <= 1) return <Box>{paint(Text, joined([...head, ...rest]))}</Box>
+    if (width <= 1) return band(<Box>{paint(Text, joined([...head, ...rest]))}</Box>)
     // a wider animation, on this proportional font, would change width from frame to frame and carry
     // the words after it along: each of its characters gets a cell of its own, centered in it, as the
     // terminal's grid has them, so it is as wide as its frames' cells. A cell's margin, not the space,
@@ -969,7 +977,7 @@ export const register: Register = on => {
     if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '') }
     const slots = head.flatMap(sp => glyphs(sp.text).map(ch => ({ ...sp, text: ch })))
     const widths = slotWidths(variant(c.statusHeart)) // a heart's slot is wider, wherever any frame has one
-    return (
+    return band(
       <Box flexDirection="row">
         <Box flexDirection="row" flexShrink={0} marginLeft={1} marginRight={1}>
           {slots.map((sp, i) => (
@@ -979,7 +987,7 @@ export const register: Register = on => {
           ))}
         </Box>
         {paint(Text, rest)}
-      </Box>
+      </Box>,
     )
   })
 
