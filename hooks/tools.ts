@@ -81,7 +81,7 @@ export const STATE: ToolSpec = {
     "cachebeat's state in this session, every setting as it applies here, and this folder's own settings.",
     [
       '`settings` are the values in effect in this session: this folder\'s own over those for all folders. `folder` is this session\'s folder (`path`) and the settings it has of its own (`own`). `allFolders`, shown while the folder has any of its own, has the settings for all folders.',
-      "`nextBeat` is `in 42m`, `50m after this turn ends` (as seen mid-turn), `after the next turn` (nothing cached to keep warm yet), or null when off or skipping.",
+      "`nextBeat` is `in 42m` (mid-turn too: counted from the end of the turn's last request, for a turn that goes quiet), `50m after the request on its way` (a request of the turn is being answered), `after this turn` (a turn whose beats wait for its end), `after the next turn` (nothing cached to keep warm yet), or null when off or skipping.",
       '`intervalFrom` is `session` when this session has its own interval, `folder` when it follows this folder\'s own, `all folders` when it follows the interval for all folders in minutes, and `auto` when that is auto.',
       "`cacheTtl` is how long this session's cache lives, `1h` or `5m`, worked out on each call from Claude Code's cache settings and whether a subscription is within its usage; an auto interval beats within it (50 or 4 minutes).",
       '`skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum).',

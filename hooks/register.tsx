@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderElement } from 'claude-code'
 import type { Alert, BeatSettings, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
@@ -27,7 +27,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
-  isCacheShort: false, paused: null, warmModel: null,
+  isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS // as they apply here: this folder's own over those for all folders
@@ -47,6 +47,10 @@ let frame = 0
 let lineFrame = 0
 let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
+let turnId = '' // that turn's id: its end is told from a fork's by it
+let stepping = false // a request of that turn is on its way, which keeps the cache warm itself
+let cached = 0 // tokens the main conversation's last request read from the cache or wrote to it
+let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
 let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
@@ -331,8 +335,11 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   let ms: number | undefined
   let p: Pulse = 'armed'
   if (!s.enabled) s.small = null
-  if (!s.enabled || busy) p = 'hidden' // a turn keeps the last word on the context; its end checks again
-  else if (await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
+  if (!s.enabled || stepping) p = 'hidden' // a request on its way keeps the cache warm; its end counts again
+  else if (resent) p = 'hidden' // a beat would write the conversation again: the turn's next request or its end counts
+  // a conversation's first turn: its next request may send it anew, and a beat would write what that won't read
+  else if (busy && s.turns === 0) p = 'hidden'
+  else if (!busy && await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
@@ -347,6 +354,8 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   }
   // a newer call, begun while this one awaited, sets the timer and the heart: two would each arm one
   if (call !== scheduling) return undefined
+  // a turn going quiet (a tool running, a permission waiting) counts down as idle time does, its heart unshown
+  if (busy) p = 'hidden'
   setPulse($, p)
   save($)
   await refreshLine($)
@@ -369,6 +378,23 @@ async function pause($: EngineInterface, why: string, said: string) {
 }
 
 const MODEL_CHANGED = 'the model changed'
+const REWOUND = 'the conversation was rewound'
+const OUT_OF_REACH = 'Claude Code cached this conversation anew, out of a beat\'s reach'
+/** Tokens past which a beat wrote more than its own line: it missed what the last request cached. */
+const MISSED = 1000
+
+/**
+ * How the conversation ends, in short: its length and a hash of its last messages. A beat re-sends the
+ * request the last turn sent, so an ending other than the one that turn left means /rewind took the
+ * conversation back, and the beat would keep warm what the next turn no longer sends.
+ */
+async function tailOf($: EngineInterface) {
+  const messages = await $.session.messages()
+  const last = messages.slice(-3).map(m => `${m.role}\u0000${m.text}\u0000${m.toolUses.length}`).join('\u0001')
+  let h = 0x811c9dc5 // FNV-1a
+  for (let i = 0; i < last.length; i++) h = Math.imul(h ^ last.charCodeAt(i), 0x01000193)
+  return `${messages.length}:${(h >>> 0).toString(36)}`
+}
 const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have settled
 
 /** Beats paused for a model switch go on once the model is back to the one the cache was warmed on. */
@@ -389,12 +415,20 @@ function stop($: EngineInterface, why?: string) {
   return `stopped: ${why}`
 }
 
+const ASK = '[cachebeat] Automated prompt cache keep-alive, not a message from the user. Do not continue any task or use any tool. Reply with a single period and nothing else.'
+// mid-turn, the request a beat re-sends ends with the user's message, the tool call made for it left out: told
+// only not to continue, the model took the task up again and tried the tool, which a fork denies, then asked again
+const ASK_MID_TURN = '[cachebeat] Automated prompt cache keep-alive, not a message from the user. The request above is already being carried out elsewhere: do not start or continue it, and do not use any tool. Reply with a single period and nothing else.'
+
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
-  if (busy) return 'a turn is running; the beat waits for it to end'
+  if (stepping) return 'a request is on its way; the beat waits for it'
   const now = await $.clock.now()
-  if (now - (s.lastReal ?? now) >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
-  if (now - (s.lastWarm ?? now) >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
+  const since = now - (s.lastWarm ?? now)
+  // from the user's last message: a turn's start, or its end for one begun before cachebeat saw it
+  const lastWord = Math.max(s.lastReal ?? now, s.asked ?? -Infinity)
+  if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
+  if (since >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
   const { rateLimits } = await $.session.usage()
   const full = rateLimits.find(l => l.percentUsed >= cfg.stopAtUsage)
   if (full) {
@@ -405,6 +439,13 @@ async function beat($: EngineInterface): Promise<string> {
     await schedule($) // says so, and waits for a turn to grow it
     return `beats skip: ${s.small}`
   }
+  // no event marks /rewind, which runs between turns: the conversation's ending tells it. Mid-turn the ending
+  // grows by itself, as each tool's result lands
+  const tail = busy ? s.tail : await tailOf($)
+  if (s.tail !== null && tail !== s.tail) {
+    await pause($, REWOUND, REWOUND)
+    return `beats wait for your next turn: ${REWOUND}`
+  }
   // a beat goes to the current model, whose cache is not the one warmed if the model changed since
   const model = await $.session.model()
   const isNewModel = s.warmModel !== null && model !== s.warmModel
@@ -413,17 +454,36 @@ async function beat($: EngineInterface): Promise<string> {
     return `beats wait for your next turn: ${MODEL_CHANGED}`
   }
 
+  // as the beat starts: a turn may end, and its last request cache more, while the beat is on its way
+  const wasIdle = !busy
+  const wasCached = cached
+  const wasFirst = s.turns === 1
   beating = true
-  const forking = $.model.fork({ prompt: 'Reply with a single period.' })
+  // tagged, so a request log or a proxy tells a beat from the user's own messages, and the model too
+  const forking = $.model.fork({ prompt: busy ? ASK_MID_TURN : ASK })
   const r = await forking.finally(() => (beating = false))
   if (!r.isAnswered && r.reason !== 'empty-reply') {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
     if (!isTransient) return stop($, r.error === 'rate_limit' ? 'rate limited' : `API error (${r.error})`)
-    if (!busy && s.enabled) timer = $.clock.after(RETRY, () => void scheduledBeat($))
+    if (s.enabled && !stepping) {
+      timer = $.clock.after(RETRY, () => void scheduledBeat($))
+      s.nextAt = (await $.clock.now()) + RETRY
+    }
     return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
+  // after a conversation's first turn, a beat reading well short of what that turn cached, and writing the rest:
+  // Claude Code sent the conversation anew and cached it where a beat can't reach, so each beat would write it
+  // again. Within five minutes of that request the cache can't have lapsed, so even a beat writing more than it
+  // read is this. Mid-turn, or after later turns, a beat writes the message before its cache mark, which a long
+  // answer or tool call makes big: no sign of this
+  const isOutOfReach = wasIdle && wasFirst && !isNewModel && wasCached > 0 && got + MISSED < wasCached && wrote > MISSED
+    && (got >= wrote || since < 5 * MIN)
+  if (isOutOfReach) {
+    await pause($, OUT_OF_REACH, OUT_OF_REACH)
+    return `beats wait for your next turn: ${OUT_OF_REACH}`
+  }
   if (isNewModel) {
     // the first beat on a new model writes its cache, as the next turn would have: kept warm from here
     s.warmModel = model
@@ -462,13 +522,15 @@ function scheduledBeat($: EngineInterface) {
 
 /** A beat asked for by hand: never one that would switch cachebeat off for having nothing to fork. */
 function beatNow($: EngineInterface) {
+  if (busy) return Promise.resolve('a turn is running; the beat waits for it to end')
   return s.lastReal === null ? Promise.resolve('nothing to keep warm until this session has a turn') : beat($)
 }
 
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
-  : ms === undefined ? 'starts after your next turn' : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
+  : ms === undefined ? (stepping ? 'counts from the end of the request on its way' : busy ? 'starts after this turn' : 'starts after your next turn')
+  : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
 
 /** Where this session's interval comes from: its own, this folder's, or the settings for all folders. */
 const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undefined ? 'folder' : 'all folders')
@@ -488,9 +550,9 @@ async function turnOn($: EngineInterface, change?: () => Promise<void>) {
   const before = idle()
   if (change) await change()
   s.enabled = true
-  if (busy) {
+  if (stepping) {
     save($)
-    return `on, ${every()}; starts after this turn`
+    return `on, ${every()}; ${when(undefined)}`
   }
   if (wasOn && idle() === before) {
     let ms: number | undefined
@@ -550,7 +612,8 @@ async function stateOf($: EngineInterface) {
   const now = await $.clock.now()
   const nextBeat = !s.enabled || s.small ? null
     : s.nextAt !== null ? `in ${fmt(s.nextAt - now)}`
-    : busy ? `${fmt(idle())} after this turn ends`
+    : stepping ? `${fmt(idle())} after the request on its way`
+    : busy ? 'after this turn'
     : 'after the next turn'
   const from = intervalFrom()
   const session = {
@@ -674,6 +737,8 @@ export const register: Register = on => {
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     const r = await next(e)
     s = { ...fresh, enabled: s.enabled, idle: s.idle, isCacheShort: s.isCacheShort }
+    cached = 0 // a new conversation: nothing of it cached yet
+    resent = false
     await syncSettings($)
     await schedule($)
     return r
@@ -782,23 +847,61 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
-    if (!beating) {
+    // a fork's own turn, on an engine that raises one, carries the beat's line: a user's message sent while a beat
+    // is on its way is a turn all the same
+    if (!(beating && (e.text === ASK || e.text === ASK_MID_TURN))) {
       busy = true
+      turnId = e.turnId
+      stepping = true // its first request goes out next
+      s.asked = await $.clock.now()
       s.row = null // the line moves to this turn's row once it ends
       await schedule($)
     }
     return next(e)
   })
 
+  // each request of the main conversation's turn reads the cache, so the count starts again when one ends; a turn
+  // that then goes quiet for the whole interval (a long tool run, a permission prompt left waiting) gets a beat
+  on('turn.step', async function* ($, e, next) {
+    const isMain = busy && e.agentId === undefined && e.turnId === turnId
+    if (isMain) {
+      stepping = true
+      await schedule($)
+    }
+    const r = yield* next(e)
+    if (isMain) {
+      stepping = false
+      if (r.usage) {
+        const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
+        // reading well short of what the last request cached (a few tokens short is usual: 44,964 of 44,989), it
+        // sent the conversation anew (as a session's second turn can) and cached it through this turn's message. A
+        // beat re-sends it short of that message, so it would write it all again: beats wait for the turn's next
+        // request, or its end
+        resent = got + MISSED < cached
+        cached = got + wrote
+        s.lastWarm = await $.clock.now()
+        s.warmModel = await $.session.model()
+        s.paused = null
+      }
+      await schedule($)
+    }
+    return r
+  })
+
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined && !beating) {
+    // the turn's own end, by its id, even while a beat runs within it; a fork's end, if one is raised, is not it
+    if (e.agentId === undefined && (!beating || (busy && e.turnId === turnId))) {
       busy = false
+      stepping = false
+      resent = false // after the turn, a beat reaches what its last request cached
       rowPending = true
       s.lastReal = await $.clock.now()
       // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
       if (e.usage) {
         s.lastWarm = s.lastReal
         s.warmModel = await $.session.model()
+        s.tail = await tailOf($)
+        s.turns++
         s.paused = null
       }
       await syncSettings($)
@@ -874,11 +977,19 @@ export const register: Register = on => {
     if (p === 'armed' && c.lineAnimate) animateLine($)
     const f = c.lineAnimate ? await read($, lineFrameAtom) : 0
     const { Box, Text } = $.ui.resolve(e)
+    // the band is shared: what the other mods and the engine draw on it stays, the line after it
+    const below = await next(e)
+    const band = (line: RenderElement) => (
+      <Box flexDirection="column">
+        {below}
+        {line}
+      </Box>
+    )
     // the band's font is proportional: the heart's frames differ in width, so it gets a box of its own
     // and the words after it never move
     const { head, rest, width } = liveLine(line, c, p, f)
     // one glyph keeps its width as it beats: the line is one run of text, spaced as written
-    if (width <= 1) return <Box>{paint(Text, joined([...head, ...rest]))}</Box>
+    if (width <= 1) return band(<Box>{paint(Text, joined([...head, ...rest]))}</Box>)
     // a wider animation, on this proportional font, would change width from frame to frame and carry
     // the words after it along: each of its characters gets a cell of its own, centered in it, as the
     // terminal's grid has them, so it is as wide as its frames' cells. A cell's margin, not the space,
@@ -886,7 +997,7 @@ export const register: Register = on => {
     if (rest[0]) rest[0] = { ...rest[0], text: rest[0].text.replace(/^ /, '') }
     const slots = head.flatMap(sp => glyphs(sp.text).map(ch => ({ ...sp, text: ch })))
     const widths = slotWidths(variant(c.statusHeart)) // a heart's slot is wider, wherever any frame has one
-    return (
+    return band(
       <Box flexDirection="row">
         <Box flexDirection="row" flexShrink={0} marginLeft={1} marginRight={1}>
           {slots.map((sp, i) => (
@@ -896,7 +1007,7 @@ export const register: Register = on => {
           ))}
         </Box>
         {paint(Text, rest)}
-      </Box>
+      </Box>,
     )
   })
 
