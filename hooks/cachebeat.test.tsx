@@ -250,9 +250,9 @@ test('a global default on starts a new session beating', async ($: Engine, on: O
 test('global on sets the default and turns this session on; global off the reverse', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await cmd($, 'global')).toBe('all folders: New sessions start off, Beat after idle auto · usage: /cachebeat global on|off|<minutes>')
-  expect(await cmd($, 'global on')).toBe('all folders: new sessions start on · this session: on, every 50m idle')
+  expect(await cmd($, 'global on')).toBe('all folders: new sessions start on · this session: now on, every 50m idle')
   expect(stored(store).defaultOn).toBe(true)
-  expect(await cmd($, 'global off')).toBe('all folders: new sessions start off · this session: off')
+  expect(await cmd($, 'global off')).toBe('all folders: new sessions start off · this session: now off')
   expect(stored(store).defaultOn).toBe(false)
 })
 
@@ -261,7 +261,7 @@ test('minutes alone set this session\'s interval; global minutes set all folders
   await cmd($, '7')
   expect(stored(store).interval).toBe('auto')
   await $.turn.complete(turn)
-  expect(await cmd($, 'global 9')).toBe('all folders: every 9m idle · this session: on, every 9m idle')
+  expect(await cmd($, 'global 9')).toBe('all folders: every 9m idle · this session: on')
   expect(stored(store).interval).toBe(9)
   expect(await cmd($, '')).toBe('on, every 9m idle · 0 beats · next beat in 9m') // its own 7m dropped
   expect(store.get('settings')).toEqual({ interval: 9 })
@@ -1167,14 +1167,14 @@ test('local and global commands save for this folder or all folders, and apply h
   const { store } = await setup($, on)
   store.set('folders', { [OTHER]: { interval: 9 } }) // another session's
   expect(await cmd($, 'local')).toBe(`this folder (${HOME}): follows all folders · usage: /cachebeat local on|off|<minutes>|reset`)
-  expect(await cmd($, 'local on')).toBe(`this folder (${HOME}): new sessions start on · this session: on, every 50m idle`)
+  expect(await cmd($, 'local on')).toBe(`this folder (${HOME}): new sessions start on · this session: now on, every 50m idle`)
   expect(stored(store).defaultOn).toBe(false)
-  expect(await cmd($, 'local 45')).toBe(`this folder (${HOME}): every 45m idle · this session: on, every 45m idle`)
+  expect(await cmd($, 'local 45')).toBe(`this folder (${HOME}): every 45m idle · this session: on`)
   expect(store.get('folders')).toEqual({ [OTHER]: { interval: 9 }, [HOME]: { defaultOn: true, interval: 45 } })
   expect(await cmd($, 'local')).toBe(`this folder (${HOME}): New sessions start on, Beat after idle 45m · usage: /cachebeat local on|off|<minutes>|reset`)
   expect(await cmd($, 'global 30')).toBe('all folders: every 30m idle · this folder keeps 45m · this session: on, every 45m idle')
   expect(stored(store).interval).toBe(30)
-  expect(await cmd($, 'local off')).toBe(`this folder (${HOME}): new sessions start off · this session: off`)
+  expect(await cmd($, 'local off')).toBe(`this folder (${HOME}): new sessions start off · this session: now off`)
   expect(await cmd($, 'local reset')).toBe(`this folder (${HOME}) follows all folders again · this session: off`)
   expect(store.get('folders')).toEqual({ [OTHER]: { interval: 9 } })
 })
@@ -1183,7 +1183,7 @@ test('a long folder path is cut from the left, whole folders kept', async ($: En
   const { moveTo } = await setup($, on)
   moveTo('/home/me/work/clients/acme/services/billing-api')
   await $.turn.complete(turn)
-  expect(await cmd($, 'local')).toStartWith('this folder (…/acme/services/billing-api): follows all folders')
+  expect(await cmd($, 'local')).toStartWith('this folder (…/services/billing-api): follows all folders')
 })
 
 test('Settings for picks where menu changes save; this folder\'s own are marked, and r or Reset folder drop them', async ($: Engine, on: On) => {
@@ -1272,13 +1272,13 @@ test('Claude sets this folder\'s own settings, names it, drops one, and drops th
   const { store } = await setup($, on)
   let r = await set($, { folder: { interval: 20, defaultOn: true } })
   expect(r.changed).toEqual(['folder.interval', 'folder.defaultOn'])
-  expect(r.folder).toEqual({ interval: 20, defaultOn: true })
+  expect(r.folder).toEqual({ path: HOME, interval: 20, defaultOn: true }) // the path, for Claude to name it
   expect(r.session.intervalFrom).toBe('folder')
   let state = await stateNow($)
   expect(state.folder).toEqual({ path: HOME, own: { interval: 20, defaultOn: true } })
   expect([state.settings.interval, state.allFolders.interval]).toEqual([20, 'auto'])
   r = await set($, { folder: { interval: null } })
-  expect([r.changed, r.folder]).toEqual([['folder.interval'], { interval: null }])
+  expect([r.changed, r.folder]).toEqual([['folder.interval'], { path: HOME, interval: null }])
   expect(r.session.intervalFrom).toBe('auto')
   r = await set($, { folder: null })
   expect(r.changed).toEqual(['folder.defaultOn'])
@@ -1304,3 +1304,18 @@ test('a path is cut at its own separator, on Windows too', () => {
   expect(cut('/home/me/code/api', 30)).toBe('/home/me/code/api')
   expect(cut('/x/a-very-long-folder-name-indeed', 12)).toBe('…name-indeed')
 })
+
+test('a /clear keeps this session on, at its own interval; Reset all drops that interval with the rest', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  await cmd($, '7')
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect(await cmd($, '')).toBe('on, every 7m idle (this session\'s) · 0 beats · starts after your next turn')
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'reset' })
+  await ui.press({ key: 'reset' })
+  expect(store.get('settings')).toEqual({})
+  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · starts after your next turn')
+  await ui.unmount()
+})
+
