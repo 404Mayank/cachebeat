@@ -853,10 +853,11 @@ export const register: Register = on => {
       stepping = false
       if (r.usage) {
         const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
-        // reading less than the last request cached, it sent the conversation anew (as a session's second turn
-        // can) and cached it through this turn's message. A beat re-sends it short of that message, so it would
-        // write it all again: beats wait for the turn's next request, or its end
-        resent = got < cached
+        // reading well short of what the last request cached (a few tokens short is usual: 44,964 of 44,989), it
+        // sent the conversation anew (as a session's second turn can) and cached it through this turn's message. A
+        // beat re-sends it short of that message, so it would write it all again: beats wait for the turn's next
+        // request, or its end
+        resent = got + MISSED < cached
         cached = got + wrote
         s.lastWarm = await $.clock.now()
         s.warmModel = await $.session.model()

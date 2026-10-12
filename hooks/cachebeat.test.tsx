@@ -1413,6 +1413,21 @@ test('a turn whose request sent the conversation anew gets no beat until its nex
   await $.turn.complete({ ...turn, turnId: 't2' })
 })
 
+test('a request reading a few tokens short of what the last one cached still gets its beat mid-turn', async ($: Engine, on: On) => {
+  const { clock, forks, reads } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  reads.push(usage(44_923, 66)) // 44,989 cached
+  await step($, 't1', 0)
+  await $.turn.complete({ ...turn, turnId: 't1' })
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  reads.push(usage(44_964, 94)) // 25 short, as seen live: the same conversation, not sent anew
+  await step($, 't2', 0)
+  await clock.advance(3 * M)
+  expect(forks).toEqual([3 * M])
+  await $.turn.complete({ ...turn, turnId: 't2' })
+})
+
 test('a turn whose requests keep coming needs no beat', async ($: Engine, on: On) => {
   const { clock, forks } = await setup($, on)
   await cmd($, '3')
