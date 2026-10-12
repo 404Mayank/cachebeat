@@ -100,7 +100,7 @@ export const SET: ToolSpec = {
     'A request that names no scope ("turn it on", "beat every 20 minutes") is for this session. "In this repo", "in this folder", "here" or "for this project" mean `folder`. "Default", "new sessions", "every session", "everywhere", "always" or "from now on" mean `settings`. If you can\'t tell which the user means, ask. A change to `settings` doesn\'t reach a setting this folder has its own of (`state`\'s `folder.own`): tell the user.',
     "Each beat counts toward the user's usage. The first time in a conversation a change starts beating or changes how often a beating session beats, say so once.",
     'Setting `intervalMinutes` turns beating on too, unless `enabled: false` comes with it. Saving an interval in `settings` or `folder` drops this session\'s own, so it beats at the saved one, unless `intervalMinutes` comes with it; `intervalMinutes: null` alone makes it follow the settings.',
-    'Nothing changes if any value is invalid, and the refusal names each one. Subagents can read `state` but not call this. Returns what changed, this session\'s state, and the changed settings, for all folders and this folder.',
+    'Nothing changes if any value is invalid, and the refusal names each one. Subagents can read `state` but not call this. Returns what changed, this session\'s state, and the changed settings: for all folders, and for this folder with its `path`, which you name to the user.',
   ].join('\n\n'),
   inputSchema: object({
     session: object({

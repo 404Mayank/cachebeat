@@ -479,7 +479,7 @@ const isWhole = (word: string) => /^\d+$/.test(word)
 const minutesOf = (word: string) => Math.min(55, Math.max(1, Math.round(Number(word))))
 
 /** Where the paths of folders are shown cut to, in answers and in the menu alike. */
-const PATH = 30
+const PATH = 24
 const here = () => `this folder (${cut(root, PATH)})`
 
 /** Turns this session on after `change` (its own interval, a saved setting), saying how its interval moved. */
@@ -523,6 +523,7 @@ async function scoped($: EngineInterface, to: Target, word: string | undefined) 
     return `${where} follows all folders again · ${session()}`
   }
   const isMinutes = word !== undefined && isWhole(word)
+  const wasOn = s.enabled
   if (word !== 'on' && word !== 'off' && !isMinutes) {
     if (to === 'global') return `${where}: ${listed({ defaultOn: global.defaultOn, interval: global.interval })} · usage: /cachebeat global on|off|<minutes>`
     return `${where}: ${Object.keys(own).length ? listed(own) : 'follows all folders'} · usage: /cachebeat local on|off|<minutes>|reset`
@@ -535,7 +536,11 @@ async function scoped($: EngineInterface, to: Target, word: string | undefined) 
   const key = isMinutes ? 'interval' : 'defaultOn'
   // what this folder sets for itself, that a change for all folders doesn't reach here
   const kept = to === 'global' && own[key] !== undefined ? ` · this folder keeps ${shown(rowOf(key)!.row, own[key]!, cfg)}` : ''
-  return `${where}: ${isMinutes ? `every ${patch.interval}m idle` : `new sessions start ${word}`}${kept} · ${session()}`
+  // this session as it now is: `now` where the command turned it on or off, its interval unless it's the one just saved
+  const now = s.enabled === wasOn ? '' : 'now '
+  const sameInterval = isMinutes && idle() === minutesOf(word) * MIN
+  const state = s.enabled ? `${now}on${sameInterval ? '' : `, ${every()}`}` : `${now}off`
+  return `${where}: ${isMinutes ? `every ${patch.interval}m idle` : `new sessions start ${word}`}${kept} · this session: ${state}`
 }
 
 /** What the tools answer: this session's beating, the settings as they apply here, and this folder's own. */
@@ -578,7 +583,7 @@ async function answerSet($: EngineInterface, before: Before, change: SetChange) 
     ...settings.map(([k]) => `settings.${k}`),
     ...[...set.map(([k]) => k), ...dropped].map(k => `folder.${k}`),
   ]
-  const folder = change.folder === undefined ? {} : { folder: Object.fromEntries([...set, ...dropped.map(k => [k, null])]) }
+  const folder = change.folder === undefined ? {} : { folder: { path: root, ...Object.fromEntries([...set, ...dropped.map(k => [k, null])]) } }
   return { changed, session: (await stateOf($)).session, settings: Object.fromEntries(settings), ...folder }
 }
 

@@ -143,7 +143,7 @@ Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Set
 
 - On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
 - Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
-- **r** puts the focused setting back to its default. On a folder's own setting, it goes back to the one for all folders. On a session's own interval, it drops it, as picking another interval does.
+- **r** puts the focused setting back to its default. On a folder's own setting, it goes back to the one for all folders. On a session's own interval, it drops that interval, and the session follows the settings again.
 - In a list, ↑↓ preview each choice and Enter picks it.
 - Esc goes back one step, and closes the menu from the tab bar.
 - The mouse works too: click to pick, scroll to scroll.
@@ -158,9 +158,9 @@ Settings with numbers also take a custom value at the bottom of their list, such
 | **This folder** | Any setting, for sessions in this folder | Until you change it | **Settings for: this folder** in the menu, or `/cachebeat local …` |
 | **All folders** | Every setting | Until you change it | The menu, or `/cachebeat global …` |
 
-The nearest one wins: this session, then this folder, then all folders.
+The nearest one wins: this session, then this folder, then all folders. Saving an interval for all folders or this folder drops this session's own, so the session follows the new one. `/cachebeat global …` and `local …` apply to this session too: an interval or `on` starts it beating here, and `off` stops it.
 
-**Settings for** picks where the menu saves your changes. On `this folder`, they're saved for this folder alone and marked `· this folder`; the rest still follow all folders, so a later change there reaches this folder too. On `all folders`, a setting this folder has its own of shows it as `here: …`. The menu opens on whichever this folder uses: its own, once it has any. **Reset folder** (or `/cachebeat local reset`) drops the folder's own settings.
+**Settings for** picks where the menu saves your changes. It never changes **This session**. On `this folder`, changes are saved for this folder alone and marked `· this folder`; the rest still follow all folders, so a later change to all folders reaches this folder too. On `all folders`, a setting this folder has its own of is marked `· here: on`, with this folder's value. The menu opens on `this folder` once the folder has settings of its own, and on `all folders` otherwise. **Reset folder** (or `/cachebeat local reset`) drops the folder's own settings.
 
 A folder is where the session started, or where `/cd` or a worktree move took it. Each folder is its own, so a subfolder or another worktree doesn't share its settings.
 
