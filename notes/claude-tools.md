@@ -61,7 +61,7 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
   - unclear: ask
 
   "Project" stays among the phrases because users say it, even though the menu says "folder".
-- **Claude names the folder by its path** when it changes `folder`, and the transcript line shows the path (`cachebeat · this folder (…/api): …`). A subfolder or another worktree has settings of its own, so "this repo" may not be the folder Claude is in.
+- **Claude names the folder by its path** when it changes `folder`, and the transcript line shows the path (`cachebeat · this folder (…/api): …`). In headless tests Claude named the path once in seven tries when it was only in `state`, so `set`'s answer carries it too (`folder: { path, … }`), and the description says to name it. A subfolder or another worktree has settings of its own, so "this repo" may not be the folder Claude is in.
 - **It tells Claude that a `settings` change doesn't reach a setting the folder has its own of,** and to say so.
 - **Saving an interval in `settings` or `folder` drops this session's own,** as the menu and the commands do. The exception is when the same call sets `intervalMinutes`. Before, the tool kept the session's interval while the menu dropped it, and the code review flagged the mismatch.
 - **`state.settings` is what applies here.**

@@ -39,6 +39,7 @@ The menu, the command answers, the README and the tool text all use these three 
 - **`local reset`** drops the folder's own settings, the same as **Reset folder** and Claude's `folder: null`.
 - **Answers:**
   - They're short, start with their scope, and end with this session's state: `all folders: every 30m idle · this folder keeps 45m · this session: on, every 45m idle`.
+  - `now on` or `now off` says when the command switched this session (a `cache` session review found `local 45` turned beating on silently). The interval is left out when it's the one just saved: `this folder (…/Projects/api): every 45m idle · this session: on`.
   - A bare `global` or `local` lists the scope's values and only its own usage.
   - The status line names an interval that isn't all folders': `on, every 45m idle (this folder's) · 3 beats · …`.
 
@@ -47,7 +48,7 @@ The menu, the command answers, the README and the tool text all use these three 
 - **The folder is `$.session.root()`:** where the session started, or where `/cd` or a worktree move took it. `load()` reads it again with the store at each sync: every turn, on opening the menu, on each tool call, and with each change.
 - **When the interval that applies changes in a sync,** because of a move or another session, `syncSettings` reschedules, so the armed beat doesn't keep the old one.
 - **Keys are absolute paths,** so a subfolder or another worktree is a folder of its own. Claude's tool text says to name the folder by its path for that reason, and the transcript line shows the path.
-- **The path is cut to 30 cells** in the menu and in answers alike (`cut()` in `pane.tsx`). It keeps whole folders and uses the path's own separator, so Windows paths work too.
+- **The path is cut to 24 cells** in the menu and in answers alike (about its last two folders, so an answer fits one line) (`cut()` in `pane.tsx`). It keeps whole folders and uses the path's own separator, so Windows paths work too.
 - **It isn't shown with `~`,** because that would mean reading `HOME`, and the directory scrutinizes env reads (0.7.0's credential hold).
 
 ### Store and migration
