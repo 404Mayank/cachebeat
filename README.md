@@ -258,6 +258,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 
 - Sending a message restarts the countdown, and so does each request Claude sends during a turn. A turn that goes quiet for the whole interval, such as a long build or a permission prompt left waiting, gets a beat too.
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
+- Claude Code sometimes caches a conversation anew in a form a beat can't reach, often right after a session's first message. A beat that finds this says so once, and beats wait for your next message, rather than paying to write the cache again each time.
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.
 - Settings you change in one session reach your other open sessions at their next turn. A session moved to another folder takes that folder's settings at its next turn, and stays on or off as it was.

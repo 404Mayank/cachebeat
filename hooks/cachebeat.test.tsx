@@ -1426,3 +1426,30 @@ test('a turn whose requests keep coming needs no beat', async ($: Engine, on: On
   expect(forks).toEqual([])
 })
 
+test('a beat that can\'t reach what the last request cached waits for the next turn, instead of writing it every time', async ($: Engine, on: On) => {
+  // the turn's request read 90k; a beat reads 32k and writes 12k: the conversation was cached anew, out of its reach
+  const { clock, forks, logs } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(32_000, 12_000) }] })
+  await cmd($, '3')
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await step($, 't2', 0)
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await clock.advance(3 * M)
+  expect(forks).toEqual([3 * M])
+  expect(logs).toContain('beats wait for your next turn: Claude Code cached this conversation anew, out of a beat\'s reach')
+  await clock.advance(9 * M)
+  expect(forks).toHaveLength(1) // no beat writing the same again
+  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 0 beats · starts after your next turn')
+})
+
+test('soon after a request, a beat writing more than it read missed the cache\'s place, not the cache: it waits, never stops', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(30_000, 60_000) }] })
+  await cmd($, '3')
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await step($, 't2', 0)
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await clock.advance(3 * M)
+  expect(forks).toHaveLength(1)
+  expect(logs.some(l => l.startsWith('stopped'))).toBe(false)
+  expect(await cmd($, '')).toStartWith('on, every 3m idle')
+})
+

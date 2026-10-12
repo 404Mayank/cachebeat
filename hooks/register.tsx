@@ -377,6 +377,9 @@ async function pause($: EngineInterface, why: string, said: string) {
 
 const MODEL_CHANGED = 'the model changed'
 const REWOUND = 'the conversation was rewound'
+const OUT_OF_REACH = 'Claude Code cached this conversation anew, out of a beat\'s reach'
+/** Tokens past which a beat wrote more than its own line: it missed what the last request cached. */
+const MISSED = 1000
 
 /**
  * How the conversation ends, in short: its length and a hash of its last messages. A beat re-sends the
@@ -419,8 +422,9 @@ const ASK_MID_TURN = '[cachebeat] Automated prompt cache keep-alive, not a messa
 async function beat($: EngineInterface): Promise<string> {
   if (stepping) return 'a request is on its way; the beat waits for it'
   const now = await $.clock.now()
+  const since = now - (s.lastWarm ?? now)
   if (now - (s.lastReal ?? now) >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
-  if (now - (s.lastWarm ?? now) >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
+  if (since >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
   const { rateLimits } = await $.session.usage()
   const full = rateLimits.find(l => l.percentUsed >= cfg.stopAtUsage)
   if (full) {
@@ -457,6 +461,14 @@ async function beat($: EngineInterface): Promise<string> {
     return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
+  // read short of what the last request cached, and writing the rest: the request sent the conversation anew (as a
+  // session's second turn can) and cached it where a beat can't reach, so each beat would write it again. Within
+  // five minutes of that request the cache can't have lapsed, so even a beat writing more than it read is this
+  const isOutOfReach = !isNewModel && cached > 0 && got < cached && wrote > MISSED && (got >= wrote || since < 5 * MIN)
+  if (isOutOfReach) {
+    await pause($, OUT_OF_REACH, OUT_OF_REACH)
+    return `beats wait for your next turn: ${OUT_OF_REACH}`
+  }
   if (isNewModel) {
     // the first beat on a new model writes its cache, as the next turn would have: kept warm from here
     s.warmModel = model
@@ -708,6 +720,8 @@ export const register: Register = on => {
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     const r = await next(e)
     s = { ...fresh, enabled: s.enabled, idle: s.idle, isCacheShort: s.isCacheShort }
+    cached = 0 // a new conversation: nothing of it cached yet
+    resent = false
     await syncSettings($)
     await schedule($)
     return r

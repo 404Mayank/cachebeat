@@ -64,7 +64,13 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **How it was tested:** an interactive session in tmux (`tmux new-session -d …`, `send-keys`, `capture-pane`). The rewind picker is `/rewind`, then ↑ to the turn, Enter, then Enter on "Restore conversation". Haiku keeps it cheap. In the live check, beats every 1m stood down after the rewind with "the conversation was rewound" and came back after the next message.
 - **`$.session.messages` exists on 2.1.287:** its op table has a runner for it.
 
-## Beats during a turn (branch `long-turn`, under investigation)
+## Beats during a turn, and beats that can't reach the cache (0.9.0)
+
+- **Idle beats need the same care as mid-turn ones.**
+  - **The waste:** after a session's plain-text first turn, an idle beat read 31,772 and wrote 10,661, and the second turn didn't use it. A second idle beat 345s later wrote the same 10,659 again: a fork's own writes seem to last 5 minutes.
+  - **The rule since 0.9.0:** a beat that reads less than the last request cached (`cached`), and writes more than `MISSED` (1,000 tokens, far above a beat's own line), makes beats wait for the next turn ("Claude Code cached this conversation anew, out of a beat's reach").
+  - **Expired or out of reach:** within 5 minutes of the last cache read, the cache can't have lapsed. So a beat there that writes more than it read is treated as out of reach too, not as "the cache was not served", which would stop cachebeat or switch `auto` to 4m beats. After 5 minutes the two look alike, and the old rule stands.
+  - **Status:** inferred from the subagent's measurements, and confirmed live once.
 
 - **`turn.step` fires once per request a turn sends**, with `turnId`, `index` and `messageCount`, and `agentId` for a subagent's. It's a streaming event: the hook is `async function* ($, e, next)`, and `yield* next(e)` returns once the response is complete.
 - **A fork runs fine during a turn,** for example while a tool runs. The turn carries on and completes as usual.
