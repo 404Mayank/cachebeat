@@ -256,7 +256,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 
 ## Good to know
 
-- Sending a message restarts the countdown.
+- Sending a message restarts the countdown, and so does each request Claude sends during a turn. A turn that goes quiet for the whole interval, such as a long build or a permission prompt left waiting, gets a beat too.
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.

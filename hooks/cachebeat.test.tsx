@@ -41,6 +41,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   const replies = world.fork ?? []
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
+  // one request of a turn: it read the cache, then called a tool
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { ...usage(90_000, 0), model: OPUS } } as never
+  })
   on('ui.log', (_$, e) => (logs.push(e.text), { value: undefined }) as never)
   on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }) as never)
   on('session.usage', () => ({
@@ -1351,3 +1355,44 @@ test('after /rewind, beats wait for the next turn instead of warming the convers
   await clock.advance(3 * M)
   expect(forks).toHaveLength(2) // the next turn sends the rewound conversation, and beats follow it
 })
+
+/** One request of a turn, sent and answered. */
+const step = async ($: Engine, turnId: string, index: number) => {
+  const stream = $.turn.step({ turnId, index, model: OPUS, messageCount: 5 })
+  for await (const _ of stream) { /* the stub streams nothing */ }
+  return stream.result
+}
+
+test('a turn gone quiet for the interval gets a beat, counted from its last request, and still ends as itself', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  await clock.advance(1 * M)
+  await step($, 't2', 0) // a request at 1m, then a tool that runs on
+  await clock.advance(2 * M)
+  expect(forks).toEqual([]) // 3m since the last turn, 2m since the request
+  await clock.advance(1 * M)
+  expect(forks).toEqual([4 * M]) // 3m of quiet within the turn: a beat
+  expect(await cmd($, 'now')).toBe('a turn is running; the beat waits for it to end') // by hand, still none mid-turn
+  await clock.advance(3 * M)
+  expect(forks).toEqual([4 * M, 7 * M]) // and on, while it stays quiet
+  await clock.advance(1 * M)
+  await step($, 't2', 1) // the tool ends, the next request goes out at 8m
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 2 beats · next beat in 3m')
+})
+
+test('a turn whose requests keep coming needs no beat', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'refactor', turnId: 't2' })
+  for (let i = 0; i < 5; i++) {
+    await clock.advance(2 * M)
+    await step($, 't2', i)
+  }
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  expect(forks).toEqual([])
+})
+

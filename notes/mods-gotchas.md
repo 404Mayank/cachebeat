@@ -64,6 +64,22 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **How it was tested:** an interactive session in tmux (`tmux new-session -d …`, `send-keys`, `capture-pane`). The rewind picker is `/rewind`, then ↑ to the turn, Enter, then Enter on "Restore conversation". Haiku keeps it cheap. In the live check, beats every 1m stood down after the rewind with "the conversation was rewound" and came back after the next message.
 - **`$.session.messages` exists on 2.1.287:** its op table has a runner for it.
 
+## Beats during a turn (branch `long-turn`, under investigation)
+
+- **`turn.step` fires once per request a turn sends**, with `turnId`, `index` and `messageCount`, and `agentId` for a subagent's. It's a streaming event: the hook is `async function* ($, e, next)`, and `yield* next(e)` returns once the response is complete.
+- **A fork runs fine during a turn,** for example while a tool runs. The turn carries on and completes as usual.
+- **On 2.1.295, a fork raises no turn events at all:** no `turn.start`, `turn.step` or `turn.complete`, idle or mid-turn. The `beating` guard in `turn.start`/`turn.complete` is a precaution from 0.3.0. On the branch, `turn.complete` also accepts the running turn's own id while a beat is on its way.
+- **The beat's prompt has to say not to carry on.** Mid-turn, the request a fork re-sends ends with the user's own instruction:
+  - With "Reply with a single period." the model went on with the task and tried a tool, which forks deny. That made a second request (91,726 read in all) and a long reply.
+  - With "Do not continue any task or use any tool…" it made one request and replied "." (one probe run on Haiku, 6s into the tool).
+- **Open: what a mid-turn beat costs.** Beats every 1m during an 80s tool call, on Haiku:
+  - **tmux run 1:** read 32,136, wrote 12,417 (conversation about 44.5k).
+  - **tmux run 2:** read 44,783, wrote 0, the same as an idle beat.
+  - **compuse's screenshot run:** read 78,397, wrote 13,812 (conversation about 46k). That looks like two requests: about 32k read with 14k written, then 46k read.
+  - **The pattern:** the first mid-turn beat in a session partly rewrites the cache, and sometimes the model still makes a second request. The turn line then shows the inflated "78k cached".
+  - **Status:** unexplained. Held back from 0.8.2.
+- **The test kit raises `turn.step` as `$.turn.step({ turnId, index, model, messageCount })`.** It returns a stream: read it to its end, then `await stream.result`. A test registers a stub generator beneath it, in `setup()`.
+
 ## Surfaces: the desktop app (found live, 0.7.0)
 
 **Status: passable, left open.** The desktop app isn't the maintainer's main surface: cachebeat is built for the terminal. On desktop it works and looks acceptable, but it isn't polished. Line animations keep small gaps, and heart-heavy ones space wide (below). It's left as it is on purpose. Contributions to tighten it are welcome; the `Svg`-grid idea below is the likely route.

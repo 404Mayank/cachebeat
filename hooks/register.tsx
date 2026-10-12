@@ -47,6 +47,8 @@ let frame = 0
 let lineFrame = 0
 let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
+let turnId = '' // that turn's id: its end is told from a fork's by it
+let stepping = false // a request of that turn is on its way, which keeps the cache warm itself
 let beating = false
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
@@ -331,8 +333,8 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   let ms: number | undefined
   let p: Pulse = 'armed'
   if (!s.enabled) s.small = null
-  if (!s.enabled || busy) p = 'hidden' // a turn keeps the last word on the context; its end checks again
-  else if (await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
+  if (!s.enabled || stepping) p = 'hidden' // a request on its way keeps the cache warm; its end counts again
+  else if (!busy && await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
@@ -347,6 +349,8 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   }
   // a newer call, begun while this one awaited, sets the timer and the heart: two would each arm one
   if (call !== scheduling) return undefined
+  // a turn going quiet (a tool running, a permission waiting) counts down as idle time does, its heart unshown
+  if (busy) p = 'hidden'
   setPulse($, p)
   save($)
   await refreshLine($)
@@ -405,7 +409,7 @@ function stop($: EngineInterface, why?: string) {
 
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
-  if (busy) return 'a turn is running; the beat waits for it to end'
+  if (stepping) return 'a request is on its way; the beat waits for it'
   const now = await $.clock.now()
   if (now - (s.lastReal ?? now) >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
   if (now - (s.lastWarm ?? now) >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
@@ -483,6 +487,7 @@ function scheduledBeat($: EngineInterface) {
 
 /** A beat asked for by hand: never one that would switch cachebeat off for having nothing to fork. */
 function beatNow($: EngineInterface) {
+  if (busy) return Promise.resolve('a turn is running; the beat waits for it to end')
   return s.lastReal === null ? Promise.resolve('nothing to keep warm until this session has a turn') : beat($)
 }
 
@@ -805,15 +810,41 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (!beating) {
       busy = true
+      turnId = e.turnId
+      stepping = true // its first request goes out next
       s.row = null // the line moves to this turn's row once it ends
       await schedule($)
     }
     return next(e)
   })
 
+  // each request of the main conversation's turn reads the cache, so the count starts again when one ends; a turn
+  // that then goes quiet for the whole interval (a long tool run, a permission prompt left waiting) gets a beat
+  on('turn.step', async function* ($, e, next) {
+    const isMain = busy && e.agentId === undefined && e.turnId === turnId
+    if (isMain) {
+      stepping = true
+      await schedule($)
+    }
+    const r = yield* next(e)
+    if (isMain) {
+      stepping = false
+      if (r.usage) {
+        s.lastWarm = await $.clock.now()
+        s.warmModel = await $.session.model()
+        s.tail = await tailOf($) // the conversation as this request left it: what a beat would re-send
+        s.paused = null
+      }
+      await schedule($)
+    }
+    return r
+  })
+
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined && !beating) {
+    // the turn's own end, by its id, even while a beat runs within it; a fork's end, if one is raised, is not it
+    if (e.agentId === undefined && (!beating || (busy && e.turnId === turnId))) {
       busy = false
+      stepping = false
       rowPending = true
       s.lastReal = await $.clock.now()
       // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
