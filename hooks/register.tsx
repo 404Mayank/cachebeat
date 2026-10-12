@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Alert, BeatSettings, PanePage, Pulse, Saved, Ttl } from '../types'
+import type { Alert, BeatSettings, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
-import { PANE, paint, settingsPane, statusText } from './pane'
-import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, lookOf, normalize, rowOf, spans, tokens } from './settings'
+import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
+import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, isObject, lookOf, normalize, normalizeOwn, rowOf, spans, tokens } from './settings'
 import type { Span, Value } from './settings'
-import { SET, STATE, parseSet, summary } from './tools'
+import { SET, STATE, label, parseSet, summary } from './tools'
+import type { SetChange } from './tools'
 
 const MIN = 60_000
 export const IDLE = AUTO['1h'] * MIN // the default silence before a beat on a subscription's one-hour cache
@@ -19,6 +20,7 @@ const frameAtom = atom({ plugin: 'cachebeat', key: 'frame' } as const, 0)
 const lineFrameAtom = atom({ plugin: 'cachebeat', key: 'lineFrame' } as const, 0)
 const lineAtom = atom({ plugin: 'cachebeat', key: 'line' } as const, '')
 const settingsAtom = atom({ plugin: 'cachebeat', key: 'settings' } as const, DEFAULTS)
+const folderAtom = atom({ plugin: 'cachebeat', key: 'folder' } as const, { root: '', own: {} } as Folder)
 const tickAtom = atom({ plugin: 'cachebeat', key: 'tick' } as const, 0)
 const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'beating', picker: null } as PanePage)
 const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
@@ -28,7 +30,11 @@ const fresh: Saved = {
   isCacheShort: false, paused: null, warmModel: null,
 }
 let s: Saved = { ...fresh }
-let cfg: BeatSettings = DEFAULTS
+let cfg: BeatSettings = DEFAULTS // as they apply here: this folder's own over those for all folders
+let global: BeatSettings = DEFAULTS // the settings for all folders
+let root = '' // this session's folder: where it started, or where /cd or a worktree move took it
+let own: Partial<BeatSettings> = {} // the settings this folder has of its own
+let editsFolder = false // the menu saves changes for this folder alone, not all folders
 let timer: { cancel: () => void } | undefined
 let ticker: { cancel: () => void } | undefined // the prompt heart's animation clock
 let lineTicker: { cancel: () => void } | undefined // the turn line's, at its own speed
@@ -100,29 +106,86 @@ async function keepCustoms($: EngineInterface, patch: Partial<BeatSettings>) {
   await $.store.set('customs', customs)
 }
 
-async function setSettings($: EngineInterface, patch: Partial<BeatSettings>) {
-  await keepCustoms($, patch)
-  // from the store, not this session's copy: another session may have changed it since
-  cfg = { ...normalize(await $.store.get('settings')), ...patch }
+/** Where a change is saved: the settings for all folders, or this folder's own. */
+type Target = 'global' | 'folder'
+
+/** The settings as they apply here: this folder's own over those for all folders. */
+const merged = (): BeatSettings => ({ ...global, ...own })
+
+/** This session's folder, the settings for all folders and the folder's own, from the store: another session may have changed them. */
+async function load($: EngineInterface) {
+  root = await $.session.root()
+  const stored = await $.store.get('settings')
+  global = normalize(stored)
+  const folders = await $.store.get('folders')
+  own = normalizeOwn(isObject(folders) ? folders[root] : undefined)
+  cfg = merged()
+}
+
+/** Publishes the settings and the folder where the drawings read them, which a /clear empties. */
+async function publish($: EngineInterface) {
   const copy = { ...cfg }
-  await $.store.set('settings', changed(copy))
   await update($, settingsAtom, () => copy)
+  const view = { root, own }
+  await update($, folderAtom, () => view)
+}
+
+/** Saves this folder's own settings among every other folder's as the store has them; a folder with none goes. */
+async function saveOwn($: EngineInterface) {
+  const stored = await $.store.get('folders')
+  const folders = isObject(stored) ? { ...stored } : {}
+  if (Object.keys(own).length) folders[root] = own
+  else delete folders[root]
+  await $.store.set('folders', folders)
+}
+
+/** `settings` without `keys`: those follow all folders again. */
+const without = (settings: Partial<BeatSettings>, keys: readonly string[]) =>
+  Object.fromEntries(Object.entries(settings).filter(([k]) => !keys.includes(k))) as Partial<BeatSettings>
+
+/** A change to the saved settings: some for all folders, and some of this folder's own set or dropped ('all', every one). */
+type Change = { global?: Partial<BeatSettings>; own?: Partial<BeatSettings>; drop?: readonly string[] | 'all' }
+
+/** Saves a change, read against the store as it is now (another session may have changed it), then draws and schedules by it. */
+async function changeSettings($: EngineInterface, change: Change) {
+  const set = { ...change.global, ...change.own }
+  await keepCustoms($, set)
+  await load($)
+  if (change.global) {
+    global = { ...global, ...change.global }
+    await $.store.set('settings', changed(global))
+  }
+  if (change.own || change.drop) {
+    own = change.drop === 'all' ? { ...change.own } : without({ ...own, ...change.own }, change.drop ?? [])
+    await saveOwn($)
+  }
+  // an interval saved, for all folders or this one, is what this session beats at from then, by any route
+  if (set.interval !== undefined) s.idle = null
+  cfg = merged()
+  await publish($)
   restartClocks($)
+  save($)
   if (s.enabled && !busy && !beating) await schedule($)
   else await refreshLine($)
 }
 
+const setSettings = ($: EngineInterface, patch: Partial<BeatSettings>, to: Target) =>
+  changeSettings($, to === 'folder' ? { own: patch } : { global: patch })
+
 /**
- * Picks up settings another session changed since this one last looked, and publishes them where
- * the drawings read them, which a /clear empties.
+ * Picks up settings another session changed since this one last looked, or the folder a /cd moved it
+ * to, publishes them where the drawings read them, which a /clear empties, and moves the next beat
+ * if its interval changed.
  */
 async function syncSettings($: EngineInterface) {
-  const now = normalize(await $.store.get('settings'))
-  const same = (x: unknown) => JSON.stringify(x) === JSON.stringify(now)
-  if (same(cfg) && same(await read($, settingsAtom))) return
-  cfg = now
-  await update($, settingsAtom, () => now)
+  const before = JSON.stringify([global, root, own])
+  const was = idle()
+  await load($)
+  const drawn = JSON.stringify([await read($, settingsAtom), await read($, folderAtom)])
+  if (JSON.stringify([global, root, own]) === before && drawn === JSON.stringify([cfg, { root, own }])) return
+  await publish($)
   restartClocks($)
+  if (idle() !== was && s.enabled && !busy && !beating) await schedule($)
 }
 
 /** The animation clocks restart at the settings' speed, or stay stopped, as the next drawing finds them. */
@@ -407,20 +470,27 @@ const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
   : ms === undefined ? 'starts after your next turn' : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
 
-async function turnOn($: EngineInterface, minutes: number | undefined) {
+/** Where this session's interval comes from: its own, this folder's, or the settings for all folders. */
+const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undefined ? 'folder' : 'all folders')
+
+const isWhole = (word: string) => /^\d+$/.test(word)
+
+/** Minutes typed, kept under the hour the cache lives. */
+const minutesOf = (word: string) => Math.min(55, Math.max(1, Math.round(Number(word))))
+
+/** Where the paths of folders are shown cut to, in answers and in the menu alike. */
+const PATH = 30
+const here = () => `this folder (${cut(root, PATH)})`
+
+/** Turns this session on after `change` (its own interval, a saved setting), saying how its interval moved. */
+async function turnOn($: EngineInterface, change?: () => Promise<void>) {
   const wasOn = s.enabled
   const before = idle()
-  if (minutes !== undefined) {
-    const m = Math.min(55, Math.max(1, Math.round(minutes)))
-    if (cfg.intervalScope === 'global') {
-      s.idle = null
-      await setSettings($, { interval: m })
-    } else s.idle = m * MIN
-  }
+  if (change) await change()
   s.enabled = true
   if (busy) {
     save($)
-    return { text: `on, ${every()}; starts after this turn` }
+    return `on, ${every()}; starts after this turn`
   }
   if (wasOn && idle() === before) {
     let ms: number | undefined
@@ -429,14 +499,46 @@ async function turnOn($: EngineInterface, minutes: number | undefined) {
       const now = await $.clock.now()
       ms = Math.max(0, at - now)
     }
-    return { text: `already on, ${every()} · ${when(ms)}` }
+    return `already on, ${every()} · ${when(ms)}`
   }
   const ms = await schedule($)
-  if (wasOn) return { text: `interval ${fmt(before)} → ${fmt(idle())} · ${when(ms)}` }
-  return { text: `on, ${every()} · ${when(ms)}` }
+  if (wasOn) return `interval ${fmt(before)} → ${fmt(idle())} · ${when(ms)}`
+  return `on, ${every()} · ${when(ms)}`
 }
 
-/** What the tools answer: this session's beating, and the settings every session shares. */
+/** Settings and their values as the menu names them: `New sessions start on, Beat after idle 45m`. */
+const listed = (settings: Partial<BeatSettings>) =>
+  (Object.entries(settings) as [keyof BeatSettings, Value][]).map(([k, v]) => `${label(k)} ${shown(rowOf(k)!.row, v, cfg)}`).join(', ')
+
+/**
+ * `/cachebeat global …` and `local …`: whether new sessions start on, or the interval, saved for all
+ * folders or this one, and applied to this session too.
+ */
+async function scoped($: EngineInterface, to: Target, word: string | undefined) {
+  await syncSettings($)
+  const where = to === 'folder' ? here() : 'all folders'
+  const session = () => `this session: ${s.enabled ? `on, ${every()}` : 'off'}`
+  if (to === 'folder' && word === 'reset') {
+    await changeSettings($, { drop: 'all' })
+    return `${where} follows all folders again · ${session()}`
+  }
+  const isMinutes = word !== undefined && isWhole(word)
+  if (word !== 'on' && word !== 'off' && !isMinutes) {
+    if (to === 'global') return `${where}: ${listed({ defaultOn: global.defaultOn, interval: global.interval })} · usage: /cachebeat global on|off|<minutes>`
+    return `${where}: ${Object.keys(own).length ? listed(own) : 'follows all folders'} · usage: /cachebeat local on|off|<minutes>|reset`
+  }
+  const patch: Partial<BeatSettings> = isMinutes ? { interval: minutesOf(word) } : { defaultOn: word === 'on' }
+  if (word === 'off') {
+    await setSettings($, patch, to)
+    if (s.enabled) stop($)
+  } else await turnOn($, () => setSettings($, patch, to))
+  const key = isMinutes ? 'interval' : 'defaultOn'
+  // what this folder sets for itself, that a change for all folders doesn't reach here
+  const kept = to === 'global' && own[key] !== undefined ? ` · this folder keeps ${shown(rowOf(key)!.row, own[key]!, cfg)}` : ''
+  return `${where}: ${isMinutes ? `every ${patch.interval}m idle` : `new sessions start ${word}`}${kept} · ${session()}`
+}
+
+/** What the tools answer: this session's beating, the settings as they apply here, and this folder's own. */
 async function stateOf($: EngineInterface) {
   await syncSettings($)
   ttl = await cacheTtl($) // usage can cross into credits between turns
@@ -445,30 +547,39 @@ async function stateOf($: EngineInterface) {
     : s.nextAt !== null ? `in ${fmt(s.nextAt - now)}`
     : busy ? `${fmt(idle())} after this turn ends`
     : 'after the next turn'
+  const from = intervalFrom()
   const session = {
-    enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: s.idle !== null ? 'session' : cfg.interval === 'auto' ? 'auto' : 'default',
+    enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: from === 'all folders' && cfg.interval === 'auto' ? 'auto' : from,
     cacheTtl: s.isCacheShort ? '5m' : ttl,
     beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small, paused: s.paused,
   }
   const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
-  return { session, settings: cfg, defaults }
+  return {
+    session, settings: cfg, folder: { path: root, own },
+    ...(Object.keys(own).length ? { allFolders: global } : {}), defaults,
+  }
 }
 
-type Before = { enabled: boolean; idle: number | null; settings: BeatSettings }
+type Before = { enabled: boolean; idle: number | null; settings: BeatSettings; own: Partial<BeatSettings> }
 
 /**
  * `set`'s answer: the fields the call changed (this session's own switch and interval, not what follows
- * from the settings; its own patch, not what another session saved meanwhile), this session's state,
- * and the settings it changed.
+ * from the settings; its own patches, not what another session saved meanwhile), this session's state,
+ * and the settings it changed, for all folders and this one.
  */
-async function answerSet($: EngineInterface, before: Before, patch: Partial<BeatSettings>) {
-  const settings = Object.entries(patch).filter(([k, v]) => before.settings[k as keyof BeatSettings] !== v)
+async function answerSet($: EngineInterface, before: Before, change: SetChange) {
+  const settings = Object.entries(change.patch).filter(([k, v]) => before.settings[k as keyof BeatSettings] !== v)
+  const set = Object.entries(change.folder?.own ?? {}).filter(([k, v]) => before.own[k as keyof BeatSettings] !== v)
+  const drop = change.folder === null ? Object.keys(before.own) : change.folder?.drop ?? []
+  const dropped = drop.filter(k => k in before.own)
   const changed = [
     ...(before.enabled !== s.enabled ? ['session.enabled'] : []),
     ...(before.idle !== s.idle ? ['session.intervalMinutes'] : []),
     ...settings.map(([k]) => `settings.${k}`),
+    ...[...set.map(([k]) => k), ...dropped].map(k => `folder.${k}`),
   ]
-  return { changed, session: (await stateOf($)).session, settings: Object.fromEntries(settings) }
+  const folder = change.folder === undefined ? {} : { folder: Object.fromEntries([...set, ...dropped.map(k => [k, null])]) }
+  return { changed, session: (await stateOf($)).session, settings: Object.fromEntries(settings), ...folder }
 }
 
 const json = (x: unknown) => JSON.stringify(x, null, 2)
@@ -480,6 +591,7 @@ async function openSettings($: EngineInterface) {
   ttl = await cacheTtl($)
   notice = ''
   isResetArmed = false
+  editsFolder = Object.keys(own).length > 0 // a folder with settings of its own opens on them
   await update($, pageAtom, () => ({ tab: 'beating', picker: null }))
   await $.ui.open({ id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, holdToasts: true, rows: 24 })
   await focusOn($, 'tab:beating', true)
@@ -528,23 +640,23 @@ function say($: EngineInterface, text: string) {
   void update($, tickAtom, t => t + 1)
 }
 
-const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|global on|off|settings]'
+const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
 
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
   on('session.start', async ($, e, next) => {
     isStatusOnBand = false // until the band is drawn on a desktop
     paneSurface = 'terminal' // until the pane draws, on whichever surface
-    cfg = normalize(await $.store.get('settings'))
-    await update($, settingsAtom, () => cfg)
+    await load($)
+    await publish($)
     const prev = await read($, saved)
-    // a reload keeps this session's choice; a new session takes the global default
+    // a reload keeps this session's choice; a new session starts as its folder's settings say
     s = prev ? { ...fresh, ...prev } : { ...fresh, enabled: cfg.defaultOn }
     await schedule($)
     await $.command.register({
       name: 'cachebeat',
       description: 'Keep the prompt cache warm while idle',
-      argumentHint: '[on|off|<minutes>|now|global on|off|settings]',
+      argumentHint: '[on|off|<minutes>|now|global …|local …|settings]',
       immediate: true,
     })
     await $.tool.register(STATE)
@@ -565,27 +677,20 @@ export const register: Register = on => {
   on('command.run', { command: 'cachebeat' }, async ($, e) => {
     ttl = await cacheTtl($) // what `auto` comes to, for the answer
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    const minutes = words.find(w => /^\d+$/.test(w))
+    const minutes = words.find(isWhole)
     if (words[0] === 'settings' || words[0] === 'config') {
       await openSettings($)
       return { text: 'settings opened' }
     }
     if (words[0] === 'now') return { text: await beatNow($) }
-    if (words[0] === 'global') {
-      if (words[1] !== 'on' && words[1] !== 'off') return { text: `new sessions start ${cfg.defaultOn ? 'on' : 'off'} · ${USAGE}` }
-      await setSettings($, { defaultOn: words[1] === 'on' })
-      let here = 'already off'
-      if (words[1] === 'on') {
-        const turned = await turnOn($, undefined)
-        here = turned.text
-      } else if (s.enabled) here = stop($)
-      return { text: `new sessions start ${words[1]} · this session: ${here}` }
+    if (words[0] === 'global' || words[0] === 'local') return { text: await scoped($, words[0] === 'local' ? 'folder' : 'global', words[1]) }
+    if (words[0] === 'off') return { text: `this session: ${s.enabled ? stop($) : 'already off'}` }
+    if (words[0] === 'on' || minutes) {
+      const turned = await turnOn($, minutes === undefined ? undefined : async () => {
+        s.idle = minutesOf(minutes) * MIN
+      })
+      return { text: `this session: ${turned}` }
     }
-    if (words[0] === 'off') {
-      if (!s.enabled) return { text: 'already off' }
-      return { text: stop($) }
-    }
-    if (words[0] === 'on' || minutes) return turnOn($, minutes === undefined ? undefined : Number(minutes))
     if (words.length) return { text: USAGE }
     if (!s.enabled) return { text: 'off' }
     let ms: number | undefined
@@ -594,37 +699,46 @@ export const register: Register = on => {
       const now = await $.clock.now()
       ms = Math.max(0, at - now)
     }
-    return { text: `on, ${every()} · ${s.beats} beats · ${when(ms)}` }
+    const from = intervalFrom()
+    const source = from === 'all folders' ? '' : ` (this ${from}'s)`
+    return { text: `on, ${every()}${source} · ${s.beats} beat${s.beats === 1 ? '' : 's'} · ${when(ms)}` }
   })
 
   on('tool.call', { tool: 'mcp__cachebeat__state' }, async $ => ({ result: json(await stateOf($)) }))
 
   on('tool.call', { tool: 'mcp__cachebeat__set' }, async ($, e) => {
     if (e.agentId) return { deny: 'Only the main conversation changes cachebeat.' }
-    const change = parseSet({ session: e.session, settings: e.settings })
+    const change = parseSet({ session: e.session, settings: e.settings, folder: e.folder })
     if ('error' in change) return { deny: change.error }
     await syncSettings($)
-    const before: Before = { enabled: s.enabled, idle: s.idle, settings: cfg }
-    if (Object.keys(change.patch).length) await setSettings($, change.patch)
+    const before: Before = { enabled: s.enabled, idle: s.idle, settings: global, own }
+    const hasPatch = Object.keys(change.patch).length > 0
+    if (hasPatch || change.folder !== undefined) {
+      await changeSettings($, {
+        global: hasPatch ? change.patch : undefined,
+        own: change.folder?.own, drop: change.folder === null ? 'all' : change.folder?.drop,
+      })
+    }
     if (change.intervalMinutes !== undefined) s.idle = change.intervalMinutes === null ? null : change.intervalMinutes * MIN
     if (change.enabled !== undefined) s.enabled = change.enabled
     // always: setSettings reschedules only while on, and this is what cancels a beat when turned off
     await schedule($)
-    return { result: json(await answerSet($, before, change.patch)) }
+    return { result: json(await answerSet($, before, change)) }
   })
 
   // a call is one dim line in the transcript, and its answer, for the model alone, is not drawn
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__cachebeat__state' } }, async ($, e, next) => {
     if (e.props.isErrored) return next(e)
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor>cachebeat: read the state</Text>
+    return <Text dimColor>cachebeat · read the state</Text>
   })
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__cachebeat__set' } }, async ($, e, next) => {
-    const change = parseSet((e.props.input ?? {}) as { session?: unknown; settings?: unknown })
+    const change = parseSet((e.props.input ?? {}) as { session?: unknown; settings?: unknown; folder?: unknown })
     if (e.props.isErrored || 'error' in change) return next(e)
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor>{`cachebeat: ${summary(change, await read($, settingsAtom))}`}</Text>
+    const { root: path } = await read($, folderAtom)
+    return <Text dimColor>{`cachebeat · ${summary(change, await read($, settingsAtom), cut(path, PATH))}`}</Text>
   })
 
   on('ui.render', { component: 'ToolResult', props: { tool: 'mcp__cachebeat__state' } }, async ($, e, next) => {
@@ -786,6 +900,7 @@ export const register: Register = on => {
     const page = await read($, pageAtom)
     const tick = await read($, tickAtom)
     const focus = await read($, focusAtom)
+    const place = await read($, folderAtom)
     await read($, pulse) // redraws "This session" as it turns on or off
     // the preview's clock runs only while there is a preview to move
     const picked = page.picker ? rowOf(page.picker) : undefined
@@ -797,26 +912,42 @@ export const register: Register = on => {
     const els = $.ui.resolve(e)
     paneSurface = e.surface
     if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
+    // the menu shows the settings it saves to: this folder's own over all folders', or all folders'
+    const shownSettings = editsFolder ? c : global
+    const to: Target = editsFolder ? 'folder' : 'global'
+    const where = cut(place.root, PATH)
     const view = {
       page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN,
       autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal', customs,
+      own: place.own, path: where, editsFolder, allFolders: global,
     }
-    const { tree, ring: walk } = settingsPane(els, c, view, {
-      set: patch => void setSettings($, patch),
+    const { tree, ring: walk } = settingsPane(els, shownSettings, view, {
+      set: patch => void setSettings($, patch, to),
       // a press on a tab (Enter, 1-5, a click) shows it and goes into its settings
-      tab: id => void goTo($, { tab: id, picker: null }, firstOf(id, c)),
+      tab: id => void goTo($, { tab: id, picker: null }, firstOf(id, shownSettings)),
       at: key => void focusOn($, key),
       open: key => {
         // the focus starts on the value set: one of the choices, or the custom field
         const { row } = rowOf(key)!
-        const i = row.values.indexOf(c[key])
+        const i = row.values.indexOf(shownSettings[key])
         void goTo($, { ...page, picker: key }, i >= 0 ? `opt:${i}` : row.custom ? 'custom' : 'opt:0', true)
       },
-      pick: (key, value) => void setSettings($, { [key]: value }).then(() => (say($, ''), goTo($, { ...page, picker: null }, `row:${key}`))),
+      pick: (key, value) => void setSettings($, { [key]: value }, to).then(() => (say($, ''), goTo($, { ...page, picker: null }, `row:${key}`))),
       refuse: text => say($, text),
-      resetRow: key => void setSettings($, { [key]: DEFAULTS[key] }).then(() => say($, `${rowOf(key)!.row.label.trim()} back to its default`)),
+      resetRow: key => {
+        if (!editsFolder) return void setSettings($, { [key]: DEFAULTS[key] }, 'global').then(() => say($, `${label(key)} back to its default`))
+        void changeSettings($, { drop: [key] }).then(() => say($, `${label(key)} follows all folders again`))
+      },
+      dropSession: () => {
+        s.idle = null
+        void schedule($).then(() => say($, `this session follows ${intervalFrom() === 'folder' ? 'this folder' : 'all folders'}: ${every()}`))
+      },
+      toggleFolder: () => {
+        editsFolder = !editsFolder
+        say($, `menu changes now save for ${editsFolder ? `${where} only` : 'all folders'}`)
+      },
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
-      toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($, undefined).then(r => r.text)).then(t => say($, `this session: ${t}`)),
+      toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($)).then(t => say($, `this session: ${t}`)),
       beatNow: () => void beatNow($).then(t => say($, t)),
       reset: () => {
         if (!isResetArmed) {
@@ -824,7 +955,8 @@ export const register: Register = on => {
           return say($, '')
         }
         isResetArmed = false
-        void setSettings($, DEFAULTS).then(() => say($, 'settings reset to the defaults'))
+        if (editsFolder) return void changeSettings($, { drop: 'all' }).then(() => say($, `${where}'s own settings dropped: it follows all folders`))
+        void changeSettings($, { global: DEFAULTS }).then(() => say($, 'settings reset to the defaults'))
       },
     })
     ring = walk

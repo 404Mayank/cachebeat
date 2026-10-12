@@ -80,7 +80,13 @@ The heart appears under the prompt, and after your next turn it starts beating. 
 /cachebeat global on
 ```
 
-Or ask Claude: "keep the cache warm in this session", "make 30 minutes the default beat time".
+Or only the sessions in this folder, such as one repo:
+
+```
+/cachebeat local on
+```
+
+Or ask Claude: "keep the cache warm in this session", "always start it in this repo", "make 30 minutes the default beat time".
 
 Beats fit your cache by themselves: every 50 minutes on a Claude subscription's one-hour cache, and every 4 on the five-minute cache of an API key, a cloud provider or usage credits. To pick your own interval, use `/cachebeat 30` for this session, or set **Beat after idle** in `/cachebeat settings`.
 
@@ -99,7 +105,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 - cachebeat collects no personal data and has no telemetry. It sends nothing to its author or anyone else.
 - A beat is a request to Anthropic's API, made by Claude Code with your account, the same way your own messages are sent.
-- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
+- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
 
 ## Commands
 
@@ -108,9 +114,12 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 | `/cachebeat` | Shows the status: on or off, the interval, beats so far, the next beat |
 | `/cachebeat on` | Turns it on for this session |
 | `/cachebeat off` | Turns it off for this session |
-| `/cachebeat <minutes>` | Turns it on with a different interval, e.g. `/cachebeat 30` (1–55) |
+| `/cachebeat <minutes>` | Turns it on for this session with its own interval, e.g. `/cachebeat 30` (1–55) |
 | `/cachebeat now` | Beats right away |
-| `/cachebeat global on` / `off` | Sets whether new sessions start on, and applies it here too |
+| `/cachebeat global on` / `off` | Sets whether new sessions start on, in all folders, and applies it here too |
+| `/cachebeat global <minutes>` | Sets the interval for all folders, and turns it on here at that interval |
+| `/cachebeat local on` / `off` / `<minutes>` | The same, for sessions in this folder only |
+| `/cachebeat local reset` | Drops this folder's own settings: it follows all folders again |
 | `/cachebeat settings` | Opens the settings menu |
 
 ## What you'll see
@@ -130,18 +139,30 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 ## Settings
 
-Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings are saved once and apply to every session.
+Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings apply in every folder, unless you give a folder its own (see [Where settings apply](#where-settings-apply)).
 
 - On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
 - Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
-- **r** puts the focused setting back to its default.
+- **r** puts the focused setting back to its default. On a folder's own setting, it goes back to the one for all folders. On a session's own interval, it drops it, as picking another interval does.
 - In a list, ↑↓ preview each choice and Enter picks it.
 - Esc goes back one step, and closes the menu from the tab bar.
 - The mouse works too: click to pick, scroll to scroll.
 
 Settings with numbers also take a custom value at the bottom of their list, such as `35` minutes, `90m`, or `35k` tokens. A value out of range is refused, with what the setting takes. Your last custom value stays in the list after you pick another, so it's one Enter from coming back.
 
-Everything in the menu applies to every session, except **This session** at the top of Beating.
+### Where settings apply
+
+| | What it holds | How long it lasts | How to set it |
+| --- | --- | --- | --- |
+| **This session** | Whether it beats, and an interval of its own | Until the session ends; `/clear` keeps it | **This session** on Beating, `/cachebeat on`, `off` or `<minutes>` |
+| **This folder** | Any setting, for sessions in this folder | Until you change it | **Settings for: this folder** in the menu, or `/cachebeat local …` |
+| **All folders** | Every setting | Until you change it | The menu, or `/cachebeat global …` |
+
+The nearest one wins: this session, then this folder, then all folders.
+
+**Settings for** picks where the menu saves your changes. On `this folder`, they're saved for this folder alone and marked `· this folder`; the rest still follow all folders, so a later change there reaches this folder too. On `all folders`, a setting this folder has its own of shows it as `here: …`. The menu opens on whichever this folder uses: its own, once it has any. **Reset folder** (or `/cachebeat local reset`) drops the folder's own settings.
+
+A folder is where the session started, or where `/cd` or a worktree move took it. Each folder is its own, so a subfolder or another worktree doesn't share its settings.
 
 <details>
 <summary><b>Beating</b>: whether it's on, and how often</summary>
@@ -152,9 +173,8 @@ Everything in the menu applies to every session, except **This session** at the 
 | New sessions start | Whether new sessions start with it on | off |
 | Beat after idle | How long the session sits idle before a beat: auto fits your cache, or a number of minutes | auto: 50 minutes on a one-hour cache, 4 on a five-minute one |
 | After /model | Wait for your next message, or have the next beat warm the new model's cache | wait |
-| `/cachebeat 30` changes | Whether `/cachebeat 30` changes this session only, or the default for all | this session |
 
-**Beat now** sends a beat right away, and **Reset all** puts every setting back to its default.
+**Beat now** sends a beat right away, and **Reset all** puts every setting back to its default. With **Settings for** on `this folder`, it's **Reset folder**, which drops the folder's own settings.
 
 </details>
 
@@ -240,7 +260,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 - After `/compact`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.
-- Settings you change in one session reach your other open sessions at their next turn.
+- Settings you change in one session reach your other open sessions at their next turn. A session moved to another folder takes that folder's settings at its next turn, and stays on or off as it was.
 
 ## Contributing
 
