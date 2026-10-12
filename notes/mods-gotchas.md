@@ -50,6 +50,20 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **The "beats wait" line after `/compact` lands above the compaction's output,** not at the end of the transcript. The engine places `$.ui.log` lines. This is cosmetic and isn't fixed.
 - **`claude --debug` writes `~/.claude/debug/<session>.txt`.** It holds every hook dispatch (`hooks module cachebeat@inline <event> settled …`) and every `$.ui.log` line. Use it to see event order instead of guessing.
 
+## /rewind (found live, 0.8.2)
+
+- **No event marks `/rewind`.** A probe mod that logged `session.append` and `turn.step` saw nothing at the rewind itself, only its own command rows afterwards.
+- **`$.session.messages()` shows the rewound conversation at once.** It went from 7 messages to 4 straight after "Restore conversation", before any new message.
+- **`$.model.fork` still re-sends the conversation from before the rewind.** It sends the request the main thread last sent:
+  - before the rewind, a fork read 51,730 tokens
+  - the rewound conversation came to about 44,500
+  - a fork after the rewind read 51,728
+
+  Until the next message, beats would keep the wrong conversation warm. cache-warmer, the other cache mod, says the same of itself.
+- **A fork adds nothing to `$.session.messages()`:** the count stayed the same across forks. So comparing how the conversation ends (`tailOf()`: its length and a hash of the last three messages) with how the last turn left it detects a rewind without false alarms from beats.
+- **How it was tested:** an interactive session in tmux (`tmux new-session -d …`, `send-keys`, `capture-pane`). The rewind picker is `/rewind`, then ↑ to the turn, Enter, then Enter on "Restore conversation". Haiku keeps it cheap. In the live check, beats every 1m stood down after the rewind with "the conversation was rewound" and came back after the next message.
+- **`$.session.messages` exists on 2.1.287:** its op table has a runner for it.
+
 ## Surfaces: the desktop app (found live, 0.7.0)
 
 **Status: passable, left open.** The desktop app isn't the maintainer's main surface: cachebeat is built for the terminal. On desktop it works and looks acceptable, but it isn't polished. Line animations keep small gaps, and heart-heavy ones space wide (below). It's left as it is on purpose. Contributions to tighten it are welcome; the `Svg`-grid idea below is the likely route.
