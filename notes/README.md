@@ -86,7 +86,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 0.7.4 went out that way ([PR #5](https://github.com/404Mayank/cachebeat/pull/5)). The `v0.7.4` branch was validated first, which cleared the block, then fast-forwarded into `main`. 0.7.5 ([PR #6](https://github.com/404Mayank/cachebeat/pull/6)) changed only `plugin.json`, so it went straight to `main`, which the submission validates anyway.
 
-0.8.0 was the first built on `dev` and shipped by the new steps ([PR #7](https://github.com/404Mayank/cachebeat/pull/7)). The release branch took the plugin files from `dev` with `git checkout dev -- …`. A fix after review went in as a second commit on the same branch, and `main` was fast-forwarded to it. `main` merged back into `dev` cleanly, since the files matched.
+0.8.0 was the first built on `dev` and shipped by the new steps ([PR #7](https://github.com/404Mayank/cachebeat/pull/7)). The release branch took the plugin files from `dev` with `git checkout dev -- …`. A fix after review went in as a second commit on the same branch, and `main` was fast-forwarded to it. `main` merged back into `dev` cleanly, since the files matched. 0.8.1 ([PR #8](https://github.com/404Mayank/cachebeat/pull/8)) went out the same way: only the manifest and new logo files, with the logo build changes kept on `dev`.
 
 ### Where a release goes
 
