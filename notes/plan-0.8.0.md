@@ -1,6 +1,6 @@
 # 0.8.0: where settings apply
 
-Status: built on `dev`, with the tests passing on 2.1.287 and the latest version. Still to do: look at it live in the terminal and the desktop app, check `--resume`, and release.
+Status: shipped 2026-10-12 ([PR #7](https://github.com/404Mayank/cachebeat/pull/7), release v0.8.0). Tried live in the terminal by the user, and Claude's side in headless sessions. Not yet checked: the desktop app, and whether `--resume`/`--continue` keep on/off.
 
 ## The problem
 
