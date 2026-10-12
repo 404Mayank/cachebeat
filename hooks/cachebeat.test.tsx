@@ -97,6 +97,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   return {
     clock, forks, prompts, logs, toasts, tails, store, specs, reads, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
+    add: (role: 'user' | 'assistant', text: string) => (chat = [...chat, said(role, text)]),
   }
 }
 
@@ -811,7 +812,7 @@ test('turned on mid-turn, it says so, and beats an interval after the turn ends'
   const { clock, forks } = await setup($, on)
   await $.turn.start({ text: 'hi', turnId: 't2' })
   const r = JSON.parse((await call($, 'set', { session: { enabled: true } })).result as string)
-  expect(r.session.nextBeat).toBe('50m after this turn ends')
+  expect(r.session.nextBeat).toBe('50m after the request on its way') // the turn's first request
   await $.turn.complete(turn)
   expect((await stateNow($)).session.nextBeat).toBe('in 50m')
   await clock.advance(IDLE)
@@ -1468,5 +1469,75 @@ test('soon after a request, a beat writing more than it read missed the cache\'s
   expect(forks).toHaveLength(1)
   expect(logs.some(l => l.startsWith('stopped'))).toBe(false)
   expect(await cmd($, '')).toStartWith('on, every 3m idle')
+})
+
+// what code review found in 0.9.0's first draft, each of these failing on it
+
+test('stop after idle counts from the user\'s last message, not the last turn\'s end', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { settings: { stopAfterHours: 1 } })
+  await cmd($, '50')
+  await $.turn.complete(turn) // 0m
+  await clock.advance(40 * M)
+  await $.turn.start({ text: 'run the long build', turnId: 't2' }) // the user's message at 40m
+  await step($, 't2', 0) // its request, then a long tool
+  await clock.advance(50 * M) // 90m: 50m since the message
+  expect(forks).toEqual([90 * M])
+  expect(logs.some(l => l.startsWith('stopped'))).toBe(false)
+})
+
+test('a tool\'s result landing mid-turn is not a rewind', async ($: Engine, on: On) => {
+  const { clock, forks, logs, add } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'two tools', turnId: 't2' })
+  add('user', 'two tools')
+  add('assistant', '') // two tool calls
+  await step($, 't2', 0)
+  await clock.advance(1 * M)
+  add('user', '') // the first tool's result, while the second still runs
+  await clock.advance(2 * M)
+  expect(forks).toEqual([3 * M]) // 3m after the request
+  expect(logs.some(l => l.includes('rewound'))).toBe(false)
+})
+
+test('a beat writing a long answer before its cache mark is renewing, not out of reach: mid-turn, or after later turns', async ($: Engine, on: On) => {
+  const { clock, forks, logs, reads } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(88_000, 1_500) }] })
+  await cmd($, '3')
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  reads.push(usage(80_000, 8_000)) // 88k cached
+  await step($, 't1', 0)
+  await $.turn.complete({ ...turn, turnId: 't1' })
+  await clock.advance(3 * M) // after the first turn, idle: reads all, writes the long answer
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  reads.push(usage(88_000, 2_000))
+  await step($, 't2', 0)
+  await clock.advance(3 * M) // mid-turn: the same
+  expect(forks).toEqual([3 * M, 6 * M])
+  expect(logs.some(l => l.includes('out of a beat'))).toBe(false)
+})
+
+test('a mid-turn beat that fails for a moment is tried again a minute later', async ($: Engine, on: On) => {
+  const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
+  const { clock, forks } = await setup($, on, { fork: [err, ok] })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(3 * M)
+  await clock.advance(1 * M)
+  expect(forks).toEqual([3 * M, 4 * M])
+  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 1 beat · next beat in 3m')
+})
+
+test('a conversation\'s first turn gets no mid-turn beat: its next request may cache it anew', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.start({ text: 'build', turnId: 't1' })
+  await step($, 't1', 0)
+  await clock.advance(9 * M)
+  expect(forks).toEqual([])
+  await $.turn.complete({ ...turn, turnId: 't1' })
+  await clock.advance(3 * M)
+  expect(forks).toEqual([12 * M]) // after it, beats as ever
 })
 

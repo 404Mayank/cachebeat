@@ -27,7 +27,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
-  isCacheShort: false, paused: null, warmModel: null, tail: null,
+  isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0,
 }
 let s: Saved = { ...fresh }
 let cfg: BeatSettings = DEFAULTS // as they apply here: this folder's own over those for all folders
@@ -337,6 +337,8 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   if (!s.enabled) s.small = null
   if (!s.enabled || stepping) p = 'hidden' // a request on its way keeps the cache warm; its end counts again
   else if (resent) p = 'hidden' // a beat would write the conversation again: the turn's next request or its end counts
+  // a conversation's first turn: its next request may send it anew, and a beat would write what that won't read
+  else if (busy && s.turns === 0) p = 'hidden'
   else if (!busy && await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
@@ -423,7 +425,9 @@ async function beat($: EngineInterface): Promise<string> {
   if (stepping) return 'a request is on its way; the beat waits for it'
   const now = await $.clock.now()
   const since = now - (s.lastWarm ?? now)
-  if (now - (s.lastReal ?? now) >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
+  // from the user's last message: a turn's start, or its end for one begun before cachebeat saw it
+  const lastWord = Math.max(s.lastReal ?? now, s.asked ?? -Infinity)
+  if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
   if (since >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
   const { rateLimits } = await $.session.usage()
   const full = rateLimits.find(l => l.percentUsed >= cfg.stopAtUsage)
@@ -435,8 +439,9 @@ async function beat($: EngineInterface): Promise<string> {
     await schedule($) // says so, and waits for a turn to grow it
     return `beats skip: ${s.small}`
   }
-  // no event marks /rewind: the conversation's ending tells it
-  const tail = await tailOf($)
+  // no event marks /rewind, which runs between turns: the conversation's ending tells it. Mid-turn the ending
+  // grows by itself, as each tool's result lands
+  const tail = busy ? s.tail : await tailOf($)
   if (s.tail !== null && tail !== s.tail) {
     await pause($, REWOUND, REWOUND)
     return `beats wait for your next turn: ${REWOUND}`
@@ -449,6 +454,10 @@ async function beat($: EngineInterface): Promise<string> {
     return `beats wait for your next turn: ${MODEL_CHANGED}`
   }
 
+  // as the beat starts: a turn may end, and its last request cache more, while the beat is on its way
+  const wasIdle = !busy
+  const wasCached = cached
+  const wasFirst = s.turns === 1
   beating = true
   // tagged, so a request log or a proxy tells a beat from the user's own messages, and the model too
   const forking = $.model.fork({ prompt: busy ? ASK_MID_TURN : ASK })
@@ -457,14 +466,20 @@ async function beat($: EngineInterface): Promise<string> {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
     if (!isTransient) return stop($, r.error === 'rate_limit' ? 'rate limited' : `API error (${r.error})`)
-    if (!busy && s.enabled) timer = $.clock.after(RETRY, () => void scheduledBeat($))
+    if (s.enabled && !stepping) {
+      timer = $.clock.after(RETRY, () => void scheduledBeat($))
+      s.nextAt = (await $.clock.now()) + RETRY
+    }
     return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
-  // read short of what the last request cached, and writing the rest: the request sent the conversation anew (as a
-  // session's second turn can) and cached it where a beat can't reach, so each beat would write it again. Within
-  // five minutes of that request the cache can't have lapsed, so even a beat writing more than it read is this
-  const isOutOfReach = !isNewModel && cached > 0 && got < cached && wrote > MISSED && (got >= wrote || since < 5 * MIN)
+  // after a conversation's first turn, a beat reading well short of what that turn cached, and writing the rest:
+  // Claude Code sent the conversation anew and cached it where a beat can't reach, so each beat would write it
+  // again. Within five minutes of that request the cache can't have lapsed, so even a beat writing more than it
+  // read is this. Mid-turn, or after later turns, a beat writes the message before its cache mark, which a long
+  // answer or tool call makes big: no sign of this
+  const isOutOfReach = wasIdle && wasFirst && !isNewModel && wasCached > 0 && got + MISSED < wasCached && wrote > MISSED
+    && (got >= wrote || since < 5 * MIN)
   if (isOutOfReach) {
     await pause($, OUT_OF_REACH, OUT_OF_REACH)
     return `beats wait for your next turn: ${OUT_OF_REACH}`
@@ -514,7 +529,8 @@ function beatNow($: EngineInterface) {
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
-  : ms === undefined ? 'starts after your next turn' : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
+  : ms === undefined ? (stepping ? 'counts from the end of the request on its way' : busy ? 'starts after this turn' : 'starts after your next turn')
+  : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
 
 /** Where this session's interval comes from: its own, this folder's, or the settings for all folders. */
 const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undefined ? 'folder' : 'all folders')
@@ -534,9 +550,9 @@ async function turnOn($: EngineInterface, change?: () => Promise<void>) {
   const before = idle()
   if (change) await change()
   s.enabled = true
-  if (busy) {
+  if (stepping) {
     save($)
-    return `on, ${every()}; starts after this turn`
+    return `on, ${every()}; ${when(undefined)}`
   }
   if (wasOn && idle() === before) {
     let ms: number | undefined
@@ -596,7 +612,8 @@ async function stateOf($: EngineInterface) {
   const now = await $.clock.now()
   const nextBeat = !s.enabled || s.small ? null
     : s.nextAt !== null ? `in ${fmt(s.nextAt - now)}`
-    : busy ? `${fmt(idle())} after this turn ends`
+    : stepping ? `${fmt(idle())} after the request on its way`
+    : busy ? 'after this turn'
     : 'after the next turn'
   const from = intervalFrom()
   const session = {
@@ -830,10 +847,13 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
-    if (!beating) {
+    // a fork's own turn, on an engine that raises one, carries the beat's line: a user's message sent while a beat
+    // is on its way is a turn all the same
+    if (!(beating && (e.text === ASK || e.text === ASK_MID_TURN))) {
       busy = true
       turnId = e.turnId
       stepping = true // its first request goes out next
+      s.asked = await $.clock.now()
       s.row = null // the line moves to this turn's row once it ends
       await schedule($)
     }
@@ -861,7 +881,6 @@ export const register: Register = on => {
         cached = got + wrote
         s.lastWarm = await $.clock.now()
         s.warmModel = await $.session.model()
-        s.tail = await tailOf($) // the conversation as this request left it: what a beat would re-send
         s.paused = null
       }
       await schedule($)
@@ -882,6 +901,7 @@ export const register: Register = on => {
         s.lastWarm = s.lastReal
         s.warmModel = await $.session.model()
         s.tail = await tailOf($)
+        s.turns++
         s.paused = null
       }
       await syncSettings($)

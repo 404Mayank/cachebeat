@@ -95,7 +95,7 @@ Beats fit your cache by themselves: every 50 minutes on a Claude subscription's 
 Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript. The beat's one line starts with `[cachebeat]` and says it isn't from you, so a request log or a proxy can tell beats from your own messages.
 
 - A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would.
-- Beats happen only while the session is idle, at most once per interval (50 minutes by default).
+- Beats happen only while the session is idle, or while a turn sits waiting on a long tool or a permission prompt, at most once per interval (50 minutes by default).
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
 - To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
 - `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself. The tools read or change only cachebeat's own state and settings. Claude calls them without a permission prompt, and each call that goes through shows as one line in the transcript.
