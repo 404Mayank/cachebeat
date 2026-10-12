@@ -45,3 +45,28 @@ Unit tests cover these, through `$.tool.call`:
 - the transcript rows
 
 Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over cross-session messages: one old session, and one started cold. Their reviews shaped `changed`, the null resets, `defaults`, and most of the description wording.
+
+## Folders (0.8.0)
+
+- **`set` takes `folder` beside `session` and `settings`,** with the same fields as `settings`.
+  - A value saves it as the folder's own.
+  - `null` for one setting drops it, so it follows all folders. In `settings`, `null` still means "back to the default".
+  - `folder: null` drops every one, the same as **Reset folder** and `/cachebeat local reset`.
+  - A folder's own settings always apply while it has any. There's no on or off for them.
+  - It goes through the same `accept()` as the menu, and a bad value refuses the whole call, as before.
+- **The description maps phrasing to a key:**
+  - "in this repo", "in this folder", "here" or "for this project": `folder`
+  - "default", "everywhere", "always" and the rest: `settings`
+  - no scope named: `session`
+  - unclear: ask
+
+  "Project" stays among the phrases because users say it, even though the menu says "folder".
+- **Claude names the folder by its path** when it changes `folder`, and the transcript line shows the path (`cachebeat · this folder (…/api): …`). A subfolder or another worktree has settings of its own, so "this repo" may not be the folder Claude is in.
+- **It tells Claude that a `settings` change doesn't reach a setting the folder has its own of,** and to say so.
+- **Saving an interval in `settings` or `folder` drops this session's own,** as the menu and the commands do. The exception is when the same call sets `intervalMinutes`. Before, the tool kept the session's interval while the menu dropped it, and the code review flagged the mismatch.
+- **`state.settings` is what applies here.**
+  - `folder` is `{ path, own }`.
+  - `allFolders` appears only while the folder has settings of its own. Otherwise it would repeat `settings`.
+- **`intervalFrom` is `session`, `folder`, `all folders` or `auto`.** `default` became `all folders`, and `auto` means all folders' auto. A folder set to auto says `folder`, since where the value comes from matters more there.
+- **`changed` lists `folder.<key>` for each one set or dropped.** The answer's `folder` holds those, with `null` for a drop.
+- **The transcript line** prefixes every saved change with its scope: `cachebeat · this session on, every 20m · all folders: Beat after idle 30m · this folder (…/api): New sessions start on`.

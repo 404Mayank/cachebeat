@@ -18,16 +18,14 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 ### Day to day
 
-- **Plugin changes** (code, tests, README, manifest) are made on `main`, or on a short branch fast-forwarded into it.
-- **Notes, and changes to the demo or logo scripts,** are made on `dev`.
-- **After `main` moves,** bring `dev` up to date: `git switch dev && git merge main`. The scripts were added on `dev` after `main` dropped them, so the merge leaves them alone.
+- **Everything is built on `dev`:** plugin changes (code, tests, README, manifest), notes, and the demo and logo scripts. Commit plugin files and notes separately, so each commit is one or the other.
+- **Plugin files reach `main` only through a release branch and a PR** (see "Releasing, step by step"). The release branch takes just the plugin's files from `dev`, never the merge.
+- **The plugin's files** are what `main` holds: `.claude-plugin/`, `hooks/`, `types/`, `README.md`, `LICENSE`, `.github/`, and the shipped images (`assets/demo.gif`, `assets/logo/*.svg`/`.png`). Everything else on `dev` stays there.
+- **After `main` moves,** bring `dev` up to date: `git switch dev && git merge main`. The release commit holds the same files `dev` already has, so the merge is clean. The scripts were added on `dev` after `main` dropped them, so the merge leaves them alone.
 - **Keep a file on one branch or the same on both, never in two versions.** A file that differs between the branches (as `assets/logo/README.md` once did) conflicts on every merge that touches it.
 - **A dev-only file that `main` deleted** is now only on `dev`. Merges leave it alone, because `main`'s deletion is already merged in.
-- **Never merge `dev` into `main`.** That would ship the scripts and these notes. If something done on `dev` belongs in the plugin, such as a new `demo.gif` or regenerated logo files, cherry-pick it or check out just those files onto `main`:
-
-  ```sh
-  git switch main && git checkout dev -- assets/demo.gif
-  ```
+- **Never merge `dev` into `main`.** That would ship the scripts and these notes.
+- **`claude plugin validate --strict .` fails on `dev`,** for `CLAUDE.md` at the plugin root ("not loaded as project context"). That's expected: run the strict validation on the release branch, which has no `CLAUDE.md`. `plugin test` and `tsc` run fine on `dev`.
 
 ### When to ship
 
@@ -40,8 +38,17 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 ### Releasing, step by step
 
-1. On `main`, make the change and bump `version` in `.claude-plugin/plugin.json`.
-2. Check it:
+1. On `dev`, bump `version` in `.claude-plugin/plugin.json`, and check `plugin test` and `tsc` pass.
+2. Cut the release branch off `main`, and take the plugin's files from `dev`:
+
+   ```sh
+   git switch -c v<version> main
+   git checkout dev -- .claude-plugin hooks types README.md LICENSE .github
+   git diff --name-only --cached main   # plugin files only: no notes/, CLAUDE.md, demo or logo sources
+   ```
+
+   Add any shipped image that changed (`assets/demo.gif`, `assets/logo/*.svg`/`.png`) the same way.
+3. Check it on the branch:
 
    ```sh
    claude plugin test .
@@ -49,9 +56,11 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
    claude plugin validate --strict .
    ```
 
-3. Commit with the version first in the message (`cachebeat 0.6.1: …`), then `git push origin main`.
-4. CI tags `v<version>` and creates the GitHub release with generated notes.
-5. Bring `dev` up to date (`git merge main`) and push it.
+4. Commit with the version first in the message (`cachebeat 0.8.0: …`), push the branch, and open a PR into `main`. CI runs on it, on 2.1.287 and the latest version, without releasing.
+5. Validate the branch in the directory portal (`404Mayank/cachebeat@v<version>` in the Repository field) before it reaches `main`.
+6. Once CI and the portal pass, fast-forward `main` to the branch (`git switch main && git merge --ff-only v<version> && git push origin main`). GitHub marks the PR merged.
+7. CI tags `v<version>` and creates the GitHub release with generated notes. Put a short summary and any changed defaults or removed settings on top with `gh release edit`.
+8. Bring `dev` up to date (`git switch dev && git merge main`), push it, and delete the local release branch.
 
 ### Changing a default, or a setting's name
 
@@ -93,6 +102,6 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 | [mods-gotchas.md](mods-gotchas.md) | Things about mods, the engine and the test kit that took time to find out |
 | [directory.md](directory.md) | Submitting to Anthropic's plugin directory: what its validation flagged, and what was done |
 | [directory-report-0.7.0.md](directory-report-0.7.0.md) | The full reading of the directory's 0.7.0 validation: each finding, the lines behind it, and how to fix it |
-| [plan-0.8.0.md](plan-0.8.0.md) | The plan for 0.8.0: settings by scope (this session, this project, all projects), and how the menu shows it |
+| [plan-0.8.0.md](plan-0.8.0.md) | 0.8.0: where settings apply (this session, this folder, all folders), as built, and the design it replaced |
 
 Add to them whenever something takes a while to work out.

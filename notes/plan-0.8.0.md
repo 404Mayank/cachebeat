@@ -1,210 +1,81 @@
-# Plan: 0.8.0, where settings apply
+# 0.8.0: where settings apply
 
-Status: a proposal, not started. The questions it raised are decided, under "Decisions" at the end. 0.8.0 gets built in a local session, where the menu can be seen in a terminal and the desktop app. A cloud session can run the tests, but nobody can look at the menu there.
+Status: built on `dev`, with the tests passing on 2.1.287 and the latest version. Still to do: look at it live in the terminal and the desktop app, check `--resume`, and release.
 
 ## The problem
 
-It's hard to tell where a setting applies: this session, this project or everywhere. It's also hard to tell whether you choose that or it's fixed. 0.8.0 should show the scope of each setting, and let people choose the scope where it matters, without making the menu harder to read.
+It was hard to tell where a setting applies (this session or every session), and whether you could choose. 0.7 said the scope once per tab, in a dim line. It had five names for two scopes ("this session", "global", "the default", "every session", "new sessions"). One setting, **/cachebeat 30 changes**, changed what a command meant. There was also no way to have cachebeat on in one repo and off everywhere else.
 
-## How it works today (0.7.0)
-
-### The scopes
-
-| Scope | Kept in | What's in it | How long it lasts | How it's set |
-| --- | --- | --- | --- | --- |
-| This session | `$.state` (the `saved` atom) | on or off, and an interval of its own if one was given | Until the session ends. Reloads and `/clear` keep it. A new session starts from **New sessions start**. | `/cachebeat on`, `off` or `<minutes>`; the menu's **This session** row (on or off only); Claude's `set` with `session` |
-| Every session | `$.store`, key `settings`: a JSON file of cachebeat's under the Claude Code config folder | all 29 settings, `defaultOn` and `interval` among them | Until changed. Other open sessions pick a change up at their next turn. | The menu; `/cachebeat global on` or `off`; `/cachebeat <minutes>` when **/cachebeat 30 changes** is "the default"; Claude's `set` with `settings` |
-| A project | nothing | | | |
-
-`auto` adds an input the user doesn't set in cachebeat at all. It beats by the cache's lifetime, which comes from the `promptCacheTtl` setting, three environment variables, and whether the account is a subscription within its usage.
-
-### How the scope is shown
-
-- **The menu:** one dim line under the tab bar.
-  - On Beating: "This session is this session alone; every other setting applies to every session."
-  - On the other tabs: "These apply to every session."
-  - A session's own interval shows only as a tail on **Beat after idle** (`· this session 30m`), and the menu can't clear it.
-- **Commands:**
-  - `on` and `off` change this session.
-  - `global on` and `off` change new sessions, and this session too.
-  - `<minutes>` changes this session or the default, depending on a setting.
-- **README:** "Settings are saved once and apply to every session", and "Everything in the menu applies to every session, except **This session**".
-- **`/cachebeat`:** prints `on, every 30m idle · …` without saying where the 30 comes from. Claude's `state` does say (`intervalFrom`).
-
-### What's hard to grasp
-
-1. **The scope is said once per tab,** in a dim line, never at the setting itself.
-2. **Five names cover two scopes:** "this session", "global", "the default", "every session" and "new sessions".
-3. **`/cachebeat 30 changes` is a setting that changes what a command means.** You choose the scope somewhere else, and nothing shows it when you type the command.
-4. **A session's own interval is easy to miss and hard to undo.** It shows only as a tail. Only Claude (`intervalMinutes: null`) or a new session clears it.
-5. **There's no per-project choice.** To have it on in one repo and off everywhere else, you type `/cachebeat on` in every session there.
-6. **Nothing says which value wins** when a session and the default disagree.
-7. **The same setting behaves differently by route.** `/cachebeat global on` also turns this session on. The menu's **New sessions start** doesn't: "Open sessions keep what they have".
-
-## Goals
-
-- Every place that shows or changes a setting names its scope, in the same words.
-- The user picks the scope at the moment of the change, not through a setting somewhere else.
-- Add a project scope only where it's useful.
-- The menu stays one list per tab, with a few more rows and no grid.
-
-**Not goals:**
-
-- Per-project looks, alerts or limits. These are taste, the same everywhere.
-- Team-wide settings in a project's `.claude/settings.json`. Beats spend each person's own usage, and a mod can only read settings files anyway.
-
-## The model
+## The design
 
 ### Three scopes, one set of words
 
-| Scope | Lasts | Kept in |
+| Scope | Holds | Kept in |
 | --- | --- | --- |
-| **This session** | Until the session ends; reloads and `/clear` keep it | `$.state`, as now |
-| **This project** | Until changed | `$.store`, key `projects`, under the project's root folder (`$.session.root()`) |
-| **All projects** | Until changed | `$.store`, key `settings`, as now |
+| **This session** | on or off, and an interval of its own | `$.state` (`saved`), as before |
+| **This folder** | any setting it sets for itself | `$.store`, key `folders`: `{ [root]: Partial<BeatSettings> }` |
+| **All folders** | every setting | `$.store`, key `settings`, as before |
 
-The menu, command answers, README and tool descriptions all use these three names. The command word `global` stays, since it has already shipped, but answers say "all projects".
+The nearest scope wins: this session, then this folder, then all folders. A folder's own settings always apply while it has any. There's no on or off for them, so nothing sits turned off out of sight.
 
-### Which settings have which scopes
+The menu, the command answers, the README and the tool text all use these three names. The command words are `local` and `global`; `global` shipped before 0.8.0.
 
-| Setting | This session | This project | All projects |
-| --- | --- | --- | --- |
-| Beating (on or off) | yes: the live switch | | |
-| New sessions start | | yes | yes |
-| Beat after idle | yes | yes | yes |
-| Everything else: After /model, limits, looks, alerts | | | yes |
+### The menu: one switch for where changes save
 
-Only these two settings get more than one scope, because they're the ones that depend on the work. A long-running repo and a scratch session want different things, and so does a project on an API key's five-minute cache. If people later ask for another (say **Stop at usage** per project), the same mechanism takes more keys.
+**Settings for** reads `all folders` (dimmed, the usual case) or `this folder · …/code/api`. It only chooses where the menu saves. On Beating it sits under **This session**, which it doesn't govern. On the other tabs it's the first line.
 
-### Which value wins
+- **`this folder`:** changes save to the folder's own, and those rows are marked `· this folder`. The rest follow all folders, so a later change there reaches the folder too. `r` on a marked row drops it. **Reset all** becomes **Reset folder**, which drops every one.
+- **`all folders`:** the menu shows and saves the settings for all folders. A row this folder has its own of shows `· here: on`. A folder with its own settings never has to turn them off to edit the all-folders ones.
+- **Which side it opens on:** the menu opens on `this folder` when the folder has settings of its own, and on `all folders` otherwise. So someone who never uses folders sees the 0.7 menu plus one dim line.
 
-The nearest scope with a value wins: this session, then this project, then all projects.
+**This session** keeps its row on Beating. A session's own interval (`/cachebeat 30`) shows on **Beat after idle** as `30m · this session`, and `r` drops it.
 
-A session or project row with no value of its own shows what it follows and what that comes to: `as this project · 45m`, `as all projects · off`. That tells people which value wins without a line of explanation.
+**Saving an interval drops this session's own,** so this session beats at the new one. That holds by every route: the menu, `global` or `local <minutes>`, and Claude's `set` with `settings.interval` or `folder.interval`, unless the same call also sets `intervalMinutes`. The code review found the routes disagreeing, which is the problem 0.8.0 set out to fix.
 
-## The menu
+### Commands
 
-The Beating tab groups its rows under the three scopes. The project's folder goes in its heading:
+- **`on`, `off` and `<minutes>`** change this session alone.
+- **`global` and `local` with `on`, `off` or `<minutes>`** save to all folders or this folder, and also apply here.
+- **`local reset`** drops the folder's own settings, the same as **Reset folder** and Claude's `folder: null`.
+- **Answers:**
+  - They're short, start with their scope, and end with this session's state: `all folders: every 30m idle · this folder keeps 45m · this session: on, every 45m idle`.
+  - A bare `global` or `local` lists the scope's values and only its own usage.
+  - The status line names an interval that isn't all folders': `on, every 45m idle (this folder's) · 3 beats · …`.
 
-```
- Beating   Limits   Prompt heart   Turn line   Alerts
-───────────────────────────────────────────────────────
-This session
-  Beating               on
-  Beat after idle       as this project · 45m ›
-This project  ~/code/api
-  New sessions start    as all projects · off ›
-  Beat after idle       45m ›
-All projects
-  New sessions start    off
-  Beat after idle       auto · 50m now ›
-  After /model          wait for your next turn ›
-───────────────────────────────────────────────────────
-[ Beat now ]  [ Reset all ]
-This session only. Set here, it wins over this project and all projects.
-↑↓ move · enter changes · 1-5 tabs · esc back to the tabs
-```
+### Folders
 
-- **Headings** are plain text and take no focus. The arrows walk the rows as they do now.
-- **A session or project row's list** offers `as this project` or `as all projects` first, then the same choices as the all-projects row, custom value included.
-- **The help line** names the scope and what it wins over.
-- **`r`** puts a session or project row back to `as …`, and an all-projects row back to its default, as now. **Reset all** resets the all-projects settings, as now. A project's own values clear row by row with `r`.
-- **`/cachebeat 30 changes` goes away.**
-- **The row count** goes from 5 rows on Beating to 7, plus three headings.
-- **The other tabs'** line under the tab bar becomes "These apply to all projects."
-- **The desktop app** draws headings as text, with nothing new to focus.
+- **The folder is `$.session.root()`:** where the session started, or where `/cd` or a worktree move took it. `load()` reads it again with the store at each sync: every turn, on opening the menu, on each tool call, and with each change.
+- **When the interval that applies changes in a sync,** because of a move or another session, `syncSettings` reschedules, so the armed beat doesn't keep the old one.
+- **Keys are absolute paths,** so a subfolder or another worktree is a folder of its own. Claude's tool text says to name the folder by its path for that reason, and the transcript line shows the path.
+- **The path is cut to 30 cells** in the menu and in answers alike (`cut()` in `pane.tsx`). It keeps whole folders and uses the path's own separator, so Windows paths work too.
+- **It isn't shown with `~`,** because that would mean reading `HOME`, and the directory scrutinizes env reads (0.7.0's credential hold).
 
-**Alternatives considered:**
+### Store and migration
 
-- **A scope switcher at the top of the tab,** like VS Code's User and Workspace tabs. It needs fewer rows, but it hides the scopes you're not looking at, which is the problem being solved.
-- **One row per setting, with the scope chosen in its list.** It's compact, but every change takes a list inside a list, and the overview of what applies where is gone.
-
-## Commands
-
-| Command | Scope |
-| --- | --- |
-| `/cachebeat on` / `off` | This session |
-| `/cachebeat <minutes>` | This session's interval, always |
-| `/cachebeat project on` / `off` / `<minutes>` | This project, and this session too |
-| `/cachebeat project clear` | This project back to all projects |
-| `/cachebeat global on` / `off` / `<minutes>` | All projects, and this session too |
-
-Each answer names the scope. For example:
-
-- `this session: on, every 30m idle`
-- `this project (~/code/api): new sessions start on · this session: on, every 45m idle`
-
-The project and global forms change this session too, as `global on` does today. A command is a one-off, so it does both and says so. The menu keeps them apart because its live switch is right there.
-
-`/cachebeat` says where the interval comes from: `on · every 45m idle, from this project · 3 beats · next beat in 12m`.
-
-## Claude's tools
-
-- **`set`** takes `project: { defaultOn?, interval? }` beside `session` and `settings`, with `null` clearing a value. Its description maps what people say to a scope:
-  - no scope: this session
-  - "in this repo", "for this project": `project`
-  - "always", "everywhere", "by default": `settings`
-  - unclear: ask
-- **`state`** adds `project: { root, defaultOn, interval }`, with the project's own values only. `session.intervalFrom` becomes `session`, `project`, `all projects` or `auto`.
-- **[claude-tools.md](claude-tools.md)** records the change and the reasons for it.
-
-## README
-
-Replace "Settings are saved once and apply to every session" and "Everything in the menu applies to every session, except This session" with a short section, "Where settings apply":
-
-- the three scopes, each with what can be set there, how long it lasts, and how to set it
-- one sentence on which value wins
-
-The Commands table gains the project rows. The Beating table loses `/cachebeat 30 changes`.
-
-## Store, defaults and migration
-
-- **`settings`** keeps its shape, minus `intervalScope`.
-- **`projects`** is new: `{ [root]: { defaultOn?, interval? } }`. It holds only what's set, and an entry with nothing left in it is deleted.
-- **When a session starts,** `s.enabled = project.defaultOn ?? cfg.defaultOn`.
-- **The interval** is `s.idle ?? project.interval ?? cfg.interval`, with `auto` read off the cache lifetime as now.
-- **A project change made in another session** reaches open sessions at their next turn, like settings do now: `syncSettings` reads `projects` too.
-- **`normalize()` drops `intervalScope`.** Anyone who set it to "the default" finds that `/cachebeat 30` now changes this session only. The release notes say so and point to `/cachebeat global 30`.
+- **`normalizeOwn()`** keeps each value the menu would take, through `accept()`, and drops the rest.
+- **A folder left with no settings of its own** is deleted.
+- **A write reads the store fresh first,** so another session's entries survive.
+- **One `changeSettings()`** applies a whole change: some settings for all folders, and some of the folder's own set or dropped. It does one load, one save per key, and one reschedule.
+- **`intervalScope` is gone.** `normalize()` drops unknown keys, so an old store loses it by itself. Anyone who had it set to "the default" now finds that `/cachebeat 30` changes this session only. The release notes say so and point to `/cachebeat global 30`.
 - **Anyone who never touched a setting** sees no change in behavior.
 
-## Edge cases
+## Alternatives considered
 
-- **The project is `$.session.root()`:** where the session started, or where `/cd` or a worktree move took it. After a move, the session re-reads the project's values at its next turn, and its own on or off stays as it is.
-- **Projects are keyed by absolute path,** so each worktree or folder is its own project. The heading shows the path, with `~` for the home folder.
-- **A session started in the home folder** has the home folder as its project. The heading makes that visible.
-- **Removed folders** leave small entries in the store. They're harmless. A list of projects with their own settings could come later.
-- **Resume:** check whether `$.state` survives `--resume` and `--continue`. If it doesn't, a resumed session starts from its project's or all projects' default, like a new one. The README should say which.
+- **The first plan: "project" scopes under three headings.** The Beating tab had This session / This project / All projects headings, with session and project rows always shown as `as this project · 45m`. Only **New sessions start** and **Beat after idle** had a project scope.
+  - Dropped because "project" read as confusing, and every user would have seen the scope machinery, even those who never use it.
+  - The full text is in git history (`c75aff1`).
+- **Scope chips inside a setting's list.** The scope was picked at the top of the list (`This session · This project · All projects`). It's compact, but it's one more concept inside every picker.
+- **Plain-language exceptions only** ("on in this project only"). It's the least visible, but it covers only on and off; an interval can't be put that way.
+- **A "This folder only" toggle that also turned the folder's settings on or off** (the first build).
+  - Dropped after a UX review. The one control did two jobs: it chose where edits go and whether the folder's settings applied.
+  - To edit an all-folders setting from a folder with its own settings, you had to turn those settings off and back on.
+  - Settings that were off came back silently, and "off", "Reset folder" and "local clear" each ended differently.
+  - Its label, "This folder only", read as a Beating setting.
 
-## The directory
+The switch won because it's one control that only picks where changes save, the menu stays a single list, and nothing about scope appears until someone uses it.
 
-- Write each new `$` call plainly, as a statement of its own, for example `const root = await $.session.root()`. No casts or `??` around calls. See [directory-report-0.7.0.md](directory-report-0.7.0.md).
-- `$.session.root()` reads a path. It reads no environment variable.
+## Still open
 
-## Tests
-
-- which value wins, session over project over all projects, for the interval and for starting on
-- projects keyed by root, with `session.root` stubbed to two folders
-- a root change mid-session
-- `project on`, `off`, `<minutes>` and `clear`, `global <minutes>`, and answers that name the scope
-- migration from a store with `intervalScope`
-- the menu: headings, `as …` values, `r` clearing a session or project row, the `as …` first choice in a list
-- the tools: `set.project`, `state.project`, the new `intervalFrom` values
-
-## Releases
-
-1. **0.7.1:** the directory fixes in [directory-report-0.7.0.md](directory-report-0.7.0.md). They're small, they don't change behavior, and they unblock the submission without waiting for this work.
-2. **0.8.0:** this plan, in this order:
-   1. the model and store
-   2. commands
-   3. the menu
-   4. tools
-   5. README
-   6. tests throughout
-
-## Decisions
-
-1. **Names. Decided:** the widest scope is "all projects" in the menu, answers, README and tools. `global` stays the command word, since it has already shipped.
-2. **More settings with a project scope. Decided: no.** Only **New sessions start** and **Beat after idle** get one, for now. **After /model**, **Stop at usage**, **Skip small chats** and the rest stay all projects until someone asks. The store's `projects` entry can take more keys later without a redesign.
-3. **`/cachebeat project on` turns this session on too. Decided: yes,** as `global on` does, and the answer says it did both.
-4. **Saying why a session started on. Decided: no log line.** A session that starts on because of its project doesn't log it: `/cachebeat` says where it comes from, and the transcript stays quiet.
-5. **0.7.1 ships on its own first. Decided: yes.** It's built and shipped from a cloud session, since it changes nothing on screen and the tests cover it. 0.8.0 is built in a local session.
+- **`--resume` and `--continue`:** does `$.state` (`saved`) survive them? If it doesn't, a resumed session starts from its folder's or all folders' **New sessions start**, like a new one. Check it live and say which in the README.
+- **Desktop app:** check that the Settings for line, dimmed and not, and the markers draw, and that Tab reaches the switch.
+- **Removed folders** leave small entries in the store. They're harmless; a list of folders with their own settings could come later.

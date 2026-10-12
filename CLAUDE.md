@@ -4,7 +4,7 @@ A Claude Code mod that keeps the prompt cache warm while a session sits idle. Th
 
 ## Branches
 
-- **Where each change goes,** and how releases ship: `notes/README.md`, "Branches and releases".
+- **Build on `dev`,** plugin changes included. Ship to `main` only the plugin's files, through a release branch cut off `main` and a PR: `notes/README.md`, "Branches and releases".
 - **Never merge `dev` into `main`.** Merge `main` into `dev`.
 
 ## What goes in user-facing docs
@@ -23,7 +23,7 @@ A Claude Code mod that keeps the prompt cache warm while a session sits idle. Th
 ```sh
 claude plugin test .
 npx -p typescript tsc -p .
-claude plugin validate --strict .
+claude plugin validate --strict .   # on the release branch: on dev it flags this CLAUDE.md
 ```
 
 `notes/contributing.md` maps the files.

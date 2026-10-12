@@ -95,6 +95,8 @@ Things about mods, the engine and the test kit that took time to work out. These
 
 ## The test kit (`claude plugin test`)
 
+- **`$.session.root()` has no implementation in the test kit.** Every hook that reaches it is skipped ("no implementation for session.root") until a test stubs it: `on('session.root', () => ({ value: root }) as never)`. `setup()` does this with a root a test can move (`moveTo`). 0.8.0 checked that 2.1.287 implements it: its binary's op table has a `session.root` runner, and the suite passes on 2.1.287.
+
 - **Register a test's own hooks before the first `$` call.** `setup()` starts the session, so a test hook goes above `await setup($, on)`. Otherwise it throws "after the test first called $".
 - **`$.tool.register` needs a stub beneath it** (`on('tool.register', …)` in `setup`). Nothing answers it otherwise.
 - **A `classic.PreToolUse` deny reaches the test's `$.tool.call` as an errored result** (`isError: true`, the reason as `text`), not as `{ deny }`. `{ deny }` is what a plugin's own `$.tool.call` gets.
