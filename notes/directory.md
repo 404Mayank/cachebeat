@@ -39,6 +39,16 @@ The report again named a ref and paths that don't exist (`main 15e2b3b` for `15a
 
 The summary ticked 5 of 7 checks. The unticked two were "MCP servers and directory match" and "Name and publisher checks". No finding named a name or publisher problem, and the report listed only one block and one hold.
 
+## The 0.9.1 validation
+
+| Finding | Result | What it is | Status |
+| --- | --- | --- | --- |
+| `MOD_CAPABILITY_USE_NOT_PLAIN` (3) | Blocks | Same code as 0.7.0, but a different check under it. The heading repeats the general `$`/`on` rule; the text under it is the real one: a `.tsx` file may use `h` or `Fragment` only as JSX compiles them. `hashOf` (new in 0.9.0) kept its FNV-1a running hash in `let h`, and lines 404–406 were its declaration, its assignment and its read. It was local and shadowed no element, but the check doesn't look at scope. This time the line numbers were exact. | 0.9.2 renamed it `hash`. |
+| Uses a credential from the user's machine | Hold | Shown at `.claude-plugin/plugin.json`. Not traced this time; 0.7.0's hold of this kind was the test file's environment stub. | A reviewer confirms it. |
+| Validation didn't finish on this commit | Warning | | |
+| Unknown `plugin.json` fields (5), `icon` from another tool's manifest | Warning | | Kept, as before. |
+| Answers a tool call (line 846), uses hooks | Warning | Our two tools | The README covers it, as before. |
+
 ## Listing fields
 
 The submission form's listing step asks for a privacy policy and terms of service. Both are optional, and both are `plugin.json` fields that the directory reads and Claude Code ignores. `claude plugin validate --strict` accepts both on 2.1.287 and later, so CI passes.
