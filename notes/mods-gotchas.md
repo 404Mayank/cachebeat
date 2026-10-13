@@ -85,6 +85,17 @@ Things about mods, the engine and the test kit that took time to work out. These
   - **Why no fix:** the beat's request went out 18ms *before* the tool ended. So "skip if every tool has answered" wouldn't have caught it, and a fork can't be cancelled (`ModelForkRequest` takes only `prompt`).
   - **How rare:** the window is the fork's 1–2s at each interval mark, about 0.07% of quiet stretches at 50m.
 - **The turn line's read is capped at what the last request cached.** A fork that tries a tool asks twice, and its usage sums both reads: "91k cached" for a 46k conversation. `s.lastRead` is now `min(got, cached)`.
+- **A second code review (`/code-review high` on PR #10) found five more bugs, all fixed and covered by tests that fail without the fix:**
+  - **A small chat mid-turn looped:** a 0ms re-arm.
+  - **A retry left an orphan timer** when a turn's request had re-armed in the meantime.
+  - **"Not served" fired on mid-turn beats** that wrote a big tool result.
+  - **Messages added between turns read as /rewind.** `isRewound()` now checks the conversation shrank, or the old ending changed at its old place.
+  - **Settings changed mid-turn left the turn's beat on the old interval.**
+- **Not changed:**
+  - **"The `--resume` line may be drawn over":** disproved live, the line showed at startup.
+  - **"Enabling the plugin mid-conversation reads as a resume":** true, and harmless: one pause until the next message, with the wrong reason.
+  - **"The rewind check fetches the whole conversation":** `$.session.messages()` has no limit to ask for.
+  - **No test for the retry fix:** the kit can't run a fork and a turn's request together.
 - **Idle beats need the same care as mid-turn ones.**
   - **The waste:** after a session's plain-text first turn, an idle beat read 31,772 and wrote 10,661, and the second turn didn't use it. A second idle beat 345s later wrote the same 10,659 again: a fork's own writes seem to last 5 minutes.
   - **The rule since 0.9.0:** a beat that reads less than the last request cached (`cached`), and writes more than `MISSED` (1,000 tokens, far above a beat's own line), makes beats wait for the next turn ("Claude Code cached this conversation anew, out of a beat's reach").
