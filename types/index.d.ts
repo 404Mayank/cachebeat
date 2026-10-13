@@ -7,6 +7,7 @@ export type Saved = {
   lastReal: number | null
   lastWarm: number | null
   lastRead: number | null // tokens the last beat read from the cache
+  lastWrote: number | null // tokens the last beat wrote to the cache: what wasn't cached
   nextAt: number | null
   beats: number // in this session
   row: string | null // the latest turn's closing row, which carries the status line

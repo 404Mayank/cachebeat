@@ -86,7 +86,7 @@ export const STATE: ToolSpec = {
       "`cacheTtl` is how long this session's cache lives, `1h` or `5m`, worked out on each call from Claude Code's cache settings and whether a subscription is within its usage; an auto interval beats within it (50 or 4 minutes).",
       '`skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum).',
       "`paused`, when set, says why beats wait for the user's next turn (a model switch, a compaction); only that turn ends it, not `set`.",
-      '`lastBeatReadTokens` is how much the last beat read from the cache. `defaults` has the default of each setting that differs from it.',
+      'A beat re-sends the conversation as this session last sent it, with one short line tagged `[cachebeat]` asking for a one-character reply, which is thrown away. It reads the cached conversation (`lastBeatReadTokens`, the last beat\'s) and writes only what wasn\'t cached (`lastBeatWrittenTokens`), usually a few tokens; both are null before the first beat. `defaults` has the default of each setting that differs from it.',
     ].join(' '),
   ].join('\n\n'),
   inputSchema: object({}),
