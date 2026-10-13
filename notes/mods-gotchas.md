@@ -75,7 +75,7 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **Left as is:**
   - **A real 5-minute expiry after a first turn can read as "out of reach".** That happens when the chat is no bigger than the shared system prompt, and it pauses rather than switching `auto` to 4m beats. The cost is no worse than before; 0.8.1 called it "renewed".
   - **`turn.complete` keeps `!beating || (busy && e.turnId === turnId)`.** The stricter `busy ? e.turnId === turnId : !beating` broke tests whose turn ids differ between start and end. Real turns match.
-  - **Not covered by a test:** a turn ending while a mid-turn beat is in flight, because the test kit runs dispatches one at a time.
+  - **A turn ending while a mid-turn beat is in flight is tested now** (see below), though an earlier note said the kit couldn't do it.
 - **A turn ending while a mid-turn beat is on its way: handled** (`compuse`, live, `--debug`).
   - **The setup:** beats every 1m and a 60s job (`scratchpad/rwprobe/work/primesfor.py 60`), so the beat fired right as the tool ended. 4 tries overlapped: the fork finished 0.34–0.36s after `turn.complete`.
   - **The outcome:** `turn.complete` was taken as the turn's end every time, by its `turnId`. `/cachebeat` said "next beat in 1m", and the next idle beat landed 60s later in the one try that waited for it.
@@ -95,7 +95,12 @@ Things about mods, the engine and the test kit that took time to work out. These
   - **"The `--resume` line may be drawn over":** disproved live, the line showed at startup.
   - **"Enabling the plugin mid-conversation reads as a resume":** true, and harmless: one pause until the next message, with the wrong reason.
   - **"The rewind check fetches the whole conversation":** `$.session.messages()` has no limit to ask for.
-  - **No test for the retry fix:** the kit can't run a fork and a turn's request together.
+  - **The retry fix is tested now:** the kit *can* run a turn's events while a fork is on its way (see below).
+- **An independent check of the fixes (a subagent mutation-testing each one) found 15 fixes no test caught.** Its tests are in the suite now (141 tests).
+  - **The trick for "a beat in flight while X happens":** `World.during(n)` runs while beat n's fork stub is awaited, and can call `$.turn.start`, `step`, `$.turn.complete` or `$.session.end`. Make the `model.fork` stub `async`. It works on 2.1.287 too.
+  - **It found one bug,** past the 4,096 messages `$.session.messages()` lists: the old ending isn't at its index any more. `isRewound()` gives up there. The stub lists the newest 4,096, as the engine does.
+  - **The first-turn count restarts on compaction** (`s.turns = 0`): the compacted conversation's next turn sends it anew.
+  - **Still inferred:** a hot reload mid-turn loses `busy`, `stepping`, `turnId`, `cached` and `resent`, which aren't saved. That's dev-only, and the kit keeps module state across a reload, so it can't show it.
 - **Idle beats need the same care as mid-turn ones.**
   - **The waste:** after a session's plain-text first turn, an idle beat read 31,772 and wrote 10,661, and the second turn didn't use it. A second idle beat 345s later wrote the same 10,659 again: a fork's own writes seem to last 5 minutes.
   - **The rule since 0.9.0:** a beat that reads less than the last request cached (`cached`), and writes more than `MISSED` (1,000 tokens, far above a beat's own line), makes beats wait for the next turn ("Claude Code cached this conversation anew, out of a beat's reach").
