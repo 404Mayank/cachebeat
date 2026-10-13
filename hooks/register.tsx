@@ -170,7 +170,7 @@ async function changeSettings($: EngineInterface, change: Change) {
   await publish($)
   restartClocks($)
   save($)
-  if (s.enabled && !busy && !beating) await schedule($)
+  if (s.enabled && !stepping && !beating) await schedule($)
   else await refreshLine($)
 }
 
@@ -190,7 +190,7 @@ async function syncSettings($: EngineInterface) {
   if (JSON.stringify([global, root, own]) === before && drawn === JSON.stringify([cfg, { root, own }])) return
   await publish($)
   restartClocks($)
-  if (idle() !== was && s.enabled && !busy && !beating) await schedule($)
+  if (idle() !== was && s.enabled && !stepping && !beating) await schedule($)
 }
 
 /** The animation clocks restart at the settings' speed, or stay stopped, as the next drawing finds them. */
@@ -340,7 +340,7 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   else if (resent) p = 'hidden' // a beat would write the conversation again: the turn's next request or its end counts
   // a conversation's first turn: its next request may send it anew, and a beat would write what that won't read
   else if (busy && s.turns === 0) p = 'hidden'
-  else if (!busy && await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
+  else if (await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
@@ -394,10 +394,31 @@ const MISSED = 1000
  */
 async function tailOf($: EngineInterface) {
   const messages = await $.session.messages()
-  const last = messages.slice(-3).map(m => `${m.role}\u0000${m.text}\u0000${m.toolUses.length}`).join('\u0001')
+  return `${messages.length}:${hashOf(messages.slice(-3))}`
+}
+
+type Said = { role: string; text: string; toolUses: readonly unknown[] }
+
+const hashOf = (messages: readonly Said[]) => {
+  const said = messages.map(m => `${m.role}\u0000${m.text}\u0000${m.toolUses.length}`).join('\u0001')
   let h = 0x811c9dc5 // FNV-1a
-  for (let i = 0; i < last.length; i++) h = Math.imul(h ^ last.charCodeAt(i), 0x01000193)
-  return `${messages.length}:${(h >>> 0).toString(36)}`
+  for (let i = 0; i < said.length; i++) h = Math.imul(h ^ said.charCodeAt(i), 0x01000193)
+  return (h >>> 0).toString(36)
+}
+
+/** The newest messages `$.session.messages()` lists: past them, an ending can't be found by its place. */
+const LISTED = 4096
+
+/**
+ * Whether the conversation no longer holds the ending `tail` recorded: shorter now, or its messages there changed.
+ * Messages added since (a `! command`'s output, a notice) leave that ending where it was.
+ */
+async function isRewound($: EngineInterface, tail: string) {
+  const [count, hash] = tail.split(':')
+  const n = Number(count)
+  if (n >= LISTED) return false
+  const messages = await $.session.messages()
+  return messages.length < n || hashOf(messages.slice(Math.max(0, n - 3), n)) !== hash
 }
 const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have settled
 
@@ -429,6 +450,7 @@ async function beat($: EngineInterface): Promise<string> {
   if (stepping) return 'a request is on its way; the beat waits for it'
   const now = await $.clock.now()
   const since = now - (s.lastWarm ?? now)
+  const warmedAt = s.lastWarm
   // from the user's last message: a turn's start, or its end for one begun before cachebeat saw it
   const lastWord = Math.max(s.lastReal ?? now, s.asked ?? -Infinity)
   if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last message`)
@@ -445,8 +467,7 @@ async function beat($: EngineInterface): Promise<string> {
   }
   // no event marks /rewind, which runs between turns: the conversation's ending tells it. Mid-turn the ending
   // grows by itself, as each tool's result lands
-  const tail = busy ? s.tail : await tailOf($)
-  if (s.tail !== null && tail !== s.tail) {
+  if (!busy && s.tail !== null && await isRewound($, s.tail)) {
     await pause($, REWOUND, REWOUND)
     return `beats wait for your next turn: ${REWOUND}`
   }
@@ -470,11 +491,15 @@ async function beat($: EngineInterface): Promise<string> {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
     if (!isTransient) return stop($, r.error === 'rate_limit' ? 'rate limited' : `API error (${r.error})`)
-    if (s.enabled && !stepping) {
+    // a request of a turn begun meanwhile warmed the cache, and set the next beat from it: no retry needed
+    const isWarmedSince = s.lastWarm !== warmedAt
+    if (s.enabled && !stepping && !isWarmedSince) {
+      timer?.cancel()
       timer = $.clock.after(RETRY, () => void scheduledBeat($))
       s.nextAt = (await $.clock.now()) + RETRY
     }
-    return `${'error' in r ? r.error : r.reason}; ${s.enabled ? 'retrying in a minute' : 'not retried while off'}`
+    const then = !s.enabled ? 'not retried while off' : isWarmedSince ? 'a request since keeps it warm' : 'retrying in a minute'
+    return `${'error' in r ? r.error : r.reason}; ${then}`
   }
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
   // after a conversation's first turn, a beat reading well short of what that turn cached, and writing the rest:
@@ -497,7 +522,9 @@ async function beat($: EngineInterface): Promise<string> {
     await schedule($)
     return warmed
   }
-  if (got < wrote) {
+  // mid-turn, a beat writes the message before its cache mark, which a big tool result makes bigger than what it
+  // read: no sign the cache lapsed
+  if (got < wrote && wasIdle) {
     const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
     // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
     // this beat wrote it afresh, so beat at that from here
@@ -541,6 +568,13 @@ const when = (ms: number | undefined) =>
 const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undefined ? 'folder' : 'all folders')
 
 const isWhole = (word: string) => /^\d+$/.test(word)
+
+/** A request of the main conversation read the cache just now: the count starts again from it. */
+async function warmed($: EngineInterface) {
+  s.lastWarm = await $.clock.now()
+  s.warmModel = await $.session.model()
+  s.paused = null
+}
 
 /** After /clear or /resume: another conversation, its count from zero, this session's switch and interval kept. */
 async function anotherConversation($: EngineInterface) {
@@ -912,9 +946,7 @@ export const register: Register = on => {
         // request, or its end
         resent = got + MISSED < cached
         cached = got + wrote
-        s.lastWarm = await $.clock.now()
-        s.warmModel = await $.session.model()
-        s.paused = null
+        await warmed($)
       }
       await schedule($)
     }
@@ -931,11 +963,9 @@ export const register: Register = on => {
       s.lastReal = await $.clock.now()
       // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
       if (e.usage) {
-        s.lastWarm = s.lastReal
-        s.warmModel = await $.session.model()
+        await warmed($)
         s.tail = await tailOf($)
         s.turns++
-        s.paused = null
       }
       await syncSettings($)
       await schedule($)
