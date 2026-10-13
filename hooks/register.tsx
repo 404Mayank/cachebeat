@@ -26,7 +26,7 @@ const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'bea
 const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
-  enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, nextAt: null, beats: 0, row: null, small: null,
+  enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, nextAt: null, beats: 0, row: null, small: null,
   isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0,
 }
 let s: Saved = { ...fresh }
@@ -539,6 +539,7 @@ async function beat($: EngineInterface): Promise<string> {
   s.lastWarm = await $.clock.now()
   // what the conversation's cache holds: a fork that tried a tool asks twice, and its usage counts both reads
   s.lastRead = cached > 0 ? Math.min(got, cached) : got
+  s.lastWrote = wrote
   s.beats++
   if (cfg.heartAnimate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
@@ -667,7 +668,7 @@ async function stateOf($: EngineInterface) {
   const session = {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: from === 'all folders' && cfg.interval === 'auto' ? 'auto' : from,
     cacheTtl: s.isCacheShort ? '5m' : ttl,
-    beats: s.beats, lastBeatReadTokens: s.lastRead, nextBeat, skipping: s.small, paused: s.paused,
+    beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, nextBeat, skipping: s.small, paused: s.paused,
   }
   const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
   return {

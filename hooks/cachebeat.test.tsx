@@ -726,7 +726,7 @@ type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, nextBeat: null, skipping: null, paused: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, nextBeat: null, skipping: null, paused: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
   plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
@@ -1840,5 +1840,13 @@ test('after a compaction, the conversation\'s next turn counts as its first: no 
   await step($, 't3', 0)
   await clock.advance(9 * M)
   expect(forks).toEqual([])
+})
+
+test('state says what the last beat read and wrote', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(44_783, 12) }] })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect((await stateNow($)).session).toMatchObject({ lastBeatReadTokens: 44_783, lastBeatWrittenTokens: 12 })
 })
 
