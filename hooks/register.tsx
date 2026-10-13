@@ -427,7 +427,7 @@ async function beat($: EngineInterface): Promise<string> {
   const since = now - (s.lastWarm ?? now)
   // from the user's last message: a turn's start, or its end for one begun before cachebeat saw it
   const lastWord = Math.max(s.lastReal ?? now, s.asked ?? -Infinity)
-  if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last turn`)
+  if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last message`)
   if (since >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
   const { rateLimits } = await $.session.usage()
   const full = rateLimits.find(l => l.percentUsed >= cfg.stopAtUsage)
@@ -505,12 +505,13 @@ async function beat($: EngineInterface): Promise<string> {
     return `${why}; beating every ${AUTO['5m']}m`
   }
   s.lastWarm = await $.clock.now()
-  s.lastRead = got
+  // what the conversation's cache holds: a fork that tried a tool asks twice, and its usage counts both reads
+  s.lastRead = cached > 0 ? Math.min(got, cached) : got
   s.beats++
   if (cfg.heartAnimate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
   if (logs(cfg.onBeat) || (s.row === null && !isStatusOnBand)) $.ui.log(renewed) // else no line at all says it
-  if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(got)} read`)
+  if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(s.lastRead)} read`)
   await schedule($)
   return renewed
 }
