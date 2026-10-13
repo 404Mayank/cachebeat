@@ -27,6 +27,7 @@ type World = {
   fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS>
   env?: Record<string, string>; settingsFile?: Record<string, unknown>; isSubscription?: boolean
   folders?: Record<string, unknown> // the store's folders, by path
+  chat?: ReturnType<typeof said>[] // the conversation as the session starts: one there means a resumed session
 }
 
 const setup = async ($: Engine, on: On, world: World = {}) => {
@@ -60,7 +61,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   let root = HOME
   on('session.root', () => ({ value: root }) as never)
   // the conversation as a turn leaves it; /rewind takes it back, and a turn adds to it
-  let chat = [said('user', 'hi'), said('assistant', 'ok')]
+  let chat = world.chat ?? [] // a new session's: empty
   on('session.messages', () => ({ value: chat }) as never)
   mock.env(on, world.env ?? {})
   on('settings.read', () => ({ value: world.settingsFile ?? {} }) as never)
@@ -92,6 +93,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('classic.PostModelSwitch', () => ({}))
+  on('classic.SessionStart', () => ({}))
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return {
@@ -1554,5 +1556,33 @@ test('a beat whose fork asked twice shows what the conversation\'s cache holds, 
   await draw($, row('r1'))
   await clock.advance(3 * M)
   expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×1 · 90k cached · next in 3m']) // the turn's 90k, not 91k
+})
+
+test('a resumed conversation (--resume, --continue) waits for the next turn, and says so', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { settings: { defaultOn: true }, chat: [said('user', 'hi'), said('assistant', 'ok')] })
+  expect(logs).toContain('beats wait for your next turn: this conversation was resumed')
+  await clock.advance(IDLE * 2)
+  expect(forks).toEqual([]) // a beat would re-read the uncached conversation before the user chose to
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(forks).toEqual([IDLE * 3])
+})
+
+test('/resume within a session waits for the next turn, and never switches beating off', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { fork: [ok, { isAnswered: false, reason: 'nothing-to-fork', usage: usage(0, 0) }, ok] })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(1 * M)
+  await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
+  expect(logs.some(l => l.includes('resumed'))).toBe(false) // it would land in the conversation left behind
+  await $.classic.SessionStart({ source: 'resume' } as never) // the resumed conversation in place
+  await clock.advance(1000) // and drawn
+  expect(logs).toContain('beats wait for your next turn: this conversation was resumed')
+  await clock.advance(9 * M)
+  expect(forks).toEqual([]) // the beat set before the /resume does not come
+  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 0 beats · starts after your next turn')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(forks).toEqual([13 * M + 1000])
 })
 

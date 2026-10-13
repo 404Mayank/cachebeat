@@ -11,6 +11,6 @@
   "termsOfServiceUrl": "https://github.com/404Mayank/cachebeat#disclaimer",
   "license": "MIT",
   "icon": "./assets/logo/logo-square.png",
-  "keywords": ["prompt-cache", "cache", "keepalive", "idle", "usage", "heartbeat", "terminal", "tui", "mod"],
+  "keywords": ["prompt-cache", "prompt-caching", "keepalive", "cost-saving", "usage", "idle", "heartbeat", "mod", "terminal", "productivity"],
   "types": "./types/index.d.ts"
 }

@@ -18,13 +18,13 @@ You come back from lunch, type your next message, and it picks up right where yo
 
 ## Features
 
-- **Background beats** keep the cache warm while you're idle, timed to how long your cache lasts, and stay out of the conversation
+- **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation
 - **A live heart** under the prompt, with 19 animations to choose from
 - **A turn line** under your latest turn shows the beats so far and the time until the next one
 - **A settings menu** with live previews, driven by keyboard or mouse
 - **Ask Claude** to turn it on, change the interval, or change any setting, in your own words
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
-- **Per session or everywhere**: turn it on for one session, or have every new session start with it
+- **This session, this folder or all folders**: turn it on for one session, or have new sessions start with it in one folder or everywhere
 
 ## Requirements
 
@@ -74,7 +74,7 @@ In any session:
 /cachebeat on
 ```
 
-The heart appears under the prompt, and after your next turn it starts beating. To have every new session start with it on:
+The prompt heart appears under the prompt, and starts beating once the session has had a turn. To have every new session start with it on:
 
 ```
 /cachebeat global on
@@ -92,10 +92,10 @@ Beats fit your cache by themselves: every 50 minutes on a Claude subscription's 
 
 ## What it sends, and what it costs
 
-Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript. The beat's one line starts with `[cachebeat]` and says it isn't from you, so a request log or a proxy can tell beats from your own messages.
+Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript. The request's last line is cachebeat's own: it starts with `[cachebeat]` and says it isn't from you, so a request log or a proxy can tell beats from your own messages.
 
 - A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would.
-- Beats happen only while the session is idle, or while a turn sits waiting on a long tool or a permission prompt, at most once per interval (50 minutes by default).
+- Beats happen only while nothing else keeps the cache warm: while the session is idle, or while a turn sits waiting on a long tool run or a permission prompt. They come at most once per interval.
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
 - To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
 - `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself. The tools read or change only cachebeat's own state and settings. Claude calls them without a permission prompt, and each call that goes through shows as one line in the transcript.
@@ -117,21 +117,21 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 | `/cachebeat <minutes>` | Turns it on for this session with its own interval, e.g. `/cachebeat 30` (1–55) |
 | `/cachebeat now` | Beats right away |
 | `/cachebeat global on` / `off` | Sets whether new sessions start on, in all folders, and applies it here too |
-| `/cachebeat global <minutes>` | Sets the interval for all folders, and turns it on here at that interval |
+| `/cachebeat global <minutes>` | Sets the interval for all folders, and turns it on here |
 | `/cachebeat local on` / `off` / `<minutes>` | The same, for sessions in this folder only |
 | `/cachebeat local reset` | Drops this folder's own settings: it follows all folders again |
 | `/cachebeat settings` | Opens the settings menu |
 
 ## What you'll see
 
-**The heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next turn.
+**The prompt heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next message.
 
-**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`. Its heart beats too, with an animation of its own under **Turn line**. While beats wait for your next message, after `/model`, `/compact` or `/rewind`, it says so. When you send a new message, the line moves down to the new turn. In the desktop app it stays above the prompt instead.
+**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`. Its heart beats too, with an animation of its own under **Turn line**. When beats wait for your next message (see [Good to know](#good-to-know)), it says so. When you send a new message, the line moves to that turn once it ends. Until then, in the terminal, a beat during the turn shows as a line in the log. In the desktop app the line stays above the prompt instead.
 
 ```
 ✻ Cogitated for 12s · done 3:09 PM
 
-♥ cache kept warm ×3 · next in 42m
+♥ cache kept warm ×3 · 184k cached · next in 42m
 
 ❯
   ⏸ manual mode on · ⠀(♥)⠀ ×3
@@ -139,7 +139,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 ## Settings
 
-Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings apply in every folder, unless you give a folder its own (see [Where settings apply](#where-settings-apply)).
+Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings apply in all folders, unless you give a folder its own (see [Where settings apply](#where-settings-apply)).
 
 - On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
 - Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
@@ -158,9 +158,9 @@ Settings with numbers also take a custom value at the bottom of their list, such
 | **This folder** | Any setting, for sessions in this folder | Until you change it | **Settings for: this folder** in the menu, or `/cachebeat local …` |
 | **All folders** | Every setting | Until you change it | The menu, or `/cachebeat global …` |
 
-The nearest one wins: this session, then this folder, then all folders. Saving an interval for all folders or this folder drops this session's own, so the session follows the new one. `/cachebeat global …` and `local …` apply to this session too: an interval or `on` starts it beating here, and `off` stops it.
+The nearest one wins: this session, then this folder, then all folders. Saving an interval for all folders or this folder drops this session's own, so the session follows the new one.
 
-**Settings for** picks where the menu saves your changes. It never changes **This session**. On `this folder`, changes are saved for this folder alone and marked `· this folder`; the rest still follow all folders, so a later change to all folders reaches this folder too. On `all folders`, a setting this folder has its own of is marked `· here: on`, with this folder's value. The menu opens on `this folder` once the folder has settings of its own, and on `all folders` otherwise. **Reset folder** (or `/cachebeat local reset`) drops the folder's own settings.
+**Settings for** picks where the menu saves your changes. It never changes **This session**. On `this folder`, changes are saved for this folder alone and marked `· this folder`; the rest still follow all folders, so a later change to all folders reaches this folder too. On `all folders`, a setting this folder sets for itself is marked `· here: on`, with this folder's value. The menu opens on `this folder` once the folder has settings of its own, and on `all folders` otherwise. **Reset folder** (or `/cachebeat local reset`) drops the folder's own settings.
 
 A folder is where the session started, or where `/cd` or a worktree move took it. Each folder is its own, so a subfolder or another worktree doesn't share its settings.
 
@@ -256,9 +256,10 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 
 ## Good to know
 
-- Sending a message restarts the countdown, and so does each request Claude sends during a turn. A turn that goes quiet for the whole interval, such as a long build or a permission prompt left waiting, gets a beat too.
+- Sending a message restarts the countdown, and so does each request Claude makes during a turn. A turn gets a beat once it has gone quiet for a whole interval, counted from its last request. A conversation's first turn gets none.
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
-- Claude Code sometimes caches a conversation anew in a form a beat can't reach, often right after a session's first message. A beat that finds this says so once, and beats wait for your next message, rather than paying to write the cache again each time.
+- A resumed conversation (`claude --resume`, `--continue`, or `/resume`) waits for your next message too, and says so. Nothing of it is cached in this session yet, so no beat re-reads it before you decide to carry on.
+- After a conversation's first turn, Claude Code can cache the conversation anew where a beat can't reach it. A beat that finds this says so once, and beats wait for your next message rather than paying to write the cache again each time.
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.
 - Settings you change in one session reach your other open sessions at their next turn. A session moved to another folder takes that folder's settings at its next turn, and stays on or off as it was.
