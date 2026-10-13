@@ -170,6 +170,8 @@ Things about mods, the engine and the test kit that took time to work out. These
 
 - **On 2.1.287 a `Button` needs a `label` or a single string child.** Newer builds also accept `Text` children ("a chip, a dim part"). For a dim button, use `<Button dimColor>` with a string. The test kit on the current build accepts both, so only CI's 2.1.287 leg catches it.
 - **A `Button` with a `hotkey` draws its own `r: ` before its label.** Don't write the key into the label too.
+- **On 2.1.287, a function handed `$` must have a name used nowhere else in the file,** not even as a local `const` in another function. The loader refuses the whole module: "the function handed $ "warmed" is declared more than once in this file". That broke 112 of 125 tests on 2.1.287 only (0.9.0's `warmed($)` helper against a `const warmed` message in `beat()`). Newer versions accept it, and only CI's 2.1.287 leg or the local 2.1.287 install catches it.
+- **When checking test output in a script, fail on the summary,** with `grep -q "^ 0 fail"`. Filtering with `grep` exits 0 even when tests fail, and that let a broken release branch get pushed once.
 - **Every API 0.7.0 added works on 2.1.287:** `$.env.get`, `$.settings.read`, `classic.PostModelSwitch`, `session.compact`, `AbovePrompt`, `Box` `minWidth`, and the kit's `$.classic`. CI's 2.1.287 leg passed, so the floor stays.
 - **Testing an old version locally:**
   1. `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder.
