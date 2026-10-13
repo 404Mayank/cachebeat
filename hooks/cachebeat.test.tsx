@@ -439,7 +439,7 @@ test('stops at the deadline after the last real turn', async ($: Engine, on: On)
   await $.turn.complete(turn)
   await clock.advance(DEADLINE + IDLE * 2)
   expect(forks.length).toBe(Math.ceil(DEADLINE / IDLE) - 1)
-  expect(logs.at(-1)).toBe('stopped: 8h since your last turn')
+  expect(logs.at(-1)).toBe('stopped: 8h since your last message')
 })
 
 test('the deadline is a setting, and a stop can toast', async ($: Engine, on: On) => {
@@ -449,7 +449,7 @@ test('the deadline is a setting, and a stop can toast', async ($: Engine, on: On
   await clock.advance(2 * 60 * M)
   expect(forks).toEqual([20 * M, 40 * M])
   expect(logs.filter(l => l.startsWith('stopped'))).toEqual([])
-  expect(toasts).toEqual(['cachebeat stopped: 1h since your last turn'])
+  expect(toasts).toEqual(['cachebeat stopped: 1h since your last message'])
 })
 
 test('stops without forking once a usage limit is used up', async ($: Engine, on: On) => {
@@ -1539,5 +1539,20 @@ test('a conversation\'s first turn gets no mid-turn beat: its next request may c
   await $.turn.complete({ ...turn, turnId: 't1' })
   await clock.advance(3 * M)
   expect(forks).toEqual([12 * M]) // after it, beats as ever
+})
+
+test('a beat whose fork asked twice shows what the conversation\'s cache holds, not both reads', async ($: Engine, on: On) => {
+  const { clock, reads } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(91_000, 0) }] })
+  await cmd($, '3')
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  reads.push(usage(40_000, 6_000)) // 46k cached
+  await step($, 't1', 0)
+  await $.turn.complete({ ...turn, turnId: 't1' })
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await step($, 't2', 0)
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await draw($, row('r1'))
+  await clock.advance(3 * M)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×1 · 90k cached · next in 3m']) // the turn's 90k, not 91k
 })
 
