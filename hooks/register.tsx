@@ -570,7 +570,7 @@ const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undef
 const isWhole = (word: string) => /^\d+$/.test(word)
 
 /** A request of the main conversation read the cache just now: the count starts again from it. */
-async function warmed($: EngineInterface) {
+async function markWarm($: EngineInterface) {
   s.lastWarm = await $.clock.now()
   s.warmModel = await $.session.model()
   s.paused = null
@@ -946,7 +946,7 @@ export const register: Register = on => {
         // request, or its end
         resent = got + MISSED < cached
         cached = got + wrote
-        await warmed($)
+        await markWarm($)
       }
       await schedule($)
     }
@@ -963,7 +963,7 @@ export const register: Register = on => {
       s.lastReal = await $.clock.now()
       // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
       if (e.usage) {
-        await warmed($)
+        await markWarm($)
         s.tail = await tailOf($)
         s.turns++
       }
