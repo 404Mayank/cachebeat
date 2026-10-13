@@ -1586,3 +1586,55 @@ test('/resume within a session waits for the next turn, and never switches beati
   expect(forks).toEqual([13 * M + 1000])
 })
 
+// what code review found in 0.9.0's second draft, each of these failing on it
+
+test('mid-turn, a chat under the minimum waits for the turn to grow it, rather than trying again at once', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { settings: { skipSmall: true }, contextTokens: 8_000 })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(9 * M)
+  expect(forks).toEqual([])
+  expect(logs.filter(l => l.startsWith('beats will skip'))).toHaveLength(1)
+})
+
+test('a mid-turn beat writing a big tool result past its cache mark is no sign the cache lapsed', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(15_000, 40_000) }] })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'read the big file', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(3 * M)
+  expect(forks).toEqual([3 * M])
+  expect(logs.some(l => l.startsWith('stopped') || l.includes('not served'))).toBe(false)
+  expect(await cmd($, '')).toStartWith('on, every 3m idle')
+})
+
+test('a message added between turns (a ! command\'s output) is not a rewind', async ($: Engine, on: On) => {
+  const { clock, forks, logs, talk, add } = await setup($, on)
+  await cmd($, '3')
+  talk('question')
+  await $.turn.complete(turn)
+  add('user', '<bash-stdout>README.md</bash-stdout>')
+  await clock.advance(3 * M)
+  expect(forks).toEqual([3 * M])
+  expect(logs.some(l => l.includes('rewound'))).toBe(false)
+})
+
+test('an interval saved mid-turn moves the turn\'s beat', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on)
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(1 * M)
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'row:interval' })
+  await ui.press({ key: 'opt:1' }) // 4m for all folders, in the menu: this session follows it from now
+  await clock.advance(3 * M)
+  expect(forks).toEqual([4 * M]) // 4m after the turn's request, not the 3m it had
+  await ui.unmount()
+})
+
