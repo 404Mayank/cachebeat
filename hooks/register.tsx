@@ -52,6 +52,7 @@ let stepping = false // a request of that turn is on its way, which keeps the ca
 let cached = 0 // tokens the main conversation's last request read from the cache or wrote to it
 let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
 let beating = false
+let isResumeUnsaid = false // a /resume paused beats, to be said once the resumed conversation is in place
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
 let paneSurface = 'terminal' // where the settings pane last drew: the terminal's keys are walked here, a desktop's its own
@@ -379,6 +380,9 @@ async function pause($: EngineInterface, why: string, said: string) {
 
 const MODEL_CHANGED = 'the model changed'
 const REWOUND = 'the conversation was rewound'
+// nothing of a resumed conversation is cached in this process, and Claude Code may warn it's uncached before the next
+// message re-reads it: a beat would pay for that re-read before the user chose to
+const RESUMED = 'this conversation was resumed'
 const OUT_OF_REACH = 'Claude Code cached this conversation anew, out of a beat\'s reach'
 /** Tokens past which a beat wrote more than its own line: it missed what the last request cached. */
 const MISSED = 1000
@@ -537,6 +541,14 @@ const when = (ms: number | undefined) =>
 const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undefined ? 'folder' : 'all folders')
 
 const isWhole = (word: string) => /^\d+$/.test(word)
+
+/** After /clear or /resume: another conversation, its count from zero, this session's switch and interval kept. */
+async function anotherConversation($: EngineInterface) {
+  s = { ...fresh, enabled: s.enabled, idle: s.idle, isCacheShort: s.isCacheShort }
+  cached = 0 // nothing of it cached yet
+  resent = false
+  await syncSettings($)
+}
 
 /** Minutes typed, kept under the hour the cache lives. */
 const minutesOf = (word: string) => Math.min(55, Math.max(1, Math.round(Number(word))))
@@ -721,7 +733,10 @@ export const register: Register = on => {
     const prev = await read($, saved)
     // a reload keeps this session's choice; a new session starts as its folder's settings say
     s = prev ? { ...fresh, ...prev } : { ...fresh, enabled: cfg.defaultOn }
-    await schedule($)
+    const messages = prev ? [] : await $.session.messages()
+    // a new process with a conversation already in it: --resume, --continue
+    if (messages.length) await pause($, RESUMED, RESUMED)
+    else await schedule($)
     await $.command.register({
       name: 'cachebeat',
       description: 'Keep the prompt cache warm while idle',
@@ -737,12 +752,29 @@ export const register: Register = on => {
   // conversation, so it starts its count afresh, keeping whether this session beats and how often
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     const r = await next(e)
-    s = { ...fresh, enabled: s.enabled, idle: s.idle, isCacheShort: s.isCacheShort }
-    cached = 0 // a new conversation: nothing of it cached yet
-    resent = false
-    await syncSettings($)
+    await anotherConversation($)
     await schedule($)
     return r
+  })
+
+  // /resume within a session: another conversation takes this one's place, with no session.start. A line logged here
+  // would land in the conversation left behind: the resumed one's start says it
+  on('session.end', { reason: 'resume' }, async ($, e, next) => {
+    const r = await next(e)
+    await anotherConversation($)
+    s.paused = RESUMED
+    isResumeUnsaid = true
+    await schedule($)
+    return r
+  })
+
+  on('classic.SessionStart', async ($, e, next) => {
+    if (e.source === 'resume' && isResumeUnsaid) {
+      isResumeUnsaid = false
+      // the resumed conversation is drawn once this hook settles: a line logged before that is drawn over
+      if (s.enabled) $.clock.after(SETTLE, () => $.ui.log(`beats wait for your next turn: ${RESUMED}`))
+    }
+    return next(e)
   })
 
   on('command.run', { command: 'cachebeat' }, async ($, e) => {
