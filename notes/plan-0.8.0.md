@@ -78,5 +78,5 @@ The switch won because it's one control that only picks where changes save, the 
 ## Still open
 
 - **`--resume` and `--continue`:** does `$.state` (`saved`) survive them? If it doesn't, a resumed session starts from its folder's or all folders' **New sessions start**, like a new one. Check it live and say which in the README.
-- **Desktop app:** check that the Settings for line, dimmed and not, and the markers draw, and that Tab reaches the switch.
+- **Desktop app:** check that the Settings for line, dimmed and not, and the markers draw, and that Tab reaches the switch. Since 0.9.0, also check that the status line on the band above the prompt sits under another mod's band without hiding it, and adds no blank row when nothing else draws there.
 - **Removed folders** leave small entries in the store. They're harmless; a list of folders with their own settings could come later.

@@ -70,3 +70,15 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
 - **`intervalFrom` is `session`, `folder`, `all folders` or `auto`.** `default` became `all folders`, and `auto` means all folders' auto. A folder set to auto says `folder`, since where the value comes from matters more there.
 - **`changed` lists `folder.<key>` for each one set or dropped.** The answer's `folder` holds those, with `null` for a drop.
 - **The transcript line** prefixes every saved change with its scope: `cachebeat · this session on, every 20m · all folders: Beat after idle 30m · this folder (…/api): New sessions start on`.
+
+## 0.9.0
+
+- **`nextBeat` has more states,** because beats can come mid-turn:
+  - `in 42m`, counted from the end of the turn's last request too
+  - `50m after the request on its way`, while a request of the turn is answered
+  - `after this turn`, while beats wait for the turn's end: a conversation's first turn, or a request that re-sent the conversation
+  - `after the next turn` and `null`, as before
+
+  The tool description lists them all.
+- **A beat's own prompt is tagged,** and differs mid-turn (`ASK`, `ASK_MID_TURN` in `register.tsx`). Neither is tool text, so neither touches the cached prefix.
+
