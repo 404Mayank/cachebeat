@@ -82,3 +82,7 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
   The tool description lists them all.
 - **A beat's own prompt is tagged,** and differs mid-turn (`ASK`, `ASK_MID_TURN` in `register.tsx`). Neither is tool text, so neither touches the cached prefix.
 
+## 0.9.1
+
+- **`state` reports `lastBeatWrittenTokens` beside `lastBeatReadTokens`,** and its description says what a beat sends: the conversation as last sent, plus one line tagged `[cachebeat]`. In an end-user test of 0.9.0, Claude was asked what a beat reads and writes and couldn't say: it had only the read, and that was null before the session's first beat. Asked again with this text, it answered from the description and named both fields.
+
