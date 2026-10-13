@@ -116,6 +116,19 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **So a turn whose request read less than the last one cached gets no mid-turn beat.** Its `turn.step` usage shows it (`resent` in `register.tsx`), and beats wait for the turn's next request or its end. Live: no beat during turn 2's 80s tool, then one at 1m into turn 3's.
 - **The test kit raises `turn.step` as `$.turn.step({ turnId, index, model, messageCount })`.** It returns a stream: read it to its end, then `await stream.result`. A test registers a stub generator beneath it, in `setup()`.
 
+## Resuming a conversation (found live, 0.9.0)
+
+- **`claude --resume` and `--continue` start a new process with the conversation already there.**
+  - `session.start` fires with `$.session.messages()` holding it, and `read($, saved)` is null.
+  - A fork then has nothing to send ("nothing-to-fork") until the next turn.
+  - `classic.SessionStart` (source `resume`) fires *before* the session is bound: `$.session.messages()` throws there ("no session is bound in this process").
+- **`/resume` within a session raises `session.end` (reason `resume`), then `classic.SessionStart` (source `resume`), and no `session.start`.**
+  - Module state carries over from the conversation left behind. Before 0.9.0, a beat due from that conversation would fire, find nothing to fork, and switch beating off: "stopped: nothing to keep warm".
+  - Now the `session.end` hook resets to another conversation (as `/clear` does) and pauses. The line is logged from `classic.SessionStart`, `SETTLE` (1s) later: a line logged during either hook is drawn over when the resumed conversation is drawn.
+- **`$.state` is keyed to the session id,** so after `/resume` a hot reload (a file save during development) finds nothing saved and starts afresh (off, by default). That's dev-only.
+- **The uncached hint:** Claude Code 2.1.295 shows "~68k uncached · /clear to start fresh" in the footer, not a dialog. It's on Pro plans, when the conversation is at least 50,000 tokens and its last reply is over an hour old (`Mqe` in the bundle). Beats must not re-read the conversation before the user's next message, and with the pause they don't.
+- **The bundle also has "Compacted while idle, before the prompt cache expired":** an engine mode that compacts an idle conversation. cachebeat sees it as `session.compact` and pauses, as for `/compact`.
+
 ## Surfaces: the desktop app (found live, 0.7.0)
 
 **Status: passable, left open.** The desktop app isn't the maintainer's main surface: cachebeat is built for the terminal. On desktop it works and looks acceptable, but it isn't polished. Line animations keep small gaps, and heart-heavy ones space wide (below). It's left as it is on purpose. Contributions to tighten it are welcome; the `Svg`-grid idea below is the likely route.
