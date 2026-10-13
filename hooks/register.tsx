@@ -418,6 +418,7 @@ async function isRewound($: EngineInterface, tail: string) {
   const n = Number(count)
   if (n >= LISTED) return false
   const messages = await $.session.messages()
+  if (messages.length >= LISTED) return false // past n, the list starts later: the ending isn't at its place
   return messages.length < n || hashOf(messages.slice(Math.max(0, n - 3), n)) !== hash
 }
 const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have settled
@@ -909,6 +910,7 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
+    if (isDone) s.turns = 0 // a conversation anew: its next turn sends it as a first one
     if (isDone && !busy && s.lastWarm !== null) await pause($, 'compaction replaced the conversation', 'compaction replaced the conversation')
     return r
   })
