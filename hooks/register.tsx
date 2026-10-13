@@ -401,9 +401,9 @@ type Said = { role: string; text: string; toolUses: readonly unknown[] }
 
 const hashOf = (messages: readonly Said[]) => {
   const said = messages.map(m => `${m.role}\u0000${m.text}\u0000${m.toolUses.length}`).join('\u0001')
-  let h = 0x811c9dc5 // FNV-1a
-  for (let i = 0; i < said.length; i++) h = Math.imul(h ^ said.charCodeAt(i), 0x01000193)
-  return (h >>> 0).toString(36)
+  let hash = 0x811c9dc5 // FNV-1a
+  for (let i = 0; i < said.length; i++) hash = Math.imul(hash ^ said.charCodeAt(i), 0x01000193)
+  return (hash >>> 0).toString(36)
 }
 
 /** The newest messages `$.session.messages()` lists: past them, an ending can't be found by its place. */
