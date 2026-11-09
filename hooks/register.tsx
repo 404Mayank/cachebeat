@@ -80,6 +80,9 @@ export const clockText = (at: number, now: number) => {
   return `${new Date(at).toLocaleDateString([], { weekday: 'short' })} ${time}`
 }
 
+/** The keep-alive time left in words; past it, that it is up (a turn still running ends it at its own end). */
+const keepLeft = (keepUntil: number, now: number) => (keepUntil > now ? `${fmt(keepUntil - now)} left` : busy ? "time's up · ends after this turn" : "time's up")
+
 /** The time to the next beat in words, so a deadline that has passed reads the same everywhere. */
 const untilNext = (ms: number) => (ms <= 0 ? 'due now' : `in ${fmt(ms)}`)
 
@@ -230,8 +233,9 @@ async function refreshLine($: EngineInterface) {
     const at = s.nextAt
     if (s.enabled && (at !== null || s.keepUntil !== null)) {
       const now = await $.clock.now()
-      if (at !== null) next = untilNext(at - now)
-      if (s.keepUntil !== null) left = `${fmt(s.keepUntil - now)} left`
+      // past the keep-alive time, no beat is coming
+      if (at !== null && (s.keepUntil === null || s.keepUntil > now)) next = untilNext(at - now)
+      if (s.keepUntil !== null) left = keepLeft(s.keepUntil, now)
     }
     text = statusText(cfg, s.beats, s.lastRead, next, left)
   }
@@ -373,9 +377,16 @@ function armStep($: EngineInterface, call: number, now: number) {
   timer = $.clock.after(wait, () => void wallCheck($, call))
 }
 
-/** The keep-alive time is up: this session turns off, saying until when it kept the cache warm. */
+/**
+ * The keep-alive time is up: this session turns off. It says "kept warm" only when the cache did last to the time;
+ * a session that never had a turn, a cache gone cold on the way, beats waiting for a turn, or a sleep past the time
+ * kept nothing warm, and the words don't claim it.
+ */
 function endKeep($: EngineInterface, now: number) {
-  return stop($, `kept warm until ${clockText(s.keepUntil!, now)}, as asked`)
+  const until = clockText(s.keepUntil!, now)
+  const lasts = viewOf(cacheFacts(null, null), now).expiresAt
+  const isKept = !s.paused && lasts !== null && lasts >= s.keepUntil!
+  return stop($, isKept ? `kept warm until ${until}, as asked` : `keep-alive time up (${until})`)
 }
 
 /**
@@ -387,7 +398,8 @@ async function wallCheck($: EngineInterface, call: number) {
   // a newer schedule() armed its own chain meanwhile: two would each beat
   if (call !== scheduling || (s.nextAt === null && s.keepUntil === null)) return
   if (s.keepUntil !== null && now >= s.keepUntil) {
-    if (!busy) endKeep($, now)
+    if (busy) await refreshLine($) // the line says the time is up, not the minute it last counted
+    else endKeep($, now)
     return
   }
   if (s.nextAt !== null && now >= s.nextAt) return scheduledBeat($)
@@ -419,7 +431,8 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
     if (since >= MAX_TTL || s.paused) p = 'waiting' // nothing warm to keep, or none of use: the next turn starts it
     else {
-      if (cfg.interval === 'auto') ttl = await cacheTtl($) // usage can cross into credits
+      // usage can cross into credits; the keep-alive time's check below judges the cache by the lifetime too
+      if (cfg.interval === 'auto' || s.keepUntil !== null) ttl = await cacheTtl($)
       if (call !== scheduling) return undefined
       // the cache outlives the keep-alive time without a beat: none is armed, and the time's end is waited for
       isCovered = s.keepUntil !== null && (viewOf(cacheFacts(null, null), now).expiresAt ?? 0) >= s.keepUntil
@@ -808,6 +821,7 @@ async function stateOf($: EngineInterface) {
   const session = {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: from === 'all folders' && cfg.interval === 'auto' ? 'auto' : from,
     keepAliveUntil: s.keepUntil === null ? null : new Date(s.keepUntil).toISOString(),
+    keepAliveUntilLocal: s.keepUntil === null ? null : clockText(s.keepUntil, now),
     keepAliveMinutesLeft: s.keepUntil === null ? null : whole(Math.max(0, s.keepUntil - now)),
     cacheTtl: s.isCacheShort ? '5m' : ttl,
     beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, lastBeatUsd: roundUsd(s.lastUsd), nextBeat, skipping: s.small, paused: s.paused,
@@ -983,8 +997,9 @@ export const register: Register = on => {
     const ms = at === null ? undefined : Math.max(0, at - now)
     const from = intervalFrom()
     const source = from === 'all folders' ? '' : ` (this ${from}'s)`
-    const left = s.keepUntil === null ? '' : ` · ${fmt(s.keepUntil - now)} left`
-    return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'} · ${when(ms)}` }
+    const left = s.keepUntil === null ? '' : ` · ${keepLeft(s.keepUntil, now)}`
+    const upcoming = s.keepUntil !== null && s.keepUntil <= now ? '' : ` · ${when(ms)}` // past the time, no beat is coming
+    return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'}${upcoming}` }
   })
 
   on('tool.call', { tool: 'mcp__cachebeat__state' }, async $ => ({ result: json(await stateOf($)) }))

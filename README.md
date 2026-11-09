@@ -12,7 +12,7 @@
 [![Claude Code 2.1.287+](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-When a Claude Code session sits idle, its prompt cache expires, and your next message has to rebuild it from scratch. That's slower, and it uses more of your usage limits. cachebeat gives the session a heartbeat: shortly before the cache would expire, it sends a tiny background request that reads the conversation and keeps the cache alive. Your transcript never sees it.
+When a Claude Code session sits idle, its prompt cache goes cold, and your next message has to rebuild it from scratch. That's slower, and it uses more of your usage limits. cachebeat gives the session a heartbeat: shortly before the cache would go cold, it sends a tiny background request that reads the conversation and keeps the cache alive. Your transcript never sees it.
 
 You come back from lunch, type your next message, and it picks up right where you left off.
 
@@ -177,7 +177,7 @@ A folder is where the session started, or where `/cd` or a worktree move took it
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| This session | Turns beating on or off right here, and shows the time left on a keep-alive time | off |
+| This session | Turns beating on or off right here, and when a keep-alive time ends | off |
 | New sessions start | Whether new sessions start with it on | off |
 | Beat after idle | How long the session sits idle before a beat: auto fits your cache, or a number of minutes | auto: 50 minutes on a one-hour cache, 4 on a five-minute one |
 | After /model | Wait for your next message, or have the next beat warm the new model's cache | wait |

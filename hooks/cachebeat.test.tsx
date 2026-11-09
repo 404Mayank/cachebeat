@@ -759,7 +759,7 @@ type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', keepAliveUntil: null, keepAliveMinutesLeft: null, cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, lastBeatUsd: null, nextBeat: null, skipping: null, paused: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', keepAliveUntil: null, keepAliveUntilLocal: null, keepAliveMinutesLeft: null, cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, lastBeatUsd: null, nextBeat: null, skipping: null, paused: null }
 const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheUsd: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
@@ -791,9 +791,10 @@ const set = async ($: Engine, args: Args) => JSON.parse((await call($, 'set', ar
 test('a keep-alive time turns beating on and leaves the interval; null drops it', async ($: Engine, on: On) => {
   const { store, clock } = await setup($, on)
   const until = new Date(clock.now() + 120 * M).toISOString()
+  const local = clockText(clock.now() + 120 * M, clock.now())
   expect(await set($, { session: { keepAliveMinutes: 120 } })).toEqual({
     changed: ['session.enabled', 'session.keepAliveMinutes'],
-    session: { ...FRESH, enabled: true, keepAliveUntil: until, keepAliveMinutesLeft: 120, nextBeat: 'after the next turn' }, settings: {},
+    session: { ...FRESH, enabled: true, keepAliveUntil: until, keepAliveUntilLocal: local, keepAliveMinutesLeft: 120, nextBeat: 'after the next turn' }, settings: {},
   })
   expect(stored(store).interval).toBe('auto')
   expect(await set($, { session: { keepAliveMinutes: null } })).toEqual({
@@ -2413,7 +2414,10 @@ test('/cachebeat 2h turns this session on until then, from the command', async (
   await $.turn.complete(turn)
   await clock.advance(30 * M)
   expect(await cmd($, '')).toBe('on, every 50m idle · 1h 30m left · 0 beats · next beat in 20m') // counted from the command, not the turn
-  expect((await stateNow($)).session).toMatchObject({ enabled: true, keepAliveMinutesLeft: 90, keepAliveUntil: new Date(2 * H).toISOString() })
+  // the UTC time an agent could misread by the zone's offset, and the same time on the user's clock
+  expect((await stateNow($)).session).toMatchObject({
+    enabled: true, keepAliveMinutesLeft: 90, keepAliveUntil: new Date(2 * H).toISOString(), keepAliveUntilLocal: clockText(2 * H, 2 * H),
+  })
 })
 
 test('a keep-alive time can be typed with a space, or after on', async ($: Engine, on: On) => {
@@ -2519,7 +2523,7 @@ test('the time is up even while beats wait for a turn', async ($: Engine, on: On
   await clock.advance(29 * M)
   expect((await stateNow($)).session.enabled).toBe(true)
   await clock.advance(1 * M)
-  expect(logs).toEqual([`stopped: kept warm until ${clockText(30 * M, 30 * M)}, as asked`])
+  expect(logs).toEqual([`stopped: keep-alive time up (${clockText(30 * M, 30 * M)})`]) // it never kept anything warm
   expect((await stateNow($)).session.enabled).toBe(false)
 })
 
@@ -2547,8 +2551,61 @@ test('a sleep past the time ends it at the first step after waking', async ($: E
   await clock.advance(STEP)
   expect(forks).toEqual([])
   expect(logs).toHaveLength(1)
-  expect(logs[0]).toStartWith('stopped: kept warm until ')
+  expect(logs[0]).toStartWith('stopped: keep-alive time up (') // the cache lapsed in the sleep
   expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+test('a cache gone cold before the time is up is not called kept warm', async ($: Engine, on: On) => {
+  const { clock, logs, sleep } = await setup($, on)
+  await $.turn.complete(turn)
+  await cmd($, '3h')
+  await clock.advance(10 * M)
+  sleep(120 * M)
+  await clock.advance(STEP) // the step after waking finds the cache cold: beats wait for a turn
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: 'the cache went cold' })
+  await clock.advance(50 * M) // past the 3h
+  expect(logs.at(-1)).toBe(`stopped: keep-alive time up (${clockText(3 * H, 3 * H)})`)
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+test('beats waiting after /model did not keep the new model warm to the time, whatever the old cache holds', async ($: Engine, on: On) => {
+  const { clock, logs, switchTo } = await setup($, on)
+  await $.turn.complete(turn)
+  await cmd($, '30m') // the hour's cache outlives it
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(30 * M)
+  expect(logs.at(-1)).toBe(`stopped: keep-alive time up (${clockText(30 * M, 30 * M)})`)
+})
+
+test('past the time with a turn still running, the line and the status say it is up, not 1m left', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false } })
+  // the line as the desktop's band above the prompt draws it: in the kit with a turn running, which the real band skips while the engine works
+  const band = async () => (await draw($, BAND('desktop'))).filter(t => t !== 'engine').join('').replace('\u00a0', ' ')
+  await $.turn.complete(turn)
+  await cmd($, '10m')
+  expect(await band()).toBe('♡ 10m left')
+  await clock.advance(8 * M)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(1 * M)
+  expect(await band()).toBe('♡ 1m left')
+  await clock.advance(6 * M) // 15m: the 10m is past, the turn goes on
+  expect(await band()).toBe("♡ time's up · ends after this turn")
+  expect(await cmd($, '')).toBe("on, every 50m idle · time's up · ends after this turn · 0 beats")
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  expect(await cmd($, '')).toBe('off')
+})
+
+test('a keep-alive time under a set interval judges the cache by its lifetime now, not as last read', async ($: Engine, on: On) => {
+  const world: World = { settings: { interval: 30 } }
+  const { clock, forks } = await setup($, on, world)
+  await $.turn.complete(turn)
+  world.isSubscription = false // credits pay from here, and no plan window is reported: the cache is written for five minutes
+  // through the tool: the command reads the lifetime itself. The hour it was would reach past 55m, the five minutes does not
+  expect((await set($, { session: { keepAliveMinutes: 55 } })).session.nextBeat).toBe('in 30m')
+  await clock.advance(30 * M)
+  expect(forks).toEqual([30 * M])
 })
 
 test('the turn line and the status show the time left, moving with the countdown', async ($: Engine, on: On) => {
