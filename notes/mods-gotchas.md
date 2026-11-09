@@ -221,6 +221,37 @@ How it was done: a scratch mod (hooks on `session.start`, `session.end`, `classi
   - **`--plugin-dir` reloads on a file save** within about 20s, and that re-ran `session.start` in the live session (it saw 18 messages).
   - **A skill under test runs a real turn** (`/simplify` kicked off a multi-step agent run on Haiku, and Escape twice didn't stop it in time): probe with plugin commands where a skill isn't the point.
 
+## Dollars (built in step 2 of 0.10.0)
+
+How `hooks/prices.ts` and the beat's cost came out. "Observed" is a probe's or a test's result; "inferred" is a reading of it.
+
+- **Take prices from the pricing page, not the `claude-api` skill's table.** The page is `https://platform.claude.com/docs/en/about-claude/pricing.md` (checked 2026-11-09; the comment in `prices.ts` says so). The skill's table is cached (2026-10-06) and lists only input and output. Where they differ the page won: the skill says Sonnet 5.5 reads at $0.20, the page says $0.10 (0.05×).
+- **Cache reads are not one multiple of input.** 0.1× for most models; 0.025× for Fable 5.1 and Mythos 5.1; 0.05× for Opus 5.5 and Sonnet 5.5. Writes are 1.25× for five minutes and 2× for an hour everywhere. So the table holds the five figures per model, and a multiplier would be wrong for five of the sixteen models.
+- **Haiku 5.5 is five times dearer on every token kind for a prompt over 100,000 tokens** (input + read + write). So `writeRate` and `priceOf` take the prompt's size, and a learned rate is keyed by the tier too.
+- **Near-identical ids must not collide:** `claude-opus-5-5` ($4) and `claude-opus-5` ($5), `claude-sonnet-5-5` and `claude-sonnet-5` (reads $0.10 and $0.20), `claude-fable-5-1` and `claude-fable-5`, `claude-haiku-5-5` and `claude-haiku-4-5`. The lookup is by exact key, after the `[1m]` suffix and a `-YYYYMMDD` snapshot date come off. A provider's id (`anthropic.claude-…`, Bedrock) matches nothing: the pricing docs say Bedrock and Vertex are partner-operated with prices of their own. Lookups use `Object.hasOwn`, so `constructor` is not a model.
+- **Which write rate the re-cache is priced at (decided).** The probe found two engine figures on different write rates: `cost.usd` priced a fork's write at 1.25× input, and the resume estimate at 2× (P3, P4 above). The reading, inferred and not tested directly: 5-minute writes bill at 1.25× and 1-hour writes at 2×, a fork's own write is a 5-minute one (`hook_prompt` isn't on the 1-hour allowlist, above), and the main conversation's cache is the 1-hour one on a subscription.
+  - So `recacheUsd` is the conversation's size at the **main conversation's** rate (`s.isCacheShort ? '5m' : ttl`): 2× on an hour, 1.25× on five minutes. That is what the next message pays.
+  - A beat's own `priceOf` uses the **5-minute** rate whatever the main lifetime, since it's the fork's write.
+  - If the inference is wrong, `recacheUsd` is off by up to 1.6× on an hour's cache, and a mid-turn beat's price by the same on its few written tokens.
+- **The beat's price is the rise of `cost.usd` around the fork, when nothing else could have added to it** (P4: the rise is exact and readable straight after the `await`). Alone means: idle when the beat started (`wasIdle`), still idle after (`!busy`), and no request of the main conversation landed meanwhile (`s.lastWarm` unchanged). Each condition has its own test, since a turn that starts, or one that starts and finishes a request, both put the turn's cost into the same difference. Otherwise the fork's usage is priced from the table (mid-turn, an unknown model, or no `cost`).
+  - **A rise of zero or less isn't taken:** a priced response costs something, so zero means the ledger didn't count the fork. It also keeps the older tests, whose `session.usage` stub has a fixed cost, on the table.
+  - **`cost` is optional on `SessionUsage`** ("absent where the host keeps no cost ledger"; the CLI always has one). Without it, `priceOf`.
+  - **The delta works for a model the table lacks;** `priceOf` doesn't. So an idle beat on a new model still shows its price, and a mid-turn one shows none. A model the table lacks leaves the `· ≈$` part out of the log line altogether.
+  - **The delta can't tell a beat from other requests landing in it** (a background task, another mod's fork). The three conditions are what can be told.
+  - **It sees fast mode and a managed price, `priceOf` doesn't.** Fast mode doubles Opus's price.
+- **The engine's own re-cache estimate (`estimated_cache_write_usd`) is used less than the plan said.** `learnRate` takes it only when the table can't know better: `pricing: 'configured'` (a managed `modelPricing`), or `'catalog'` for a model the table lacks. Not for `'catalog'` on a model the table has (that is the list price again, rounded to four decimals), and not for `'default'` (the engine guessing: a guess shown as a price). Not under 20,000 tokens either (the rounding).
+  - **Only `classic.PostModelSwitch` teaches a rate.** It carries `cache_ttl`, so the rate is keyed by model, lifetime and tier. Resume's `classic.SessionStart` has `estimated_cache_write_usd` and `context_tokens` but **no TTL field**, and the model isn't always set there. Learning from it would key the rate on a guess of the lifetime, so it waits for step 4 (resume), which needs a probe of which rate the engine means there.
+  - **Whether the switch's estimate follows `cache_ttl`** (the 1-hour rate when it says `1h`) is inferred from the resume sample, not seen on a switch.
+  - The learned rates live in a module variable and are relearned after a reload at the next switch; they aren't stored.
+- **Display:** `money()` gives `≈$0.02` from a cent up, four decimals below it (a Haiku beat is about $0.0005), and `<$0.0001` below that. A figure in `state` is rounded to six decimals.
+- **No `$` in the turn line, and the plan's "dim line on a subscription" isn't drawn yet:** neither the beat log nor `state` is a page. The Status and CacheTax pages (steps 6 and 7) draw it. The `state` tool's text and the README carry the same words.
+- **The test kit:**
+  - `expect` has no `toBeCloseTo` (the tests have a `near` helper).
+  - `setup()` can be called once per test: a second call throws on `on("clock.*")`.
+  - `setup`'s `session.usage` stub now has a `cost` that each fork raises by `forkUsd`, and `noCost` leaves it out.
+- **Mutation checks:** each behaviour's test fails with its line broken: the rise taken at zero, each of the three `isAlone` conditions, the delta never taken, the fork's write rate, the lastUsd line, each `learnRate` guard, the ttl and tier in the key, the tier, the `[1m]` and date strips, `hasOwn`, the model rows with a cheaper or dearer read than their neighbour, the formatting and the omitted price.
+- **Not verified live:** an Opus fork, a fork on a cold cache (the plan asked for both), fast mode, the write-rate reading above, and that `cost.usd` exists on 2.1.287 (the types make it optional; the tests stub it).
+
 ## Surfaces: the desktop app (found live, 0.7.0)
 
 **Status: passable, left open.** The desktop app isn't the maintainer's main surface: cachebeat is built for the terminal. On desktop it works and looks acceptable, but it isn't polished. Line animations keep small gaps, and heart-heavy ones space wide (below). It's left as it is on purpose. Contributions to tighten it are welcome; the `Svg`-grid idea below is the likely route.

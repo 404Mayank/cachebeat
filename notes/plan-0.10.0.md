@@ -261,12 +261,12 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 - **A price table, `hooks/prices.ts` (pure).**
   - Base input $/MTok and output $/MTok per model family, matched on the model id from `TurnUsage.model` or `$.session.model()`.
-  - Cache rates as multipliers of input: read 0.1×, 5-minute write 1.25×, 1-hour write 2×.
-  - Fill and check every number from the `claude-api` skill at build time (it has current pricing), and write the date checked in a comment.
+  - Cache writes are 1.25× input for 5 minutes and 2× for an hour. **Reads are not 0.1× everywhere** (0.025× Fable 5.1 and Mythos 5.1, 0.05× Opus 5.5 and Sonnet 5.5), and Haiku 5.5 costs five times as much past a 100K-token prompt. So the table holds each model's five figures.
+  - Fill and check every number from the pricing page (`platform.claude.com/docs/en/about-claude/pricing.md`) at build time, and write the date checked in a comment. The `claude-api` skill's table lacks the cache columns and was wrong on one read rate.
   - An unknown model gives `null`: everything shows tokens only, never a guessed price.
-  - `export function priceOf(u: ModelUsage, model: string, ttl: Ttl): number | null`, and `export function writeRate(model: string, ttl: Ttl): number | null` in $/token.
-- **The engine's own figure wins when it has one** (see the P4 bullet below for the write-rate difference and the rounding).
-  - When `classic.PostModelSwitch` or resume `classic.SessionStart` gives `estimated_cache_write_usd` and `context_tokens > 0`, keep `rate = usd / context_tokens` for that model in a module variable for the session.
+  - `export function priceOf(u: ModelUsage, model: string, ttl: Ttl): number | null`, and `export function writeRate(model: string, ttl: Ttl, promptTokens: number, learned?: Learned): number | null` in $/token. (`promptTokens` was added for Haiku 5.5's tier.)
+- **The engine's own figure wins where it knows more than the table** (as built: a managed `modelPricing`, or a model the table lacks; not its list price for a model the table has, and not its guess. See the P4 bullet below for the write-rate difference and the rounding).
+  - When `classic.PostModelSwitch` gives `estimated_cache_write_usd` and `context_tokens` of 20,000 or more, keep `rate = usd / context_tokens` for that model, lifetime and tier in a module variable. (Resume's `classic.SessionStart` has no lifetime field, so it waits for step 4.)
   - It reflects a managed `modelPricing` when one is set (`pricing: 'configured'`), which the table can't know.
   - Don't persist it: it's cheap to relearn, and a store write per switch isn't worth it.
 - **P4 held: forks enter `cost.usd`,** and the rise was readable straight after the fork's `await` (one Haiku fork: +0.000536535, the fork's exact price). An idle beat's actual cost is the `cost.usd` delta around the fork. Use it for idle beats only: mid-turn, the turn's own requests land in the same delta. Otherwise use `priceOf` on the fork's usage. Either way, `s.lastUsd` is the last beat's cost.
@@ -622,6 +622,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 2: dollars (item 6)
 
 - **Delivers:** `hooks/prices.ts`, the rate override from engine estimates, `recacheUsd`, the `≈$` beat log, `state.session.lastBeatUsd`, and the README cost paragraph.
+- **Built 2026-11-09** on `step2-dollars`; what came out differently, and why, is in mods-gotchas.md, "Dollars (built in step 2 of 0.10.0)".
 - **Depends on:** step 1 (`CacheView`). P4 is answered (see item 6).
 - **Bundles:** item 6 alone.
 
