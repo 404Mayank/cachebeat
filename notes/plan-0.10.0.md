@@ -713,6 +713,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 8: the demo GIF (item 8)
 
 - **Depends on:** steps 1–7.
+- **`assets/demo.tape:31` types `/cachebeat 5`,** which step 3 refuses (a bare number needs a unit). The tape needs `/cachebeat global 5`, or whatever shows that interval now.
 
 ### Step 9: release 0.10.0
 
