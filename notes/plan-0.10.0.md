@@ -711,3 +711,4 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 - **The screenshots** for the Status and CacheTax pages. Both designs here are provisional until they come.
 - **P1 and P8,** pending: P1 needs the machine suspended, P8 needs Claude Code 2.1.287. P2–P7 are answered. Also not checked in step 0: a live `prompt_cache_likely_expired: true`, any origin but `composer`, and the desktop app.
 - **Whether computed `$.store` keys pass the directory scan,** pending a branch validation in step 4.
+- **`beat()` needs a `beating` guard** (a later step). A manual `/cachebeat now` during a scheduled fork sends two forks: `beat()` and `beatNow` check neither `beating` nor the other. It predates step 2 (found in step 2's review); nothing fixes it yet.
