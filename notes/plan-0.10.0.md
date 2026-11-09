@@ -687,7 +687,8 @@ Each step is finished, tested and merged into `dev` before the next starts.
   if (!('Input' in els)) return <Text>Open cachebeat's settings in the terminal.</Text>
   ```
 
-- **Then:** run the step checks. Whether CI should also run `tsc` is the user's call: on the 2.1.287 leg it would check the older types only.
+- **Then:** run the step checks.
+- **CI type-checks on the latest release only (the user, 2026-11-09: only the latest Claude Code is supported for the type-check).** The `Type-check` step in `.github/workflows/ci.yml` runs on the `latest` leg. How it gets the types without a key is in mods-gotchas.md, "Types". It ships to `main` with the next release branch.
 - **Bundles:** this fix, plus its mods-gotchas line ("Types").
 
 ### Step 3: the keep-alive time (item 3, with Stop after idle's text)
