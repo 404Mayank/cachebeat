@@ -86,3 +86,10 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
 
 - **`state` reports `lastBeatWrittenTokens` beside `lastBeatReadTokens`,** and its description says what a beat sends: the conversation as last sent, plus one line tagged `[cachebeat]`. In an end-user test of 0.9.0, Claude was asked what a beat reads and writes and couldn't say: it had only the read, and that was null before the session's first beat. Asked again with this text, it answered from the description and named both fields.
 
+## 0.9.2
+
+- **`state` gains a top-level `cache`** (beside `session`, so `session` kept its shape): `state` (`warm`, `cold`, `unknown` before anything is cached), `ttl`, `lastReadMinutesAgo`, `minutesLeft`, `coldForMinutes`, `contextTokens`, `recacheUsd`. Whole minutes, floored. All of it comes from `viewOf` in `hooks/cache.ts`; nothing else decides warm or cold.
+- **The description says "likely".** Warm is by time alone: now against the last read plus the lifetime, as Claude Code judges it. The engine can't confirm a hit before a request is made, and a gateway or provider can shorten the lifetime (see mods-gotchas.md, "The prompt cache"). The next beat or turn confirms it through its usage. The description lists the names, never values: tool text is fixed for the session.
+- **`recacheUsd` is null until step 2 adds prices.** It's in the shape now so the description doesn't change twice.
+- **`nextBeat` can be `due now`,** when the deadline has passed and the next step hasn't run. `session.paused` can read `the cache went cold`.
+- **`CacheView` carries `at`,** the time it was taken, so `lastReadMinutesAgo` and `minutesLeft` agree with `state` instead of being worked out from a second clock read.
