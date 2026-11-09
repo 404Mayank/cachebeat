@@ -4,6 +4,8 @@ import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, slotText, slotWidths, variant } from './animations'
 import { PANE, cut } from './pane'
 import { TTL_MS, viewOf } from './cache'
+import { isPriced, learnRate, money, priceOf, writeRate } from './prices'
+import type { Learned } from './prices'
 import { DEADLINE, IDLE, RETRY, STEP, fmt } from './register'
 import { DEFAULTS, EPISODE, accept, glyphs, lookOf, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
@@ -25,7 +27,7 @@ const turn = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reaso
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
 type World = {
-  fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS>
+  fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; forkUsd?: number; noCost?: boolean; settings?: Partial<typeof DEFAULTS>
   env?: Record<string, string>; settingsFile?: Record<string, unknown>; isSubscription?: boolean
   folders?: Record<string, unknown> // the store's folders, by path
   chat?: ReturnType<typeof said>[] // the conversation as the session starts: one there means a resumed session
@@ -66,9 +68,11 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   })
   on('ui.log', (_$, e) => (logs.push(e.text), { value: undefined }) as never)
   on('ui.toast', (_$, e) => (toasts.push(e.text), { value: undefined }) as never)
+  let spent = 0 // the session's cost so far, which each fork raises by `forkUsd`
   on('session.usage', () => ({
     value: {
       startedAt: 0,
+      ...(world.noCost ? {} : { cost: { usd: spent } }),
       context: { tokens: world.contextTokens, window: 200_000, ...(world.lastUsage ? { breakdown: { apiUsage: world.lastUsage } } : {}) },
       rateLimits: world.isSubscription === false ? [] : [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
     },
@@ -87,6 +91,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     prompts.push(e.prompt)
     forks.push(clock.now())
     if (world.during) await world.during(forks.length)
+    spent += world.forkUsd ?? 0
     return { value: replies[forks.length - 1] ?? replies.at(-1) ?? ok } as never
   })
   const tails: (string | undefined)[] = []
@@ -115,7 +120,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return {
-    clock, forks, prompts, logs, toasts, tails, store, specs, reads, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    clock, forks, prompts, logs, spend: (usd: number) => (spent += usd), toasts, tails, store, specs, reads, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
     add: (role: 'user' | 'assistant', text: string) => (chat = [...chat, said(role, text)]),
   }
@@ -320,7 +325,7 @@ test('now beats at once and reschedules from it', async ($: Engine, on: On) => {
   expect(await cmd($, '')).toContain('on, every 5m idle')
   await $.turn.complete(turn)
   await clock.advance(2 * M)
-  expect(await cmd($, 'now')).toBe('♥ cache renewed (90,000 read, 0 written)')
+  expect(await cmd($, 'now')).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
   await clock.advance(5 * M)
   expect(forks).toEqual([2 * M, 7 * M])
 })
@@ -413,7 +418,7 @@ test('with no closing row seen, a beat logs a line instead', async ($: Engine, o
   await cmd($, '3')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
-  expect(logs).toEqual(['♥ cache renewed (90,000 read, 0 written)'])
+  expect(logs).toEqual(['♥ cache renewed (90,000 read, 0 written · ≈$0.02)'])
 })
 
 test('a beat can log and toast both, closing row or not', async ($: Engine, on: On) => {
@@ -422,7 +427,7 @@ test('a beat can log and toast both, closing row or not', async ($: Engine, on: 
   await $.turn.complete(turn)
   await draw($, row('r1'))
   await clock.advance(3 * M)
-  expect(logs).toEqual(['♥ cache renewed (90,000 read, 0 written)'])
+  expect(logs).toEqual(['♥ cache renewed (90,000 read, 0 written · ≈$0.02)'])
   expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
 })
 
@@ -754,7 +759,7 @@ type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, nextBeat: null, skipping: null, paused: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, lastBeatUsd: null, nextBeat: null, skipping: null, paused: null }
 const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheUsd: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
@@ -958,7 +963,7 @@ test('after /model set to warm, the next beat writes the new model\'s cache and 
   await $.classic.PostModelSwitch(SWITCH)
   expect(logs.at(-1)).toBe("the next beat writes the new model's cache")
   await clock.advance(IDLE)
-  expect(logs.at(-1)).toBe("♥ warmed the new model's cache (90,000 written)")
+  expect(logs.at(-1)).toBe("♥ warmed the new model's cache (90,000 written · ≈$0.23)")
   expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · next beat in 50m')
   await clock.advance(IDLE)
   expect(forks).toEqual([IDLE, 2 * IDLE])
@@ -1119,7 +1124,7 @@ test('switched to another model and back while idle, beats go on from the cache 
 test('a beat by hand works while beating is off, after a turn', async ($: Engine, on: On) => {
   const { forks } = await setup($, on)
   await $.turn.complete(turn)
-  expect(await cmd($, 'now')).toBe('♥ cache renewed (90,000 read, 0 written)')
+  expect(await cmd($, 'now')).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
   expect(forks.length).toBe(1)
   expect(await cmd($, '')).toBe('off') // and it stays off
 })
@@ -1897,12 +1902,12 @@ test('viewOf: unknown before anything is cached, warm to the last millisecond, t
 
 test('state says whether the cache is warm, with beating off too: unknown, warm, then cold', async ($: Engine, on: On) => {
   const { clock, sleep } = await setup($, on, { contextTokens: 120_000 })
-  expect((await stateNow($)).cache).toEqual({ ...FRESH_CACHE, contextTokens: 120_000 })
+  expect((await stateNow($)).cache).toEqual({ ...FRESH_CACHE, contextTokens: 120_000, recacheUsd: 0.96 })
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, contextTokens: 120_000, recacheUsd: null })
+  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, contextTokens: 120_000, recacheUsd: 0.96 })
   sleep(80 * M) // 90m since the last read
-  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, contextTokens: 120_000, recacheUsd: null })
+  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, contextTokens: 120_000, recacheUsd: 0.96 })
 })
 
 test('state judges a cache found short by its five minutes', async ($: Engine, on: On) => {
@@ -2131,4 +2136,218 @@ test('usage crossing into credits before an on-time beat stops it for the limit,
   expect(forks).toEqual([])
   expect(logs).toEqual(['stopped: five-hour usage limit reached'])
   expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+
+// ---- dollars: what a request cost at API list prices, and what re-caching would ----
+
+const HAIKU = 'claude-haiku-5-5'
+/** `x` is `y` to `digits` decimals: the kit's expect has no toBeCloseTo. */
+const near = (x: number | null, y: number, digits: number) => expect(x !== null && Math.abs(x - y) < 10 ** -digits).toBe(true)
+const tokens = (input: number, output: number, read: number, wrote: number) => ({
+  input_tokens: input, output_tokens: output, cache_read_input_tokens: read, cache_creation_input_tokens: wrote,
+})
+
+test('priceOf: the fork the probe priced to the last digit, at its five-minute write rate', () => {
+  // Haiku 5.5, read from cost.usd around one fork: 26 in, 4 out, 52,381 read, 65 written = +$0.000536535
+  near(priceOf(tokens(26, 4, 52_381, 65), HAIKU, '5m'), 0.000536535, 9)
+  near(priceOf(tokens(26, 4, 52_381, 65), HAIKU, '1h'), 0.000536535 + 65 * 0.075 / 1e6, 9) // an hour's write is 2× input
+})
+
+test('prices: each model has its own reads, and near-identical ids do not collide', () => {
+  const read = (m: string) => Math.round(priceOf(tokens(0, 0, 100_000, 0), m, '5m')! * 1e7) / 1e6 // $ per MTok, at the base tier
+  expect([read('claude-fable-5-1'), read('claude-fable-5'), read('claude-mythos-5-1')]).toEqual([0.25, 1, 0.25])
+  expect([read('claude-opus-5-5'), read('claude-opus-5'), read('claude-opus-4-8')]).toEqual([0.2, 0.5, 0.5])
+  expect([read('claude-sonnet-5-5'), read('claude-sonnet-5'), read('claude-sonnet-4-6')]).toEqual([0.1, 0.2, 0.3])
+  expect([read('claude-haiku-5-5'), read('claude-haiku-4-5')]).toEqual([0.01, 0.1])
+  const input = (m: string) => priceOf(tokens(1_000_000, 0, 0, 0), m, '5m')
+  expect([input('claude-opus-5-5'), input('claude-opus-5'), input('claude-sonnet-5-5'), input('claude-haiku-4-5')]).toEqual([4, 5, 2, 1])
+})
+
+test('prices: a model id is matched as Claude Code writes it; anything else is unpriced, never guessed', () => {
+  const p = (m: string) => priceOf(tokens(1_000_000, 0, 0, 0), m, '5m')
+  expect(p('claude-opus-5-5[1m]')).toBe(4) // the 1M-context suffix
+  expect(p('claude-haiku-4-5-20251001')).toBe(1) // a snapshot date
+  expect(p('anthropic.claude-opus-5-5')).toBeNull() // a provider's id: its pricing is its own
+  expect(p('claude-future-9')).toBeNull()
+  expect(p('constructor')).toBeNull()
+  expect(isPriced('claude-opus-5-5')).toBe(true)
+  expect(isPriced('toString')).toBe(false)
+  expect(writeRate('claude-future-9', '1h', 90_000)).toBeNull()
+})
+
+test('writeRate: 1.25× input for five minutes, 2× for an hour, and Haiku 5.5 five times that past 100K tokens', () => {
+  near(writeRate(OPUS, '5m', 50_000), 5 / 1e6, 12)
+  near(writeRate(OPUS, '1h', 50_000), 8 / 1e6, 12)
+  near(writeRate(HAIKU, '1h', 100_000), 0.2 / 1e6, 12)
+  near(writeRate(HAIKU, '1h', 100_001), 1 / 1e6, 12)
+  near(priceOf(tokens(0, 0, 150_000, 0), HAIKU, '5m'), 150_000 * 0.05 / 1e6, 12)
+  near(priceOf(tokens(10, 1000, 0, 0), HAIKU, '5m'), (10 * 0.1 + 1000 * 0.5) / 1e6, 12) // a short prompt keeps the base
+})
+
+test('learnRate: the engine\'s figure counts where the table cannot know it, and not where it would only repeat it', () => {
+  const est = { model: OPUS, ttl: '1h', tokens: 100_000, usd: 0.4, pricing: 'configured' } as const
+  const learn = (e: Parameters<typeof learnRate>[1]) => {
+    const l: Learned = new Map()
+    return { learned: learnRate(l, e), rate: writeRate(e.model, e.ttl, e.tokens, l) }
+  }
+  expect(learn(est)).toEqual({ learned: true, rate: 4e-6 }) // a managed price
+  expect(learn({ ...est, pricing: 'catalog' })).toEqual({ learned: false, rate: 8e-6 }) // the list price again: the table's
+  expect(learn({ ...est, model: 'claude-future-9', pricing: 'catalog' })).toEqual({ learned: true, rate: 4e-6 }) // a model the table lacks
+  expect(learn({ ...est, model: 'claude-future-9', pricing: 'default' })).toEqual({ learned: false, rate: null }) // the engine's guess
+  expect(learn({ ...est, tokens: 19_999 })).toMatchObject({ learned: false }) // four decimals of rounding is too coarse
+  expect(learn({ ...est, usd: 0 })).toMatchObject({ learned: false })
+  const l: Learned = new Map()
+  learnRate(l, est)
+  near(writeRate(OPUS, '5m', 100_000, l), 5 / 1e6, 12) // learned at an hour's rate: not the five-minute one
+  near(writeRate('claude-opus-5', '1h', 100_000, l), 10 / 1e6, 12) // nor another model's
+  learnRate(l, { model: HAIKU, ttl: '1h', tokens: 150_000, usd: 1, pricing: 'configured' })
+  near(writeRate(HAIKU, '1h', 150_000, l), 1 / 150_000, 12)
+  near(writeRate(HAIKU, '1h', 90_000, l), 0.2 / 1e6, 12) // the other side of the tier
+})
+
+test('money: cents above a cent, four decimals below it, and a floor', () => {
+  expect(money(0.018)).toBe('≈$0.02')
+  expect(money(12.345)).toBe('≈$12.35')
+  expect(money(0.01)).toBe('≈$0.01')
+  expect(money(0.000536)).toBe('≈$0.0005')
+  expect(money(0.0042)).toBe('≈$0.0042')
+  expect(money(0.00004)).toBe('<$0.0001')
+})
+
+test('an idle beat costs what the session\'s cost rose by, as the log and the state say', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { forkUsd: 0.00123 }) // list price for this fork would be ≈$0.02
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.0012)')
+  expect((await stateNow($)).session.lastBeatUsd).toBe(0.00123)
+})
+
+test('a beat in a running turn is priced from its usage: the turn\'s own requests are in the same difference', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { forkUsd: 5 })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
+  near((await stateNow($)).session.lastBeatUsd, 0.01804, 6)
+})
+
+test('a priced beat\'s own writes are at the five-minute rate, though the conversation\'s cache lasts an hour', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { fork: [{ ...ok, usage: usage(89_000, 1_000) }] })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(3 * M)
+  near((await stateNow($)).session.lastBeatUsd, 0.02284, 6) // 1,000 written at $5/MTok, not the hour's $8
+})
+
+test('a turn that begins while an idle beat is on its way leaves the difference to the turn, so the usage is priced', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { forkUsd: 5, during: async n => { if (n === 1) await $.turn.start({ text: 'hi', turnId: 't2' }) } })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
+})
+
+test('a mid-turn beat is priced from its usage even when the turn ends meanwhile without a request', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { forkUsd: 5, during: async n => {
+    if (n === 1) await $.turn.complete({ ...turn, turnId: 't2', usage: undefined } as never) // ends: busy again false, the cache not warmed
+  } })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
+})
+
+test('a turn that begins and ends its request while an idle beat is on its way is not in the beat\'s price either', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { forkUsd: 5, during: async n => {
+    if (n === 1) { await $.turn.start({ text: 'hi', turnId: 't2' }); await step($, 't2', 0); await $.turn.complete({ ...turn, turnId: 't2' }) }
+  } })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toContain('≈$0.02)')
+})
+
+test('a session cost the engine does not report, or one that did not move, leaves the beat priced from its usage', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { noCost: true, forkUsd: 5 })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
+})
+
+test('on a model the table does not have, an idle beat still shows the cost it measured', async ($: Engine, on: On) => {
+  const { clock, logs, switchTo } = await setup($, on, { forkUsd: 0.5 })
+  switchTo('claude-future-9')
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.50)')
+})
+
+test('on a model the table does not have, a beat the cost cannot price shows no price', async ($: Engine, on: On) => {
+  const { clock, logs, switchTo } = await setup($, on)
+  switchTo('claude-future-9')
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written)')
+  expect((await stateNow($)).session.lastBeatUsd).toBeNull()
+})
+
+test('a beat that wrote its cache afresh still records its cost: the expensive ones', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }], settings: { interval: 50 } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE * 3)
+  expect(logs.at(-1)).toContain('stopped: the cache was not served')
+  near((await stateNow($)).session.lastBeatUsd, 0.45 + 0.00002 + 0.00002, 5) // 90,000 written at 1.25× of $4
+})
+
+test('the last beat\'s cost is kept across a reload', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { forkUsd: 0.002 })
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await stateNow($)).session.lastBeatUsd).toBe(0.002)
+})
+
+test('state prices a re-cache at an hour\'s write rate while the cache lasts an hour', async ($: Engine, on: On) => {
+  await setup($, on, { contextTokens: 120_000 })
+  expect((await stateNow($)).cache.recacheUsd).toBe(0.96) // 120,000 × $8/MTok
+})
+
+test('state prices a re-cache at the five-minute write rate for a five-minute cache', async ($: Engine, on: On) => {
+  await setup($, on, { contextTokens: 120_000, env: { FORCE_PROMPT_CACHING_5M: '1' } })
+  expect((await stateNow($)).cache.recacheUsd).toBe(0.6) // × $5/MTok
+})
+
+test('state has no re-cache price for a model the table lacks', async ($: Engine, on: On) => {
+  const { switchTo } = await setup($, on, { contextTokens: 120_000 })
+  switchTo('claude-future-9')
+  expect((await stateNow($)).cache.recacheUsd).toBeNull()
+})
+
+test('the engine\'s estimate on a model switch gives the re-cache rate only where it knows more than the table', async ($: Engine, on: On) => {
+  const { switchTo } = await setup($, on, { contextTokens: 120_000 })
+  const recache = async () => (await stateNow($)).cache.recacheUsd
+  const sw = (x: object) => $.classic.PostModelSwitch({ ...SWITCH, to_model: OPUS, cache_ttl: '1h', context_tokens: 100_000, estimated_cache_write_usd: 0.4, ...x } as never)
+  await sw({ pricing: 'catalog' })
+  await sw({ pricing: 'default' })
+  await sw({ pricing: 'configured', context_tokens: 10_000, estimated_cache_write_usd: 0.04 })
+  await sw({ pricing: 'configured', cache_ttl: '5m' })
+  expect(await recache()).toBe(0.96) // none of these counts for the one-hour rate
+  await sw({ pricing: 'configured' })
+  expect(await recache()).toBe(0.48) // a managed $4/MTok write
+  switchTo('claude-future-9')
+  await sw({ to_model: 'claude-future-9', pricing: 'catalog', estimated_cache_write_usd: 0.5 })
+  expect(await recache()).toBe(0.6) // 120,000 × the engine's $5/MTok: a model the table lacks
 })
