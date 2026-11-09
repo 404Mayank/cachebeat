@@ -157,6 +157,70 @@ Things about mods, the engine and the test kit that took time to work out. These
 - **The uncached hint:** Claude Code 2.1.295 shows "~68k uncached · /clear to start fresh" in the footer, not a dialog. It's on Pro plans, when the conversation is at least 50,000 tokens and its last reply is over an hour old (`Mqe` in the bundle). Beats must not re-read the conversation before the user's next message, and with the pause they don't.
 - **The bundle also has "Compacted while idle, before the prompt cache expired":** an engine mode that compacts an idle conversation. cachebeat sees it as `session.compact` and pauses, as for `/compact`.
 
+## 0.10.0 probes (found live, 2026-11-09)
+
+Step 0 of `plan-0.10.0.md`, P2–P7. Claude Code 2.1.319, `--model haiku`, a Pro plan, a terminal in tmux. "Observed" is what a probe logged or the screen showed; "inferred" is a reading of that. **Pending:** P1 (needs the machine suspended) and P8 (needs 2.1.287, whose install is blocked); nothing here was run on 2.1.287.
+
+How it was done: a scratch mod (hooks on `session.start`, `session.end`, `classic.SessionStart`, `prompt.submit`, a catch-all `command.run`, and a `/probe usage|fork` command) that wrote each event to a file with `$.fs.write`. It lived outside the repo and was loaded with `--plugin-dir`, but cachebeat itself was loaded in the same sessions (the debug log lists `cachebeat@cachebeat` hooks). Its `hooks/register.tsx` has no `prompt.submit` hook, so P5–P7 weren't touched; P4's delta matched the fork's own usage to the last digit, so its beats didn't add to it (beats were off, the default).
+
+- **P2: yes. `$.session.id()` is the same id after `--resume <id>` and after `--continue`.** Observed.
+  - `session.end` gave `sessionId`, `resume.id` and `$.session.id()` all equal (4c784efd…). The `--resume` process's `session.start` read that id from `$.session.id()`; so did `--continue`'s, which picked the most recently written conversation.
+  - **`/resume` is not so tidy.** `classic.SessionStart` (source `resume`) arrives 12ms after the `session.end`, with `e.session_id` the **resumed** conversation's id, while `$.session.id()` inside that same hook still returns the id of the conversation **left behind**. Every later `prompt.submit` and `command.run` saw the resumed id (checked in a run with no file saved during it: conversations A, `/clear`, B, `/resume` back to A, then 5 events, all A's). So in that hook read `e.session_id`, never `$.session.id()`. When it turns over between the hook and the first prompt wasn't pinned down.
+  - `/clear` is the other way: at `classic.SessionStart` (source `clear`), `$.session.id()` is already the new id.
+  - `$.session.id()` works inside `classic.SessionStart` on startup, resume and clear (`$.session.messages()` is the call that throws there).
+- **P3: `classic.SessionStart` (source `resume`) reaches the mod on `--resume` and `--continue` with every field set, but it does not finish before `session.start` starts: the two hooks run concurrently.** Observed.
+  - **The deciding run:** `classic.SessionStart` made to wait 800ms (`await new Promise(r => { $.clock.after(800, () => r(null)) })`; a bare `await $.clock.after(…)` returns at once). `session.start` was entered at 18.135, `classic.SessionStart`'s first statement ran at 18.136, and `session.start` saw the wait not yet over. So even a synchronous stash in `classic.SessionStart` can come after `session.start` began.
+  - Why the plain runs misled: each hook's log line is written after its own awaits, so file order said nothing, and the debug log's "settled in N ms" lines, taken as end times, put their starts within about 2ms of each other (`classic.SessionStart` settled at 46.683 after 22.7ms, `session.start` at 46.954 after 295.9ms), so line order in the probe's file was an accident of how many awaits each hook made.
+  - **On `/resume` and `/clear` there is no `session.start`,** so `classic.SessionStart` is the only hook there.
+  - Source is `resume` for `--continue` as well as `--resume`.
+  - Fields seen: `seconds_since_last_response` (81, then 26, then 134 on `/resume`), `context_tokens` (52,448; the footer showed the same number), `prompt_cache_likely_expired: false`, `estimated_cache_write_usd: 0.0105`. `prompt_id` and `model` came on the `/resume` one.
+  - **`seconds_since_last_response` counts from the last main-thread response, not from a `$.model.fork`.** A fork 43s before the first resume didn't reset it (81s matched the last turn). Inferred from one case.
+  - **`estimated_cache_write_usd` is rounded to 4 decimals.** Two contexts (52,448 and 52,719 tokens) both gave 0.0105. So `usd / context_tokens` is coarse for a small context: 0.00005 of error on a $0.0105 figure is 0.5%, and 5% on a 5k-token chat. Inferred from those two samples.
+  - It came to $0.20 per million tokens on Haiku 5.5, which is 2× the input rate (P4's fit has input at $0.10): the 1-hour write rate on a Pro plan, inferred.
+  - `$.session.messages()` already holds the conversation at `session.start` (18, then 20 messages).
+  - **Not seen:** `prompt_cache_likely_expired: true`. It needs a gap past the TTL, which was not waited out.
+- **P4: yes. `$.session.usage().cost.usd` grows by the fork's price, at once.** Observed with one fork on a Haiku session idle for under 2 minutes, `cost.usd` read straight before and after the `await`:
+  - before 0.00846389, after 0.009000425: a rise of 0.000536535
+  - the fork's `usage`: 26 input, 4 output, 52,381 cache read, 65 cache write
+  - that sum fits to the last digit at input $0.10, output $0.50, cache read $0.01 and 5-minute write $0.125 per million (inferred: 4 numbers fitted to 1 total, but each is a clean multiple of the next)
+  - **`cost.usd` and `estimated_cache_write_usd` price a write differently** ($0.125 against $0.20 per million, inferred as above). Both are the engine's own figures. A beat priced from the `cost.usd` delta and a re-cache priced from the estimate's rate will be on different write rates: up to 1.6× apart, and only on the written tokens. Not explained.
+  - Not checked: a fork on a model other than Haiku, a fork after the cache expired, or the delta of a mid-turn fork.
+- **P5: the dropped text stays in the composer, and the reason is drawn as a row.** Observed in the terminal, twice idle and once mid-turn.
+  - A `prompt.submit` hook answered `{ drop: 'PROBE-DROPPED: …' }` for `drop-me please`. The screen showed `● Prompt dropped by a hook: PROBE-DROPPED: …` as a transcript row above the prompt, and `❯ drop-me please` still in the composer, ready to send again or edit. Nothing was sent: the text is not in the conversation file.
+  - The engine adds the "Prompt dropped by a hook: " prefix. The reason is drawn as given.
+  - **Enter on the same text raised `prompt.submit` again** (two events, same text, 27s apart). So drop-then-resend works as the cold guard needs, and `$.ui.ask` isn't needed.
+  - **A prompt dropped mid-turn** (typed over a running turn, `turnId` set) showed the reason at the right edge above the composer while the turn ran, and as the same `● Prompt dropped by a hook: …` row afterwards. The text stayed in the composer then too.
+  - **`$.ui.log` inside `prompt.submit`:** called before a drop, it drew `● probe: <text>` as a transcript row **just above** the drop row. Called before and after `next(e)` on a prompt typed mid-turn (both calls 1ms apart: `next` resolves at once when the prompt queues), neither line was found in the pane's scrollback, though the debug log has both. So a log in a hook that passes the prompt through can't be relied on to show; use it only with a drop, or use a toast (not tried).
+  - **Not checked:** how a very long reason wraps; the desktop app; a dropped prompt with the `bridge` origin.
+- **P6: only text the model will read reaches `prompt.submit`.** Observed, all with origin `composer`.
+
+  | Typed | `command.run` | `prompt.submit` |
+  | --- | --- | --- |
+  | plain text | no | yes |
+  | `/probe …` (a plugin's command) | yes | no |
+  | `/help`, `/context`, `/clear`, `/resume` | yes | no |
+  | `/simplify` (a skill) | yes, first | yes, 20ms later, `text` `"/simplify"` as typed |
+  | `!ls` | no | no |
+
+  - `!ls` raised neither event, and ran (the conversation file holds `<bash-input>ls</bash-input>`).
+  - `/cachebeat` is a plugin command like `/probe`, so it never reaches the guard.
+  - A skill or prompt-type command sends the conversation, so it should be held on a cold cache, and it reaches the hook. Its text is the raw `/simplify`, with no expansion.
+  - `command.run` carries `origin` too (`{ kind: 'composer' }` for all of these).
+  - **A prompt typed mid-turn** reached the hook with `turnId` set, `origin` `composer` and `wait` false (twice, in the last run, over a turn Haiku was still working on).
+  - **Not seen:** any origin but `composer`. Whether dropping a skill's `prompt.submit` undoes its already-run `command.run` is untested.
+- **P7: yes. `claude plugin test` raises `prompt.submit` with `origin: { kind: 'composer' }`.** Observed (and `tsc` accepts it).
+  - `await $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false })` from a test: the plugin's hook saw a composer prompt and dropped it (`r.drop` is the reason, and the test's own bottom stub never ran). The same text with `{ kind: 'bridge' }` passed through to the stub with that origin.
+  - The test's `$.prompt.submit` takes the event's input whole, unlike a plugin's `$.prompt.submit`, which can't set `origin`, `turnId` or `wait`.
+  - **A test that leaves `origin` out gets `e.origin === undefined`:** the kit stamps nothing. A hook that reads `e.origin.kind` is skipped ("undefined is not an object") and the prompt passes, so a guard test that forgets it passes for the wrong reason.
+  - Not tried: `turnId` set in a test.
+- **Process gotchas** (not about the engine):
+  - **Use a private tmux socket (`tmux -L probe …`), never `tmux kill-server`:** that kills every tmux server of every session on the machine, and the auto-mode classifier refused the command.
+  - **A new working directory asks "Do you trust this folder?"** before the prompt appears: `Down`, `Enter` accepts.
+  - **Overlapping `$.fs.write` calls to one path race:** a slower, earlier write replaced a later, longer one and a log line vanished. Chain the writes.
+  - **`claude plugin validate` printed "No digest" when `$` was passed to an arrow function declared inside `register`.** A `function` declared at the top of the file passed.
+  - **`--plugin-dir` reloads on a file save** within about 20s, and that re-ran `session.start` in the live session (it saw 18 messages).
+  - **A skill under test runs a real turn** (`/simplify` kicked off a multi-step agent run on Haiku, and Escape twice didn't stop it in time): probe with plugin commands where a skill isn't the point.
+
 ## Surfaces: the desktop app (found live, 0.7.0)
 
 **Status: passable, left open.** The desktop app isn't the maintainer's main surface: cachebeat is built for the terminal. On desktop it works and looks acceptable, but it isn't polished. Line animations keep small gaps, and heart-heavy ones space wide (below). It's left as it is on purpose. Contributions to tighten it are welcome; the `Svg`-grid idea below is the likely route.

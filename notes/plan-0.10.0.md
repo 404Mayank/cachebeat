@@ -2,6 +2,8 @@
 
 Status: planned 2026-11-09, nothing built. The user answered the plan's questions the same day ("Decisions" at the end). Step 1 ships alone as 0.9.2. Items 5 and 7 (the summary and CacheTax pages) are **provisional** until the user re-sends the reference screenshots: their content is settled here, their look isn't.
 
+**Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 and P8 are still pending.
+
 Line numbers are `dev` at `f58a51b` (0.9.1). The mod API is `.claude-plugin/types/claude-code/index.d.ts` (written `index.d.ts:N` below).
 
 ## The problem
@@ -46,16 +48,16 @@ Read this before any step. An implementer must not treat an inferred point as fa
 
 Step 0 below checks each one.
 
-| # | Claim | Why it's believed | How to check |
-| --- | --- | --- | --- |
-| P1 | `$.clock.after` timers stop while the machine sleeps, while `$.clock.now()` jumps ahead | libuv and Bun time timers on the monotonic clock, which excludes suspend on Linux and macOS. The types say nothing about it. | A probe mod logs `$.clock.now()` from a 60s `$.clock.every`. Suspend for 3+ min (`systemctl suspend`, or close the lid), wake, and read the gaps in `~/.claude/debug/<session>.txt`. |
-| P2 | After `--resume` / `--continue`, `$.session.id()` equals the id before exit | `SessionResume.id` is what `--resume` takes | The probe logs `$.session.id()` at `session.start` and `e.sessionId` at `session.end`. Exit, `claude --resume <id>`, compare. Same with `--continue`. |
-| P3 | On `--resume`, `classic.SessionStart` (source `resume`) reaches the mod, before `session.start`, with `seconds_since_last_response` etc. set | mods-gotchas.md says it fires before the session is bound | The probe logs the hook order and the fields. Repeat on 2.1.287 (gotchas: "Testing an old version locally"). |
-| P4 | `$.session.usage().cost.usd` grows by a fork's price | "every priced API response" | The probe reads `cost.usd` before and after `/cachebeat now` on an idle session. |
-| P5 | A dropped prompt's text stays in the composer | Unknown either way | The probe drops every `composer` prompt that starts with `drop-me`. Does the text stay? Where does the reason draw? On desktop too. |
-| P6 | Slash commands, `!` shell commands and prompt-type commands (skills, `/review`) do or don't raise `prompt.submit`, and with which `origin` | Unknown | The probe logs `e.origin.kind` and `e.text` on every `prompt.submit`. Type `/cachebeat`, `!ls`, a skill command and plain text. |
-| P7 | The test kit can raise `prompt.submit` with `origin: { kind: 'composer' }` | `$.prompt.submit` from a test may stamp `plugin` | A test calls the event with an origin and checks what a hook sees. If the kit can't do it, the guard's tests need another route. Say so in that step. |
-| P8 | `prompt.submit`, `$.session.id`, and the resume fields exist on 2.1.287 | Optional in the types | Run the probe under the 2.1.287 install. Or push a branch and let CI's 2.1.287 leg run the step's tests. |
+| # | Claim | Why it's believed | How to check | Result |
+| --- | --- | --- | --- | --- |
+| P1 | `$.clock.after` timers stop while the machine sleeps, while `$.clock.now()` jumps ahead | libuv and Bun time timers on the monotonic clock, which excludes suspend on Linux and macOS. The types say nothing about it. | A probe mod logs `$.clock.now()` from a 60s `$.clock.every`. Suspend for 3+ min (`systemctl suspend`, or close the lid), wake, and read the gaps in `~/.claude/debug/<session>.txt`. | **Pending:** needs the machine suspended. |
+| P2 | After `--resume` / `--continue`, `$.session.id()` equals the id before exit | `SessionResume.id` is what `--resume` takes | The probe logs `$.session.id()` at `session.start` and `e.sessionId` at `session.end`. Exit, `claude --resume <id>`, compare. Same with `--continue`. | **Yes** for `--resume` and `--continue`. On `/resume`, `$.session.id()` inside `classic.SessionStart` is still the old id: read `e.session_id`. |
+| P3 | On `--resume`, `classic.SessionStart` (source `resume`) reaches the mod, before `session.start`, with `seconds_since_last_response` etc. set | mods-gotchas.md says it fires before the session is bound | The probe logs the hook order and the fields. Repeat on 2.1.287 (gotchas: "Testing an old version locally"). | **Fields yes, order no.** `classic.SessionStart` reaches the mod with all four fields, but it runs *concurrently* with `session.start` (entered 1ms after it; the hook was made to wait 800ms and `session.start` didn't). Apply the hint from whichever finishes second. `estimated_cache_write_usd` is rounded to 4 decimals. The `likely_expired: true` case wasn't seen. |
+| P4 | `$.session.usage().cost.usd` grows by a fork's price | "every priced API response" | The probe reads `cost.usd` before and after `/cachebeat now` on an idle session. | **Yes.** `cost.usd` rose by exactly the fork's price, at once. But `cost.usd` and the resume estimate imply different write rates. |
+| P5 | A dropped prompt's text stays in the composer | Unknown either way | The probe drops every `composer` prompt that starts with `drop-me`. Does the text stay? Where does the reason draw? On desktop too. | **Yes, it stays.** The reason is drawn as a row, `Prompt dropped by a hook: <reason>`. Enter on the same text raises the event again. A `$.ui.log` before a drop draws just above it. |
+| P6 | Slash commands, `!` shell commands and prompt-type commands (skills, `/review`) do or don't raise `prompt.submit`, and with which `origin` | Unknown | The probe logs `e.origin.kind` and `e.text` on every `prompt.submit`. Type `/cachebeat`, `!ls`, a skill command and plain text. | Plain text and skills (text as typed) reach it, mid-turn ones with `turnId` set. Plugin and built-in slash commands (`command.run` only) and `!` don't. |
+| P7 | The test kit can raise `prompt.submit` with `origin: { kind: 'composer' }` | `$.prompt.submit` from a test may stamp `plugin` | A test calls the event with an origin and checks what a hook sees. If the kit can't do it, the guard's tests need another route. Say so in that step. | **Yes**, with the origin passed in the test's call. Left out, `e.origin` is `undefined`. |
+| P8 | `prompt.submit`, `$.session.id`, and the resume fields exist on 2.1.287 | Optional in the types | Run the probe under the 2.1.287 install. Or push a branch and let CI's 2.1.287 leg run the step's tests. | **Pending:** needs 2.1.287. |
 
 ## The design
 
@@ -255,7 +257,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 **What the API offers:** see "Facts". There's no per-request dollar figure. The engine prices a re-cache at a switch or resume, and keeps a session total.
 
-**The design** depends on P4.
+**The design** (P4 held; see mods-gotchas.md "0.10.0 probes").
 
 - **A price table, `hooks/prices.ts` (pure).**
   - Base input $/MTok and output $/MTok per model family, matched on the model id from `TurnUsage.model` or `$.session.model()`.
@@ -263,11 +265,14 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - Fill and check every number from the `claude-api` skill at build time (it has current pricing), and write the date checked in a comment.
   - An unknown model gives `null`: everything shows tokens only, never a guessed price.
   - `export function priceOf(u: ModelUsage, model: string, ttl: Ttl): number | null`, and `export function writeRate(model: string, ttl: Ttl): number | null` in $/token.
-- **The engine's own figure wins when it has one.**
+- **The engine's own figure wins when it has one** (see the P4 bullet below for the write-rate difference and the rounding).
   - When `classic.PostModelSwitch` or resume `classic.SessionStart` gives `estimated_cache_write_usd` and `context_tokens > 0`, keep `rate = usd / context_tokens` for that model in a module variable for the session.
   - It reflects a managed `modelPricing` when one is set (`pricing: 'configured'`), which the table can't know.
   - Don't persist it: it's cheap to relearn, and a store write per switch isn't worth it.
-- **If P4 holds** (forks enter `cost.usd`), an idle beat's actual cost is the `cost.usd` delta around the fork. Use it for idle beats only: mid-turn, the turn's own requests land in the same delta. Otherwise use `priceOf` on the fork's usage. Either way, `s.lastUsd` is the last beat's cost.
+- **P4 held: forks enter `cost.usd`,** and the rise was readable straight after the fork's `await` (one Haiku fork: +0.000536535, the fork's exact price). An idle beat's actual cost is the `cost.usd` delta around the fork. Use it for idle beats only: mid-turn, the turn's own requests land in the same delta. Otherwise use `priceOf` on the fork's usage. Either way, `s.lastUsd` is the last beat's cost.
+  - **The two engine figures don't share a write rate.** On Haiku, `cost.usd` priced a write at 1.25× input and the resume estimate at 2×. So a beat's dollars (the `cost.usd` delta) and `recacheUsd` (from the estimate's rate) can differ on the written tokens. Decide in step 2 which `recacheUsd` follows, and say which on the page; cost-delta-only is not a fix, since it can't price a cold send ahead of time.
+  - **`estimated_cache_write_usd` is rounded to 4 decimals,** so `usd / context_tokens` is coarse below ~20k tokens. Learn the rate only from a context of 20k or more, or keep the table's.
+  - Checked on Haiku only, with the cache warm. Check Opus and an expired-cache fork once in step 2.
 - **What gets dollars:**
   - `CacheView.recacheUsd`: `contextTokens × writeRate`, for the summary, the cold guard and `state`.
   - The beat log line: `♥ cache renewed (184,212 read, 12 written · ≈$0.02)`.
@@ -376,11 +381,11 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - Its fields are optional in the types, and may be absent on 2.1.287 (P8). Absent fields mean the cache state stays `unknown`, and the guard doesn't hold.
 - **`--resume` / `--continue`, at `session.start` with messages present:**
   1. Read `` `session:${await $.session.id()}` ``. If there's a record, `s = { ...fresh, enabled, keepUntil, beats }`. Otherwise keep today's `cfg.defaultOn`.
-  2. Apply `resumeHint` if its id matches. P3 decides whether it's there yet. If `classic.SessionStart` comes *after* `session.start`, apply it there instead, with the same function.
+  2. Apply `resumeHint` if its id matches. **P3: the order isn't guaranteed.** On `--resume` and `--continue`, `classic.SessionStart` and `session.start` run concurrently (`session.start` entered first by 1ms in the deciding run, with the other hook slow). So both hooks do the same: `classic.SessionStart` stashes the hint, and calls `seedFromResume` if `session.start` has already finished its restore; `session.start` restores, and applies the hint if it is already stashed. Use one module flag for "restored" and another for "hint stashed", both set synchronously, and guard the apply against running twice. `$.session.id()` equals `e.session_id` here (P2).
   3. Then `pause($, RESUMED, …)` as now.
   - A keep-alive whose deadline has passed comes back off.
-- **`/resume`:** the same, from the `classic.SessionStart` hook, which runs after `anotherConversation`. Use `e.session_id`: `$.session.id()` may not be bound yet there.
-- **Seeding:** `s.lastWarm = now − secondsSince × 1000` sets `source: 'resume'`. Use `estimated_cache_write_usd / context_tokens` as the session's write rate (step 2's override).
+- **`/resume`:** the same, from the `classic.SessionStart` hook, which runs after `anotherConversation`. **Use `e.session_id`:** P2 found that `$.session.id()` inside that hook is still the id of the conversation *left behind* (it is the resumed id by the next prompt). Don't use `$.session.id()` for the record key there.
+- **Seeding:** `s.lastWarm = now − secondsSince × 1000` sets `source: 'resume'`. Take `now` when the hook's event arrived, not when the apply runs, if the two can differ. `seconds_since_last_response` counts from the last main-thread response, not from a fork (P3, inferred from one case), which matches what `lastWarm` should be after a restart. Use `estimated_cache_write_usd / context_tokens` as the session's write rate (step 2's override), mind its 4-decimal rounding, and leave `prompt_cache_likely_expired` to the TTL comparison cachebeat already makes (the `true` case wasn't seen).
 - **The `RESUMED` constant's comment** (:383) and the README stay true: no beat re-reads the conversation before the user's next message. The uncached hint is untouched.
 
 **Function names** handed `$`, each new in the file: `restoreConversation($, id)`, `seedFromResume($, hint)`.
@@ -395,12 +400,13 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - The resume hint seeds `state.cache`: `cold` when `secondsSince` is past the TTL, `warm` with minutes left otherwise.
   - Store pruning drops a 31-day-old record and keeps a fresh one.
   - Two sessions' records don't overwrite each other.
+- **Test both orders** (hint first, restore first) on `--resume`: the kit runs hooks one at a time, so make one `await` something the test holds open, as `holdNow` does for the clock.
 - **Raising the resume hook in a test:** `$.classic.SessionStart({ source: 'resume', session_id: 's1', seconds_since_last_response: 7200, … } as never)`. The cast is in the test, not in a `$` call of the plugin, so it's fine.
 
 **README:**
 - Rewrite the "A resumed conversation…" bullet (README:261): `A resumed conversation (claude --resume, --continue, or /resume) picks up as you left it: on or off, and any time you gave it. Beats start after your next message, since nothing of it is cached in this session yet, and the turn line says whether the cache is likely still warm.`
 - Privacy: settings and **each session's on/off, time left and beat count, by session id, for 30 days**.
-- Close the "Still open" `--resume` item in plan-0.8.0.md, with what P2 found.
+- Close the "Still open" `--resume` item in plan-0.8.0.md, with what P2 found: the id is the same after `--resume` and `--continue`.
 
 ### Item 4: the cold guard (step 5)
 
@@ -429,7 +435,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
   1. The guard applies here: `s.guard ?? cfg.coldGuard`.
   2. `e.origin.kind === 'composer'`. Not `bridge` (Remote Control: how a held message shows there is unknown), `plugin`, `sdk`, `peer` or a scheduled trigger.
   3. `e.turnId === undefined` and `!busy`. Mid-turn, the cache is being read anyway.
-  4. P6 decides whether slash and `!` commands reach this hook at all. If they do, skip text starting with `/` or `!`. If they don't, add no check: no handling for a case that can't happen.
+  4. **No check on a leading `/` or `!`** (P6): `!` commands and plugin and built-in slash commands (`/cachebeat`, `/clear`, `/resume`, `/help`) never reach `prompt.submit`. A skill or prompt-type command does, with its text as typed (`/simplify`). It sends the conversation, so it is held like plain text.
   5. `(await cacheNow($)).state === 'cold'`, written as a plain statement first. `unknown` (a new conversation, or a resume without a hint) never holds.
   6. `contextTokens >= cfg.coldGuardTokens`.
   7. The guard isn't armed: see below.
@@ -441,13 +447,13 @@ Every "next" text goes through it, and no caller writes "in" itself:
     ```
 
     Leave the `(≈$…)` out while `recacheUsd` is null.
-  - **A send while armed** (`armedFor === s.lastWarm && now < armedUntil`, any text) calls `next(e)` and warns with `$.ui.log('sent on a cold cache: cold for 2h 14m, 184k tokens cached again')`. P5's check also shows where a log during `prompt.submit` lands. If it lands badly, use a toast.
+  - **A send while armed** (`armedFor === s.lastWarm && now < armedUntil`, any text) calls `next(e)` and warns with `$.ui.log('sent on a cold cache: cold for 2h 14m, 184k tokens cached again')`. **Where a log lands (P5):** a `$.ui.log` before a drop draws as a `● cachebeat: …` row just above the drop row. After `next(e)` on a mid-turn prompt, a log wasn't found on screen, so warn on a send that goes through with a toast (not tried) or try the log first in this step.
   - **A send after the window** is held again, and re-arms.
   - **A turn that warms the cache** changes `s.lastWarm`, so `armedFor` no longer matches. No timer is needed.
 - **Counting** for step 7: a held send, and a cold send with its tokens and dollars.
 - **The guard runs with beating off.** It's about the cache, not about beats, and `markWarm` runs either way.
 
-**If P5 shows the dropped text is lost** (decided with the user), use `$.ui.ask` in the hook instead of dropping:
+**P5 found the dropped text stays in the composer** (the reason draws as a transcript row, `Prompt dropped by a hook: <reason>`, and Enter on the same text raises the event again), so drop-and-resend is the build and the variant below is **not needed**. It stays here for the case where the text were lost (decided with the user):
 - Ask `Cache cold for 2h 14m: cache 184k tokens again (≈$0.69)?` with `Send` and `Don't send`.
 - `Send` calls `next(e)`. Anything else, a dismissal included (it rejects: use `.catch` on the ask call, then drop), returns the drop.
 - There's no arm and no window in that variant, and the window setting isn't added. Record which variant was built in the step's notes.
@@ -458,7 +464,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 **Function names:** `guardColdSend($, e)` for the hook body, if it's pulled out.
 
-**Tests** (P7 decides how the event is raised):
+**Tests** (the mid-turn case is real: a composer prompt typed over a running turn arrives with `turnId` set. P7: raise it as `await $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false })`. The kit stamps no origin, so **every guard test passes one**: left out, `e.origin` is `undefined`, the hook is skipped, and the prompt goes through. A test that expects a send to pass would then pass for the wrong reason):
 - **Holding:**
   - Cold and big: the first send is dropped, naming the age, the size and `3m`. A second within 3m goes through with the warning.
   - A second send after 3m 1s is held again, and a third within the new window goes through.
@@ -469,7 +475,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - `unknown`.
   - Under `coldGuardTokens`.
   - `origin` `plugin`, and `bridge`.
-  - Mid-turn (`turnId` set).
+  - Mid-turn (`turnId` set). (Live, a prompt typed mid-turn arrives with `turnId` set. No test in the kit has set it: pass it in this step's test.)
 - **Scopes:**
   - Guard off for all folders, on for the session: holds. And the reverse.
   - The folder's own `coldGuardWindow` applies.
@@ -597,6 +603,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Bundles:** checks only, no shipped code.
 - **How:** a scratch probe mod outside the repo (`claude --plugin-dir <probe>`), driven in tmux as mods-gotchas.md "/rewind" describes. P1 needs the user to suspend the machine.
 - **Why first:** P5 can change the cold guard's whole shape, P2 and P3 the resume design, and P4 the dollar source.
+- **Status:** P2–P7 done 2026-11-09. None changed the shape of a design (P5 kept drop-and-resend, P4 kept the `cost.usd` delta, P3 kept the plan's two-order resume), but each changed a detail: see items 2, 4 and 6. P1 and P8 are pending.
 
 ### Step 1: cache state and the sleep fix, released as 0.9.2 (shared piece, item 1)
 
@@ -615,7 +622,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 2: dollars (item 6)
 
 - **Delivers:** `hooks/prices.ts`, the rate override from engine estimates, `recacheUsd`, the `≈$` beat log, `state.session.lastBeatUsd`, and the README cost paragraph.
-- **Depends on:** step 1 (`CacheView`) and P4.
+- **Depends on:** step 1 (`CacheView`). P4 is answered (see item 6).
 - **Bundles:** item 6 alone.
 
 ### Step 3: the keep-alive time (item 3, with Stop after idle's text)
@@ -628,12 +635,12 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 4: resume (item 2)
 
 - **Delivers:** per-session store records, restore, seeding from the resume hint, the new resume line, README and Privacy.
-- **Depends on:** step 3 (`keepUntil`), step 1 (cache state), P2, P3, P8, and the portal check on computed store keys.
+- **Depends on:** step 3 (`keepUntil`), step 1 (cache state), P8 (P2 and P3 are answered), and the portal check on computed store keys.
 
 ### Step 5: the cold guard (item 4)
 
 - **Delivers:** the `coldGuard`, `coldGuardWindow` and `coldGuardTokens` settings, the session override, the `prompt.submit` hook, the arm and its window, the warning, the tool fields, and the README rows and directory line.
-- **Depends on:** step 1 (state), step 2 (the `≈$` in the message), step 4 (a resumed session's first message is the case that matters most), and P5–P7.
+- **Depends on:** step 1 (state), step 2 (the `≈$` in the message), step 4 (a resumed session's first message is the case that matters most), and P8 (P5–P7 are answered).
 
 ### Step 6: the Status page (item 5, provisional)
 
@@ -701,5 +708,5 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 ## Still open
 
 - **The screenshots** for the Status and CacheTax pages. Both designs here are provisional until they come.
-- **P1–P8,** pending step 0.
+- **P1 and P8,** pending: P1 needs the machine suspended, P8 needs Claude Code 2.1.287. P2–P7 are answered. Also not checked in step 0: a live `prompt_cache_likely_expired: true`, any origin but `composer`, and the desktop app.
 - **Whether computed `$.store` keys pass the directory scan,** pending a branch validation in step 4.
