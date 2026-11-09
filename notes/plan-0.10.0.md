@@ -284,7 +284,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 **Tests:**
 - `priceOf` and `writeRate` for a known model at both TTLs, and `null` for an unknown one.
-- A `PostModelSwitch` with `estimated_cache_write_usd` overrides the table's rate for that model.
+- A `PostModelSwitch` with `estimated_cache_write_usd` overrides the table's rate for that model, when its `pricing` is `configured` or the table lacks the model (not `catalog` for a model it has, not `default`, not under 20,000 tokens).
 - The beat log line carries `≈$`.
 - `state.cache.recacheUsd` is null for an unknown model.
 
