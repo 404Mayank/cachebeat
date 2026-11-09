@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 import type { Alert, BeatSettings, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
+import { viewOf } from './cache'
+import type { CacheFacts, CacheView } from './cache'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
 import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, isObject, lookOf, normalize, normalizeOwn, rowOf, spans, tokens } from './settings'
@@ -12,6 +14,7 @@ const MIN = 60_000
 export const IDLE = AUTO['1h'] * MIN // the default silence before a beat on a subscription's one-hour cache
 export const DEADLINE = DEFAULTS.stopAfterHours * 60 * MIN // default stop this long after the last real turn
 export const RETRY = MIN // after a transient API error
+export const STEP = MIN // the longest one timer waits: the deadline is the wall clock's, checked at each step (a sleep costs one)
 export const MAX_TTL = 60 * MIN // past this since the last cache read, the cache is gone whatever the TTL
 
 const pulse = atom({ plugin: 'cachebeat', key: 'pulse' } as const, 'hidden' as Pulse)
@@ -64,6 +67,9 @@ export const fmt = (ms: number) => {
   const m = Math.max(1, Math.ceil(ms / MIN))
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`
 }
+
+/** The time to the next beat in words, so a deadline that has passed reads the same everywhere. */
+const untilNext = (ms: number) => (ms <= 0 ? 'due now' : `in ${fmt(ms)}`)
 
 /** This session's interval: its own, else the setting's, `auto` read off the cache's lifetime. */
 const idle = () => s.idle ?? (cfg.interval === 'auto' ? AUTO[s.isCacheShort ? '5m' : ttl] : cfg.interval) * MIN
@@ -206,13 +212,14 @@ function restartClocks($: EngineInterface) {
 async function refreshLine($: EngineInterface) {
   let text = ''
   if (s.enabled && s.small) text = `♡ beats skip · ${s.small}`
+  else if (s.enabled && s.paused === COLD) text = '♡ cache went cold · beats start again on your next message'
   else if (s.enabled && s.paused) text = s.beats > 0 ? `${statusText(cfg, s.beats, s.lastRead, null)} · waits for your next turn` : '♡ beats wait for your next turn'
   else if (s.enabled || s.beats > 0) {
     let next: string | null = null
     const at = s.nextAt
     if (s.enabled && at !== null) {
       const now = await $.clock.now()
-      next = fmt(at - now)
+      next = untilNext(at - now)
     }
     text = statusText(cfg, s.beats, s.lastRead, next)
   }
@@ -319,12 +326,46 @@ async function chatSize($: EngineInterface) {
   return u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens + u.output_tokens
 }
 
+/** What `viewOf` works the cache out from, as this session has it. */
+const cacheFacts = (contextTokens: number | null): CacheFacts => ({
+  lastWarm: s.lastWarm, ttl: s.isCacheShort ? '5m' : ttl, contextTokens, writeUsdPerToken: null,
+})
+
+/** Whether the cache is warm, cold or not yet cached, and what re-caching it would send: the one place this is read. */
+async function cacheNow($: EngineInterface): Promise<CacheView> {
+  const now = await $.clock.now()
+  const size = await chatSize($)
+  return viewOf(cacheFacts(size ?? null), now)
+}
+
 /** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
 async function checkSmall($: EngineInterface) {
   const small = await smallContext($)
   if (small && !s.small) $.ui.log(`beats will skip: ${small}`)
   s.small = small
   return small !== null
+}
+
+/**
+ * Waits for `s.nextAt` at most a step: the deadline is the wall clock's, and a timer stops while the machine sleeps,
+ * so one long wait would run on for what was left of it. `call` is the `schedule()` call this chain belongs to.
+ */
+function armStep($: EngineInterface, call: number, now: number) {
+  const at = s.nextAt
+  if (at === null) return
+  const wait = Math.min(STEP, Math.max(0, at - now))
+  timer = $.clock.after(wait, () => void wallCheck($, call))
+}
+
+/** A step's end: the beat when its deadline has come by the wall clock, else the line redrawn and another step. */
+async function wallCheck($: EngineInterface, call: number) {
+  const now = await $.clock.now()
+  // a newer schedule() armed its own chain meanwhile: two would each beat
+  if (call !== scheduling || s.nextAt === null) return
+  if (now >= s.nextAt) return scheduledBeat($)
+  await refreshLine($)
+  if (call !== scheduling) return
+  armStep($, call, now)
 }
 
 /** Sets the next beat from the last cache read; resolves its delay, or undefined when none is set. */
@@ -350,7 +391,7 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
       if (call !== scheduling) return undefined
       ms = Math.max(0, idle() - since)
       s.nextAt = now + ms
-      timer = $.clock.after(ms, () => void scheduledBeat($))
+      armStep($, call, now)
     }
   }
   // a newer call, begun while this one awaited, sets the timer and the heart: two would each arm one
@@ -379,6 +420,7 @@ async function pause($: EngineInterface, why: string, said: string) {
 }
 
 const MODEL_CHANGED = 'the model changed'
+const COLD = 'the cache went cold'
 const REWOUND = 'the conversation was rewound'
 // nothing of a resumed conversation is cached in this process, and Claude Code may warn it's uncached before the next
 // message re-reads it: a beat would pay for that re-read before the user chose to
@@ -455,7 +497,15 @@ async function beat($: EngineInterface): Promise<string> {
   // from the user's last message: a turn's start, or its end for one begun before cachebeat saw it
   const lastWord = Math.max(s.lastReal ?? now, s.asked ?? -Infinity)
   if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last message`)
-  if (since >= MAX_TTL) return stop($, 'over an hour since the cache was last read, so it has expired')
+  // a late beat (a sleeping or stalled process, or retries) finds a short cache lapsed; an on-time one never counts
+  const isLate = since > idle() + 2 * STEP
+  if (isLate) ttl = await cacheTtl($) // custom intervals never read it in schedule()
+  if (since >= MAX_TTL || (isLate && viewOf(cacheFacts(null), now).state === 'cold')) {
+    const said = `the cache went cold (${fmt(since)} since it was last read)`
+    if (cfg.onCold === 'stop') return stop($, said)
+    await pause($, COLD, said)
+    return `beats wait for your next turn: ${said}`
+  }
   const { rateLimits } = await $.session.usage()
   const full = rateLimits.find(l => l.percentUsed >= cfg.stopAtUsage)
   if (full) {
@@ -495,9 +545,13 @@ async function beat($: EngineInterface): Promise<string> {
     // a request of a turn begun meanwhile warmed the cache, and set the next beat from it: no retry needed
     const isWarmedSince = s.lastWarm !== warmedAt
     if (s.enabled && !stepping && !isWarmedSince) {
-      timer?.cancel()
-      timer = $.clock.after(RETRY, () => void scheduledBeat($))
-      s.nextAt = (await $.clock.now()) + RETRY
+      const call = scheduling
+      const at = await $.clock.now()
+      if (call === scheduling) {
+        timer?.cancel()
+        s.nextAt = at + RETRY
+        armStep($, call, at)
+      }
     }
     const then = !s.enabled ? 'not retried while off' : isWarmedSince ? 'a request since keeps it warm' : 'retrying in a minute'
     return `${'error' in r ? r.error : r.reason}; ${then}`
@@ -564,7 +618,7 @@ const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
   : ms === undefined ? (stepping ? 'counts from the end of the request on its way' : busy ? 'starts after this turn' : 'starts after your next turn')
-  : ms === 0 ? 'beating now' : `next beat in ${fmt(ms)}`
+  : `next beat ${untilNext(ms)}`
 
 /** Where this session's interval comes from: its own, this folder's, or the settings for all folders. */
 const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undefined ? 'folder' : 'all folders')
@@ -660,10 +714,18 @@ async function stateOf($: EngineInterface) {
   ttl = await cacheTtl($) // usage can cross into credits between turns
   const now = await $.clock.now()
   const nextBeat = !s.enabled || s.small ? null
-    : s.nextAt !== null ? `in ${fmt(s.nextAt - now)}`
+    : s.nextAt !== null ? untilNext(s.nextAt - now)
     : stepping ? `${fmt(idle())} after the request on its way`
     : busy ? 'after this turn'
     : 'after the next turn'
+  const view = await cacheNow($)
+  const whole = (ms: number | null) => (ms === null ? null : Math.floor(ms / MIN))
+  const cache = {
+    state: view.state, ttl: view.ttl,
+    lastReadMinutesAgo: whole(view.lastWarm === null ? null : view.at - view.lastWarm),
+    minutesLeft: whole(view.state === 'warm' ? view.expiresAt! - view.at : null),
+    coldForMinutes: whole(view.coldFor), contextTokens: view.contextTokens, recacheUsd: view.recacheUsd,
+  }
   const from = intervalFrom()
   const session = {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: from === 'all folders' && cfg.interval === 'auto' ? 'auto' : from,
@@ -672,7 +734,7 @@ async function stateOf($: EngineInterface) {
   }
   const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
   return {
-    session, settings: cfg, folder: { path: root, own },
+    session, cache, settings: cfg, folder: { path: root, own },
     ...(Object.keys(own).length ? { allFolders: global } : {}), defaults,
   }
 }

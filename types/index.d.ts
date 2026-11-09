@@ -39,6 +39,7 @@ export type BeatSettings = {
   interval: number | 'auto' // minutes of idle before a beat; auto fits the cache's lifetime
   stopAfterHours: number // since the last real turn
   stopAtUsage: number // percent of any rate-limit window
+  onCold: 'wait' | 'stop' // the cache went cold before a beat reached it (a sleeping computer, retries): wait for the next turn, or stop
   skipSmall: boolean
   skipSmallTokens: number
   // the heart under the prompt
