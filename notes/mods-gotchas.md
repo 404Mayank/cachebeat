@@ -305,6 +305,7 @@ How `hooks/prices.ts` and the beat's cost came out. "Observed" is a probe's or a
 
 - **`tool.call` matchers only take known tool names.** With MCP servers connected, the generated `McpToolInputs` lists only those servers' tools, so `{ tool: 'mcp__cachebeat__set' }` fails `tsc`. Declare the plugin's own tools in `types/index.d.ts` under `interface McpToolInputs`; that also types `e.session` and `e.settings`. Pinboard doesn't, and probably fails `tsc` once an MCP server is connected (a guess, not checked).
 - **The generated `claude-code-mcp` types don't list the plugin's own tools** (checked once), so the declaration doesn't clash. If it ever does (TS2717), drop ours.
+- **The generated types follow the engine that last loaded the plugin.** A session loading it from a checkout rewrites `.claude-plugin/types/` for its own Claude Code, so `tsc` can pass on one machine's checkout and fail on another's, or after the next live run. 2.1.319's types gave every surface `Input`, so `!('Input' in els)` narrowed `els` to `never` and `els.Text` failed (plan-0.10.0.md, step 2b). Check `tsc` on the newest types too, and keep narrowing checks from reaching a value used after them.
 - **Keep the fork's result a `const`.** In 0.7.1, `let r: ModelForkResult` assigned inside `try`/`finally` made `tsc` stop narrowing `r.error` after `r.reason === 'aborted' ||`. `const forking = $.model.fork(…)` then `const r = await forking.finally(…)` keeps the narrowing, and the original timing too.
 
 ## The test kit (`claude plugin test`)

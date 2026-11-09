@@ -606,13 +606,14 @@ Rerecord `assets/demo.tape` with `demo.py` once steps 1–7 have merged and the 
 - **Beats** (`'armed'`) while a mid-turn countdown runs: a turn gone quiet on a long tool run or a permission prompt.
 - Not chosen: holding the heart still for the whole turn. It's simpler, but a mid-turn beat would then land from a heart that isn't beating.
 
-**The turn line and the desktop band have hidings of their own.** The decision names only the prompt heart, so whether it extends to these is the user's call:
-- **The turn line (terminal):** `turn.start` sets `s.row = null`, so no row carries the line until the turn ends and its closing row is drawn. Mid-turn, a beat shows as a log line instead (README, "The turn line").
-- **The band (desktop):** the `AbovePrompt` render skips the line when `e.props.isWorking`. The desktop draws no prompt heart at all (README), so there the band is the only marker, and it's hidden mid-turn.
+**The turn line and the desktop band have hidings of their own. Decided (the user, 2026-11-09):**
+- **The band (desktop) keeps the cachebeat line through a turn.** It's the marker there, since the desktop draws no prompt heart (README). Remove the `e.props.isWorking` skip in the `AbovePrompt` render. The line's heart follows the pulse, as the prompt heart does.
+- **The turn line (terminal) stays as it is.** `turn.start` sets `s.row = null`, so the line moves to the new turn when it ends, and a beat mid-turn shows as a log line (README, "The turn line").
 
 **Tests change:**
 - New: on, mid-turn (`turn.start`, then `draw($, { ...HINT, props: { ...HINT.props, isWorking: true } })`), the tail carries the heart. With a request on its way it's still (`BEAT[0]`). A turn gone quiet, with its countdown armed, beats (a `BEAT` frame).
 - New: off, mid-turn, no heart (the tail is undefined).
+- New: on the desktop, mid-turn (`AbovePrompt` with `isWorking: true`), the band still carries the line.
 - Existing: no current test pins the heart hidden while busy. `HINT` has `isWorking: false`, and the hint tests draw between turns. They should pass unchanged. Re-run them to check.
 
 **README changes:**
@@ -674,6 +675,21 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Depends on:** step 1 (`CacheView`). P4 is answered (see item 6).
 - **Bundles:** item 6 alone.
 
+### Step 2b: `tsc` on the newer generated types (a fix, before step 3)
+
+- **The failure:** on the types Claude Code 2.1.319 generates, `npx -p typescript tsc -p .` fails in the settings pane's render (`hooks/register.tsx`, `if (!('Input' in els)) return <els.Text>…`): "Property 'Text' does not exist on type 'never'".
+- **Why:** the newer `Elements` is an interface whose four surfaces (terminal, desktop, mobile, vscode) all carry `Input`; in the older types `mobile` has none. So `!('Input' in els)` narrows `els` to `never`. The check still matters at run time: the types say a surface unknown at compile time can attach its own table.
+- **Not caught:** on the older types `dev`'s checkout had, `tsc` is clean, and CI doesn't run `tsc`. The types regenerate whenever a session loads the plugin from a checkout, so the next live run on `dev` breaks `tsc` there.
+- **The fix (checked against both type sets in a scratch copy: `tsc` clean on each):** take `Text` before the check, so the narrowing can't reach it:
+
+  ```tsx
+  const { Text } = els // every surface has it: taken before the check, which may narrow `els` to never
+  if (!('Input' in els)) return <Text>Open cachebeat's settings in the terminal.</Text>
+  ```
+
+- **Then:** run the step checks. Whether CI should also run `tsc` is the user's call: on the 2.1.287 leg it would check the older types only.
+- **Bundles:** this fix, plus its mods-gotchas line ("Types").
+
 ### Step 3: the keep-alive time (item 3, with Stop after idle's text)
 
 - **Delivers:** everything in item 3's touch list.
@@ -684,7 +700,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 3b: a command typed mid-turn answers at once (item 9)
 
 - **Delivers:** the probe's answers in `notes/mods-gotchas.md`, the heart shown mid-turn whenever cachebeat is on, following the beat state (decided), then the chosen acknowledgement, with tests and the README line.
-- **Waits on the user:** whether the turn line and the desktop band follow the heart.
+- **Also delivers:** the desktop band's line kept through a turn (decided). The terminal turn line is unchanged.
 - **Depends on:** step 3, which settles the command's words.
 - **Bundles:** item 9 alone. It's small, and it doesn't wait on later steps.
 
@@ -720,6 +736,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
   - the README: Commands, the Settings tables, What it sends, Privacy, Good to know
   - the notes
   - and no stale wording anywhere: "expired" (it's "cold"), the per-session interval, `/cachebeat <minutes>`
+  - `tsc` clean on the types the newest Claude Code generates, not only on the checkout's (see step 2b)
 - **What it is:** bump `version`, do a full README pass (Features list, Commands table, Privacy), validate the release branch in the portal (the cold guard and computed store keys are new to the scan), PR, and release notes.
 - **Release notes** call out:
   - the reversed `/cachebeat <minutes>` (with "use `/cachebeat global 30` or the menu for the interval")
@@ -771,4 +788,5 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 - **The screenshots** for the Status and CacheTax pages. Both designs here are provisional until they come.
 - **P1 and P8,** pending: P1 needs the machine suspended, P8 needs Claude Code 2.1.287. P2–P7 are answered. Also not checked in step 0: a live `prompt_cache_likely_expired: true`, any origin but `composer`, and the desktop app.
 - **Whether computed `$.store` keys pass the directory scan,** pending a branch validation in step 4.
+- **The session's cost rose with nothing running.** In step 2's live check, `cost.usd` rose by +0.00202 while the session sat idle, with no beat and no turn. It's unexplained. It fell outside a beat's window, so no beat's figure took it in. A request like that landing inside the window is what the rise bound (`RISE_BOUND`) is for: on a Haiku beat (about $0.0005) the bound rejects it and the beat is priced from its usage; on an Opus beat (about $0.02) it passes as about 10% more. On a model the table lacks, the rise has no bound.
 - **`beat()` needs a `beating` guard** (a later step). A manual `/cachebeat now` during a scheduled fork sends two forks: `beat()` and `beatNow` check neither `beating` nor the other. It predates step 2 (found in step 2's review); nothing fixes it yet.
