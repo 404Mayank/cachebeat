@@ -193,6 +193,23 @@ function reader(unit: string, units: Record<string, number>, min: number, max: n
 
 export const parseTokens = reader('tokens', { '': 1, k: 1e3, m: 1e6 }, 1_000, 1_000_000, true)
 export const parseMinutes = reader('minutes', { '': 1, m: 1, min: 1 }, 1, 55, true) // under the hour the cache lives
+
+/** A beat interval or a keep-alive time in words: 5m, 2h, 1h 30m. */
+export const minutesText = (m: number) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`)
+
+const DURATION_PART = '(\\d+(?:\\.\\d+)?)\\s*'
+const DURATION = new RegExp(`^(?:${DURATION_PART}(?:h|hr|hrs|hour|hours))?\\s*(?:${DURATION_PART}(?:m|min|mins|minute|minutes))?$`)
+
+/**
+ * A keep-alive time, in minutes: `30m`, `2h`, `1h30m`, `1.5h`, `90min`. The unit is required (a bare number is
+ * the old per-session interval, which a number alone no longer sets), and the time lands within 5 minutes to 48 hours.
+ */
+export const parseDuration = Object.assign((text: string): number | undefined => {
+  const m = DURATION.exec(text.trim().toLowerCase().replaceAll(',', ''))
+  if (!m || (m[1] === undefined && m[2] === undefined)) return undefined
+  const minutes = Math.round(Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0))
+  return minutes >= 5 && minutes <= 2880 ? minutes : undefined
+}, { unit: 'minutes', min: 5, max: 2880 }) satisfies Reader
 export const parseHours = reader('hours', { '': 1, h: 1, m: 1 / 60, min: 1 / 60 }, 0.5, 48, false)
 export const parsePercent = reader('percent', { '': 1, '%': 1 }, 10, 100, true)
 export const parseFrameMs = reader('ms a frame', { '': 1, ms: 1 }, 20, 500, true)
@@ -287,7 +304,7 @@ export const TABS: readonly Tab[] = [
     rows: [
       {
         key: 'stopAfterHours', label: 'Stop after idle', values: [1, 4, 8, 24], fmt: v => `${v}h`,
-        help: 'Beating stops after this long without a message from you.',
+        help: 'Beating stops after this long without a message from you. A session with its own keep-alive time (/cachebeat 2h) keeps to that instead.',
         custom: { placeholder: 'e.g. 10h or 90m', parse: parseHours },
       },
       {
@@ -332,7 +349,7 @@ export const TABS: readonly Tab[] = [
         fmt: v => ({ spaced: 'after a blank line', below: 'right below the turn row', off: 'off' })[v as string]!,
         help: 'Where the line goes under your latest turn, or off. In the desktop app it sits above the prompt.',
       },
-      { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows the time to the next beat.' },
+      { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows the time to the next beat, and the time left on a keep-alive time.' },
       { key: 'showTokens', label: 'Tokens kept', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows how much the last beat kept warm, as · 347k cached.' },
       {
         key: 'statusHeart', label: 'Its heart', name: 'Turn line heart', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.lineAnimate,

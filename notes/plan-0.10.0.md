@@ -694,6 +694,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 3: the keep-alive time (item 3, with Stop after idle's text)
 
 - **Delivers:** everything in item 3's touch list.
+- **Built 2026-11-09** on `step3-keepalive`; what came out differently, and why, is in mods-gotchas.md, "Keep-alive time (built in step 3 of 0.10.0)".
 - **Depends on:** step 1 (`wallCheck` carries the deadline).
 - **Bundles:** item 3 with the **Stop after idle** wording, since they define each other.
 - **Riskiest step for regressions:** it removes the session interval across four files.
@@ -729,6 +730,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 8: the demo GIF (item 8)
 
 - **Depends on:** steps 1–7.
+- **`assets/demo.tape:31` types `/cachebeat 5`,** which step 3 refuses (a bare number needs a unit). The tape needs `/cachebeat global 5`, or whatever shows that interval now.
 
 ### Step 9: release 0.10.0
 

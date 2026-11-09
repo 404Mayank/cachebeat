@@ -7,7 +7,7 @@ import type { Learned } from './prices'
 import type { CacheFacts, CacheView } from './cache'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
-import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, isObject, lookOf, normalize, normalizeOwn, rowOf, spans, tokens } from './settings'
+import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, isObject, lookOf, minutesText, normalize, normalizeOwn, parseDuration, rowOf, spans, tokens } from './settings'
 import type { Span, Value } from './settings'
 import { SET, STATE, label, parseSet, summary } from './tools'
 import type { SetChange } from './tools'
@@ -32,10 +32,13 @@ const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'bea
 const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
-  enabled: false, idle: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, lastUsd: null, nextAt: null, beats: 0, row: null, small: null,
+  enabled: false, keepUntil: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, lastUsd: null, nextAt: null, beats: 0, row: null, small: null,
   isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0,
 }
 let s: Saved = { ...fresh }
+
+/** A saved state as this version reads it: the keys it has, so one a past version saved (the per-session `idle`) is dropped. */
+export const restored = (prev: Saved): Saved => ({ ...fresh, ...Object.fromEntries(Object.entries(prev).filter(([k]) => k in fresh)) })
 let cfg: BeatSettings = DEFAULTS // as they apply here: this folder's own over those for all folders
 let global: BeatSettings = DEFAULTS // the settings for all folders
 let root = '' // this session's folder: where it started, or where /cd or a worktree move took it
@@ -65,18 +68,26 @@ let paneSurface = 'terminal' // where the settings pane last drew: the terminal'
 let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
 const learned: Learned = new Map() // re-cache rates the engine's own estimates gave, which the price table can't know
 let scheduling = 0 // counts schedule() calls: one still awaiting when a newer starts leaves the timer to it
+let isCovered = false // the keep-alive time is set and the cache outlives it, so schedule() armed no beat
 const rowsSeen = new Set<string>()
 
-export const fmt = (ms: number) => {
-  const m = Math.max(1, Math.ceil(ms / MIN))
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`
+export const fmt = (ms: number) => minutesText(Math.max(1, Math.ceil(ms / MIN)))
+
+/** A time of day, with the weekday when it isn't `now`'s day: `4:30 PM`, `Thu 4:30 PM`. */
+export const clockText = (at: number, now: number) => {
+  const time = new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  if (new Date(at).toDateString() === new Date(now).toDateString()) return time
+  return `${new Date(at).toLocaleDateString([], { weekday: 'short' })} ${time}`
 }
+
+/** The keep-alive time left in words; past it, that it is up (a turn still running ends it at its own end). */
+const keepLeft = (keepUntil: number, now: number) => (keepUntil > now ? `${fmt(keepUntil - now)} left` : busy ? "time's up · ends after this turn" : "time's up")
 
 /** The time to the next beat in words, so a deadline that has passed reads the same everywhere. */
 const untilNext = (ms: number) => (ms <= 0 ? 'due now' : `in ${fmt(ms)}`)
 
-/** This session's interval: its own, else the setting's, `auto` read off the cache's lifetime. */
-const idle = () => s.idle ?? (cfg.interval === 'auto' ? AUTO[s.isCacheShort ? '5m' : ttl] : cfg.interval) * MIN
+/** The interval between beats: the setting's, `auto` read off the cache's lifetime. */
+const idle = () => (cfg.interval === 'auto' ? AUTO[s.isCacheShort ? '5m' : ttl] : cfg.interval) * MIN
 
 const isSet = (v: string | undefined) => v !== undefined && /^(1|true|yes|on)$/i.test(v)
 
@@ -174,8 +185,6 @@ async function changeSettings($: EngineInterface, change: Change) {
     own = change.drop === 'all' ? { ...change.own } : without({ ...own, ...change.own }, change.drop ?? [])
     await saveOwn($)
   }
-  // an interval saved, for all folders or this one, is what this session beats at from then, by any route
-  if (set.interval !== undefined) s.idle = null
   cfg = merged()
   await publish($)
   restartClocks($)
@@ -220,12 +229,15 @@ async function refreshLine($: EngineInterface) {
   else if (s.enabled && s.paused) text = s.beats > 0 ? `${statusText(cfg, s.beats, s.lastRead, null)} · waits for your next turn` : '♡ beats wait for your next turn'
   else if (s.enabled || s.beats > 0) {
     let next: string | null = null
+    let left: string | null = null
     const at = s.nextAt
-    if (s.enabled && at !== null) {
+    if (s.enabled && (at !== null || s.keepUntil !== null)) {
       const now = await $.clock.now()
-      next = untilNext(at - now)
+      // past the keep-alive time, no beat is coming
+      if (at !== null && (s.keepUntil === null || s.keepUntil > now)) next = untilNext(at - now)
+      if (s.keepUntil !== null) left = keepLeft(s.keepUntil, now)
     }
-    text = statusText(cfg, s.beats, s.lastRead, next)
+    text = statusText(cfg, s.beats, s.lastRead, next, left)
   }
   if (text !== (await read($, lineAtom))) await update($, lineAtom, () => text)
 }
@@ -354,22 +366,43 @@ async function checkSmall($: EngineInterface) {
 }
 
 /**
- * Waits for `s.nextAt` at most a step: the deadline is the wall clock's, and a timer stops while the machine sleeps,
- * so one long wait would run on for what was left of it. `call` is the `schedule()` call this chain belongs to.
+ * Waits for the next beat or the end of the keep-alive time, whichever comes first, at most a step: the deadline is the
+ * wall clock's, and a timer stops while the machine sleeps, so one long wait would run on for what was left of it.
+ * `call` is the `schedule()` call this chain belongs to.
  */
 function armStep($: EngineInterface, call: number, now: number) {
-  const at = s.nextAt
-  if (at === null) return
+  const at = Math.min(s.nextAt ?? Infinity, s.keepUntil ?? Infinity)
+  if (at === Infinity) return
   const wait = Math.min(STEP, Math.max(0, at - now))
   timer = $.clock.after(wait, () => void wallCheck($, call))
 }
 
-/** A step's end: the beat when its deadline has come by the wall clock, else the line redrawn and another step. */
+/**
+ * The keep-alive time is up: this session turns off. It says "kept warm" only when the cache did last to the time;
+ * a session that never had a turn, a cache gone cold on the way, beats waiting for a turn, or a sleep past the time
+ * kept nothing warm, and the words don't claim it.
+ */
+function endKeep($: EngineInterface, now: number) {
+  const until = clockText(s.keepUntil!, now)
+  const lasts = viewOf(cacheFacts(null, null), now).expiresAt
+  const isKept = !s.paused && lasts !== null && lasts >= s.keepUntil!
+  return stop($, isKept ? `kept warm until ${until}, as asked` : `keep-alive time up (${until})`)
+}
+
+/**
+ * A step's end: the keep-alive time over when it has come by the wall clock (a turn running ends it at its own end),
+ * else the beat when its deadline has, else the line redrawn and another step.
+ */
 async function wallCheck($: EngineInterface, call: number) {
   const now = await $.clock.now()
   // a newer schedule() armed its own chain meanwhile: two would each beat
-  if (call !== scheduling || s.nextAt === null) return
-  if (now >= s.nextAt) return scheduledBeat($)
+  if (call !== scheduling || (s.nextAt === null && s.keepUntil === null)) return
+  if (s.keepUntil !== null && now >= s.keepUntil) {
+    if (busy) await refreshLine($) // the line says the time is up, not the minute it last counted
+    else endKeep($, now)
+    return
+  }
+  if (s.nextAt !== null && now >= s.nextAt) return scheduledBeat($)
   await refreshLine($)
   if (call !== scheduling) return
   armStep($, call, now)
@@ -381,9 +414,13 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
   timer?.cancel()
   timer = undefined
   s.nextAt = null
+  isCovered = false
   let ms: number | undefined
   let p: Pulse = 'armed'
-  if (!s.enabled) s.small = null
+  if (!s.enabled) {
+    s.small = null
+    s.keepUntil = null // a keep-alive time is for a session that beats: off ends it
+  }
   if (!s.enabled || stepping) p = 'hidden' // a request on its way keeps the cache warm; its end counts again
   else if (resent) p = 'hidden' // a beat would write the conversation again: the turn's next request or its end counts
   // a conversation's first turn: its next request may send it anew, and a beat would write what that won't read
@@ -394,15 +431,30 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
     const since = s.lastWarm === null ? Infinity : now - s.lastWarm
     if (since >= MAX_TTL || s.paused) p = 'waiting' // nothing warm to keep, or none of use: the next turn starts it
     else {
-      if (cfg.interval === 'auto' && s.idle === null) ttl = await cacheTtl($) // usage can cross into credits
+      // usage can cross into credits; the keep-alive time's check below judges the cache by the lifetime too
+      if (cfg.interval === 'auto' || s.keepUntil !== null) ttl = await cacheTtl($)
       if (call !== scheduling) return undefined
-      ms = Math.max(0, idle() - since)
-      s.nextAt = now + ms
+      // the cache outlives the keep-alive time without a beat: none is armed, and the time's end is waited for
+      isCovered = s.keepUntil !== null && (viewOf(cacheFacts(null, null), now).expiresAt ?? 0) >= s.keepUntil
+      if (!isCovered) {
+        ms = Math.max(0, idle() - since)
+        s.nextAt = now + ms
+      }
       armStep($, call, now)
     }
   }
   // a newer call, begun while this one awaited, sets the timer and the heart: two would each arm one
   if (call !== scheduling) return undefined
+  // the keep-alive time's end is watched whatever the beats are doing (waiting, skipping, a request on its way)
+  if (s.enabled && s.keepUntil !== null) {
+    const now = await $.clock.now()
+    if (call !== scheduling) return undefined
+    if (now >= s.keepUntil && !busy) {
+      endKeep($, now)
+      return undefined
+    }
+    if (!timer) armStep($, call, now)
+  }
   // a turn going quiet (a tool running, a permission waiting) counts down as idle time does, its heart unshown
   if (busy) p = 'hidden'
   setPulse($, p)
@@ -503,13 +555,14 @@ async function beat($: EngineInterface): Promise<string> {
   const warmedAt = s.lastWarm
   // from the user's last message: a turn's start, or its end for one begun before cachebeat saw it
   const lastWord = Math.max(s.lastReal ?? now, s.asked ?? -Infinity)
-  if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last message`)
+  // a keep-alive time is what the user asked for, up to 48 hours: Stop after idle doesn't apply while one is set
+  if (s.keepUntil === null && now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last message`)
   // A cache past its lifetime is cold when this beat is late (a sleeping or stalled process, or retries), or when the
   // interval is shorter than the lifetime, so an on-time beat came before it lapsed. Only an on-time beat on an interval
   // as long as the lifetime or longer finds it gone by design: that is "not served" below.
   // schedule() reads it under auto, near when the cache was written, and that lifetime is the one that counts: usage crossing into
-  // credits since would read a warm one-hour cache as five minutes. A custom interval never reads it there
-  if (cfg.interval !== 'auto' || s.idle !== null) ttl = await cacheTtl($)
+  // credits since would read a warm one-hour cache as five minutes. A custom interval never reads it there unless a keep-alive time is set
+  if (cfg.interval !== 'auto') ttl = await cacheTtl($)
   const isLate = since > idle() + 2 * STEP
   const mayBeCold = isLate || idle() < TTL_MS[s.isCacheShort ? '5m' : ttl]
   if (since >= MAX_TTL || (mayBeCold && viewOf(cacheFacts(null, null), now).state === 'cold')) {
@@ -614,7 +667,7 @@ async function beat($: EngineInterface): Promise<string> {
     const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
     // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
     // this beat wrote it afresh, so beat at that from here
-    if (cfg.interval !== 'auto' || s.idle !== null || s.isCacheShort || ttl === '5m') return stop($, why)
+    if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m') return stop($, why)
     s.isCacheShort = true
     s.lastWarm = await $.clock.now()
     announce($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
@@ -648,11 +701,11 @@ function beatNow($: EngineInterface) {
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
-  : ms === undefined ? (stepping ? 'counts from the end of the request on its way' : busy ? 'starts after this turn' : 'starts after your next turn')
+  : ms === undefined ? (stepping ? 'counts from the end of the request on its way' : busy ? 'starts after this turn' : isCovered ? 'no more beats needed' : 'starts after your next turn')
   : `next beat ${untilNext(ms)}`
 
-/** Where this session's interval comes from: its own, this folder's, or the settings for all folders. */
-const intervalFrom = () => (s.idle !== null ? 'session' : own.interval !== undefined ? 'folder' : 'all folders')
+/** Where the interval comes from: this folder's own, or the settings for all folders. */
+const intervalFrom = () => (own.interval !== undefined ? 'folder' : 'all folders')
 
 const isWhole = (word: string) => /^\d+$/.test(word)
 
@@ -663,9 +716,9 @@ async function markWarm($: EngineInterface) {
   s.paused = null
 }
 
-/** After /clear or /resume: another conversation, its count from zero, this session's switch and interval kept. */
+/** After /clear or /resume: another conversation, its count from zero, this session's switch and keep-alive time kept. */
 async function anotherConversation($: EngineInterface) {
-  s = { ...fresh, enabled: s.enabled, idle: s.idle, isCacheShort: s.isCacheShort }
+  s = { ...fresh, enabled: s.enabled, keepUntil: s.keepUntil, isCacheShort: s.isCacheShort }
   cached = 0 // nothing of it cached yet
   resent = false
   await syncSettings($)
@@ -678,28 +731,31 @@ const minutesOf = (word: string) => Math.min(55, Math.max(1, Math.round(Number(w
 const PATH = 24
 const here = () => `this folder (${cut(root, PATH)})`
 
-/** Turns this session on after `change` (its own interval, a saved setting), saying how its interval moved. */
-async function turnOn($: EngineInterface, change?: () => Promise<void>) {
+/**
+ * Turns this session on after `change` (a saved setting), saying how its interval moved. `keep` is the
+ * keep-alive time in minutes from now, or null for none; left out, the session's time stays as it is.
+ */
+async function turnOn($: EngineInterface, change?: () => Promise<void>, keep?: number | null) {
   const wasOn = s.enabled
   const before = idle()
+  const limit = s.keepUntil
   if (change) await change()
+  const now = await $.clock.now()
   s.enabled = true
+  if (keep !== undefined) s.keepUntil = keep === null ? null : now + keep * MIN
+  // on until 4:30 PM (2h); with no time limit once one was dropped
+  const lead = s.keepUntil !== null ? `on until ${clockText(s.keepUntil, now)} (${fmt(s.keepUntil - now)})` : limit !== null ? 'on with no time limit' : 'on'
   if (stepping) {
     save($)
-    return `on, ${every()}; ${when(undefined)}`
+    return `${lead}, ${every()}; ${when(undefined)}`
   }
-  if (wasOn && idle() === before) {
-    let ms: number | undefined
+  if (wasOn && idle() === before && limit === s.keepUntil) {
     const at = s.nextAt
-    if (at !== null) {
-      const now = await $.clock.now()
-      ms = Math.max(0, at - now)
-    }
-    return `already on, ${every()} · ${when(ms)}`
+    const ms = at === null ? undefined : Math.max(0, at - now)
+    return `already ${lead}, ${every()} · ${when(ms)}`
   }
   const ms = await schedule($)
-  if (wasOn) return `interval ${fmt(before)} → ${fmt(idle())} · ${when(ms)}`
-  return `on, ${every()} · ${when(ms)}`
+  return `${lead}, ${every()} · ${when(ms)}`
 }
 
 /** Settings and their values as the menu names them: `New sessions start on, Beat after idle 45m`. */
@@ -751,6 +807,7 @@ async function stateOf($: EngineInterface) {
     : s.nextAt !== null ? untilNext(s.nextAt - now)
     : stepping ? `${fmt(idle())} after the request on its way`
     : busy ? 'after this turn'
+    : isCovered ? 'none needed'
     : 'after the next turn'
   const view = await cacheNow($)
   const whole = (ms: number | null) => (ms === null ? null : Math.floor(ms / MIN))
@@ -763,6 +820,9 @@ async function stateOf($: EngineInterface) {
   const from = intervalFrom()
   const session = {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: from === 'all folders' && cfg.interval === 'auto' ? 'auto' : from,
+    keepAliveUntil: s.keepUntil === null ? null : new Date(s.keepUntil).toISOString(),
+    keepAliveUntilLocal: s.keepUntil === null ? null : clockText(s.keepUntil, now),
+    keepAliveMinutesLeft: s.keepUntil === null ? null : whole(Math.max(0, s.keepUntil - now)),
     cacheTtl: s.isCacheShort ? '5m' : ttl,
     beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, lastBeatUsd: roundUsd(s.lastUsd), nextBeat, skipping: s.small, paused: s.paused,
   }
@@ -773,10 +833,10 @@ async function stateOf($: EngineInterface) {
   }
 }
 
-type Before = { enabled: boolean; idle: number | null; settings: BeatSettings; own: Partial<BeatSettings> }
+type Before = { enabled: boolean; keepUntil: number | null; settings: BeatSettings; own: Partial<BeatSettings> }
 
 /**
- * `set`'s answer: the fields the call changed (this session's own switch and interval, not what follows
+ * `set`'s answer: the fields the call changed (this session's own switch and keep-alive time, not what follows
  * from the settings; its own patches, not what another session saved meanwhile), this session's state,
  * and the settings it changed, for all folders and this one.
  */
@@ -787,7 +847,7 @@ async function answerSet($: EngineInterface, before: Before, change: SetChange) 
   const dropped = drop.filter(k => k in before.own)
   const changed = [
     ...(before.enabled !== s.enabled ? ['session.enabled'] : []),
-    ...(before.idle !== s.idle ? ['session.intervalMinutes'] : []),
+    ...(change.keepAliveMinutes !== undefined && before.keepUntil !== s.keepUntil ? ['session.keepAliveMinutes'] : []),
     ...settings.map(([k]) => `settings.${k}`),
     ...[...set.map(([k]) => k), ...dropped].map(k => `folder.${k}`),
   ]
@@ -853,7 +913,7 @@ function say($: EngineInterface, text: string) {
   void update($, tickAtom, t => t + 1)
 }
 
-const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
+const USAGE = 'usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
 
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
@@ -864,7 +924,7 @@ export const register: Register = on => {
     await publish($)
     const prev = await read($, saved)
     // a reload keeps this session's choice; a new session starts as its folder's settings say
-    s = prev ? { ...fresh, ...prev } : { ...fresh, enabled: cfg.defaultOn }
+    s = prev ? restored(prev) : { ...fresh, enabled: cfg.defaultOn }
     const messages = prev ? [] : await $.session.messages()
     // a new process with a conversation already in it: --resume, --continue
     if (messages.length) await pause($, RESUMED, RESUMED)
@@ -872,7 +932,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'cachebeat',
       description: 'Keep the prompt cache warm while idle',
-      argumentHint: '[on|off|<minutes>|now|global …|local …|settings]',
+      argumentHint: '[on|off|<time, like 2h>|now|global …|local …|settings]',
       immediate: true,
     })
     await $.tool.register(STATE)
@@ -912,7 +972,6 @@ export const register: Register = on => {
   on('command.run', { command: 'cachebeat' }, async ($, e) => {
     ttl = await cacheTtl($) // what `auto` comes to, for the answer
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
-    const minutes = words.find(isWhole)
     if (words[0] === 'settings' || words[0] === 'config') {
       await openSettings($)
       return { text: 'settings opened' }
@@ -920,23 +979,27 @@ export const register: Register = on => {
     if (words[0] === 'now') return { text: await beatNow($) }
     if (words[0] === 'global' || words[0] === 'local') return { text: await scoped($, words[0] === 'local' ? 'folder' : 'global', words[1]) }
     if (words[0] === 'off') return { text: `this session: ${s.enabled ? stop($) : 'already off'}` }
-    if (words[0] === 'on' || minutes) {
-      const turned = await turnOn($, minutes === undefined ? undefined : async () => {
-        s.idle = minutesOf(minutes) * MIN
-      })
-      return { text: `this session: ${turned}` }
+    // `on` (no time limit), a keep-alive time (`2h`, `1h 30m`), or both
+    const rest = words[0] === 'on' ? words.slice(1) : words
+    if (words[0] === 'on' && !rest.length) return { text: `this session: ${await turnOn($, undefined, null)}` }
+    const asked = rest.join('')
+    if (/^\d/.test(asked)) {
+      // a number alone was the interval of this session, before the interval became a setting: it changes nothing now
+      if (isWhole(asked)) return { text: `nothing changed: a time needs its unit now. /cachebeat 2h keeps the cache warm for 2 hours, then turns off. The beat interval is a setting: /cachebeat global ${minutesOf(asked)}, or /cachebeat settings.` }
+      const keep = parseDuration(asked)
+      if (keep === undefined) return { text: `nothing changed: /cachebeat takes a time from 5m to 48h with its unit, like 30m, 2h or 1h30m, not "${rest.join(' ')}".` }
+      return { text: `this session: ${await turnOn($, undefined, keep)}` }
     }
     if (words.length) return { text: USAGE }
     if (!s.enabled) return { text: 'off' }
-    let ms: number | undefined
+    const now = await $.clock.now()
     const at = s.nextAt
-    if (at !== null) {
-      const now = await $.clock.now()
-      ms = Math.max(0, at - now)
-    }
+    const ms = at === null ? undefined : Math.max(0, at - now)
     const from = intervalFrom()
     const source = from === 'all folders' ? '' : ` (this ${from}'s)`
-    return { text: `on, ${every()}${source} · ${s.beats} beat${s.beats === 1 ? '' : 's'} · ${when(ms)}` }
+    const left = s.keepUntil === null ? '' : ` · ${keepLeft(s.keepUntil, now)}`
+    const upcoming = s.keepUntil !== null && s.keepUntil <= now ? '' : ` · ${when(ms)}` // past the time, no beat is coming
+    return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'}${upcoming}` }
   })
 
   on('tool.call', { tool: 'mcp__cachebeat__state' }, async $ => ({ result: json(await stateOf($)) }))
@@ -946,7 +1009,7 @@ export const register: Register = on => {
     const change = parseSet({ session: e.session, settings: e.settings, folder: e.folder })
     if ('error' in change) return { deny: change.error }
     await syncSettings($)
-    const before: Before = { enabled: s.enabled, idle: s.idle, settings: global, own }
+    const before: Before = { enabled: s.enabled, keepUntil: s.keepUntil, settings: global, own }
     const hasPatch = Object.keys(change.patch).length > 0
     if (hasPatch || change.folder !== undefined) {
       await changeSettings($, {
@@ -954,8 +1017,9 @@ export const register: Register = on => {
         own: change.folder?.own, drop: change.folder === null ? 'all' : change.folder?.drop,
       })
     }
-    if (change.intervalMinutes !== undefined) s.idle = change.intervalMinutes === null ? null : change.intervalMinutes * MIN
+    const now = await $.clock.now()
     if (change.enabled !== undefined) s.enabled = change.enabled
+    if (change.keepAliveMinutes !== undefined) s.keepUntil = change.keepAliveMinutes === null ? null : now + change.keepAliveMinutes * MIN
     // always: setSettings reschedules only while on, and this is what cancels a beat when turned off
     await schedule($)
     return { result: json(await answerSet($, before, change)) }
@@ -1181,6 +1245,7 @@ export const register: Register = on => {
     const tick = await read($, tickAtom)
     const focus = await read($, focusAtom)
     const place = await read($, folderAtom)
+    const now = await $.clock.now()
     await read($, pulse) // redraws "This session" as it turns on or off
     // the preview's clock runs only while there is a preview to move
     const picked = page.picker ? rowOf(page.picker) : undefined
@@ -1198,7 +1263,7 @@ export const register: Register = on => {
     const to: Target = editsFolder ? 'folder' : 'global'
     const where = cut(place.root, PATH)
     const view = {
-      page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, sessionMinutes: s.idle === null ? null : s.idle / MIN,
+      page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, keepUntil: s.keepUntil === null ? null : clockText(s.keepUntil, now),
       autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal', customs,
       own: place.own, path: where, editsFolder, allFolders: global,
     }
@@ -1219,9 +1284,9 @@ export const register: Register = on => {
         if (!editsFolder) return void setSettings($, { [key]: DEFAULTS[key] }, 'global').then(() => say($, `${label(key)} back to its default`))
         void changeSettings($, { drop: [key] }).then(() => say($, `${label(key)} follows all folders again`))
       },
-      dropSession: () => {
-        s.idle = null
-        void schedule($).then(() => say($, `this session follows ${intervalFrom() === 'folder' ? 'this folder' : 'all folders'}: ${every()}`))
+      dropKeep: () => {
+        s.keepUntil = null
+        void schedule($).then(() => say($, 'this session beats with no time limit'))
       },
       toggleFolder: () => {
         editsFolder = !editsFolder

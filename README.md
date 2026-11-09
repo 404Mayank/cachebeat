@@ -12,17 +12,18 @@
 [![Claude Code 2.1.287+](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-When a Claude Code session sits idle, its prompt cache expires, and your next message has to rebuild it from scratch. That's slower, and it uses more of your usage limits. cachebeat gives the session a heartbeat: shortly before the cache would expire, it sends a tiny background request that reads the conversation and keeps the cache alive. Your transcript never sees it.
+When a Claude Code session sits idle, its prompt cache goes cold, and your next message has to rebuild it from scratch. That's slower, and it uses more of your usage limits. cachebeat gives the session a heartbeat: shortly before the cache would go cold, it sends a tiny background request that reads the conversation and keeps the cache alive. Your transcript never sees it.
 
 You come back from lunch, type your next message, and it picks up right where you left off.
 
 ## Features
 
 - **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation
+- **A keep-alive time**: `/cachebeat 2h` keeps the cache warm through a break of that long, then turns itself off
 - **A live heart** under the prompt, with 19 animations to choose from
 - **A turn line** under your latest turn shows the beats so far and the time until the next one
 - **A settings menu** with live previews, driven by keyboard or mouse
-- **Ask Claude** to turn it on, change the interval, or change any setting, in your own words
+- **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
 - **This session, this folder or all folders**: turn it on for one session, or have new sessions start with it in one folder or everywhere
 
@@ -86,9 +87,15 @@ Or only the sessions in this folder, such as one repo:
 /cachebeat local on
 ```
 
-Or ask Claude: "keep the cache warm in this session", "always start it in this repo", "make 30 minutes the default beat time".
+To keep the cache warm for a set time, such as through a long meeting, and have it turn itself off after:
 
-Beats fit your cache by themselves: every 50 minutes on a Claude subscription's one-hour cache, and every 4 on the five-minute cache of an API key, a cloud provider or usage credits. To pick your own interval, use `/cachebeat 30` for this session, or set **Beat after idle** in `/cachebeat settings`.
+```
+/cachebeat 2h
+```
+
+Or ask Claude: "keep the cache warm in this session", "keep it warm for the next 2 hours", "always start it in this repo", "make 30 minutes the default beat time".
+
+Beats fit your cache by themselves: every 50 minutes on a Claude subscription's one-hour cache, and every 4 on the five-minute cache of an API key, a cloud provider or usage credits. To pick your own interval, use `/cachebeat global 30` or set **Beat after idle** in `/cachebeat settings`.
 
 ## What it sends, and what it costs
 
@@ -112,10 +119,10 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 | Command | What it does |
 | --- | --- |
-| `/cachebeat` | Shows the status: on or off, the interval, beats so far, the next beat |
-| `/cachebeat on` | Turns it on for this session |
+| `/cachebeat` | Shows the status: on or off, the interval, the time left on a keep-alive time, beats so far, the next beat |
+| `/cachebeat on` | Turns it on for this session, with no time limit |
 | `/cachebeat off` | Turns it off for this session |
-| `/cachebeat <minutes>` | Turns it on for this session with its own interval, e.g. `/cachebeat 30` (1–55) |
+| `/cachebeat <time>` | Keeps the cache warm for that long from now, then turns this session off: `/cachebeat 2h`, `45m`, `1h30m` (5 minutes to 48 hours; the unit is required) |
 | `/cachebeat now` | Beats right away |
 | `/cachebeat global on` / `off` | Sets whether new sessions start on, in all folders, and applies it here too |
 | `/cachebeat global <minutes>` | Sets the interval for all folders, and turns it on here |
@@ -127,7 +134,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 **The prompt heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next message.
 
-**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`. Its heart beats too, with an animation of its own under **Turn line**. When beats wait for your next message (see [Good to know](#good-to-know)), it says so; a cache that went cold reads `♡ cache went cold · beats start again on your next message`. When you send a new message, the line moves to that turn once it ends. Until then, in the terminal, a beat during the turn shows as a line in the log. In the desktop app the line stays above the prompt instead.
+**The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`, with the time left (`· 1h 52m left`) while a keep-alive time is set. Its heart beats too, with an animation of its own under **Turn line**. When beats wait for your next message (see [Good to know](#good-to-know)), it says so; a cache that went cold reads `♡ cache went cold · beats start again on your next message`. When you send a new message, the line moves to that turn once it ends. Until then, in the terminal, a beat during the turn shows as a line in the log. In the desktop app the line stays above the prompt instead.
 
 ```
 ✻ Cogitated for 12s · done 3:09 PM
@@ -144,7 +151,7 @@ Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Set
 
 - On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
 - Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
-- **r** puts the focused setting back to its default. On a folder's own setting, it goes back to the one for all folders. On a session's own interval, it drops that interval, and the session follows the settings again.
+- **r** puts the focused setting back to its default. On a folder's own setting, it goes back to the one for all folders. On **This session** with a keep-alive time, it drops the time, and the session keeps beating with no limit.
 - In a list, ↑↓ preview each choice and Enter picks it.
 - Esc goes back one step, and closes the menu from the tab bar.
 - The mouse works too: click to pick, scroll to scroll.
@@ -155,11 +162,11 @@ Settings with numbers also take a custom value at the bottom of their list, such
 
 | | What it holds | How long it lasts | How to set it |
 | --- | --- | --- | --- |
-| **This session** | Whether it beats, and an interval of its own | Until the session ends; `/clear` keeps it | **This session** on Beating, `/cachebeat on`, `off` or `<minutes>` |
+| **This session** | Whether it beats, and for how long (a keep-alive time) | Until the session ends; `/clear` keeps it | **This session** on Beating, `/cachebeat on`, `off` or `<time>` |
 | **This folder** | Any setting, for sessions in this folder | Until you change it | **Settings for: this folder** in the menu, or `/cachebeat local …` |
 | **All folders** | Every setting | Until you change it | The menu, or `/cachebeat global …` |
 
-The nearest one wins: this session, then this folder, then all folders. Saving an interval for all folders or this folder drops this session's own, so the session follows the new one.
+The nearest one wins: this session's switch over **New sessions start**, and a folder's own setting over those for all folders. A keep-alive time belongs to the session alone, and no interval you save changes it.
 
 **Settings for** picks where the menu saves your changes. It never changes **This session**. On `this folder`, changes are saved for this folder alone and marked `· this folder`; the rest still follow all folders, so a later change to all folders reaches this folder too. On `all folders`, a setting this folder sets for itself is marked `· here: on`, with this folder's value. The menu opens on `this folder` once the folder has settings of its own, and on `all folders` otherwise. **Reset folder** (or `/cachebeat local reset`) drops the folder's own settings.
 
@@ -170,7 +177,7 @@ A folder is where the session started, or where `/cd` or a worktree move took it
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| This session | Turns beating on or off right here | off |
+| This session | Turns beating on or off right here, and when a keep-alive time ends | off |
 | New sessions start | Whether new sessions start with it on | off |
 | Beat after idle | How long the session sits idle before a beat: auto fits your cache, or a number of minutes | auto: 50 minutes on a one-hour cache, 4 on a five-minute one |
 | After /model | Wait for your next message, or have the next beat warm the new model's cache | wait |
@@ -184,7 +191,7 @@ A folder is where the session started, or where `/cd` or a worktree move took it
 
 | Setting | What it does | Default |
 | --- | --- | --- |
-| Stop after idle | Stops beating after this long without a message from you | 8 hours |
+| Stop after idle | Stops beating after this long without a message from you. A session with a keep-alive time (`/cachebeat 2h`) keeps to that instead | 8 hours |
 | Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop | start on your next message |
 | Stop at usage | Stops once any of your usage limits reaches this percentage | 90% |
 | Skip small chats | Skips beating chats under a minimum size | off, 20k tokens |
@@ -249,7 +256,8 @@ Theme colors follow your Claude Code theme, so they change when you switch theme
 
 cachebeat turns itself off for the session when:
 
-- you haven't sent a message for longer than **Stop after idle**
+- you haven't sent a message for longer than **Stop after idle** (a session with a keep-alive time doesn't stop for this)
+- its keep-alive time is up: it kept the cache warm as long as you asked
 - a usage limit reaches **Stop at usage**
 - the API rate-limits it, or returns an error that doesn't clear up (a passing hiccup is retried a minute later)
 - there's no conversation yet to keep warm
@@ -260,6 +268,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 
 ## Good to know
 
+- A keep-alive time counts from the command, and your messages don't extend it. Beats come only while the cache would otherwise go cold before the time is up, so the last one can come well before the end. A running turn finishes first, then the session turns off. A usage limit or an API error still stops it early.
 - Sending a message restarts the countdown, and so does each request Claude makes during a turn. A turn gets a beat once it has gone quiet for a whole interval, counted from its last request. A conversation's first turn gets none.
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
 - A resumed conversation (`claude --resume`, `--continue`, or `/resume`) waits for your next message too, and says so. Nothing of it is cached in this session yet, so no beat re-reads it before you decide to carry on.

@@ -4,14 +4,14 @@ import type { ToolSpec } from 'claude-code'
 import type { BeatSettings } from '../types'
 import { shown } from './pane'
 import type { Reader, Value } from './settings'
-import { AUTO, DEFAULTS, HEX_KEYS, accept, isObject, parseMinutes, rowOf } from './settings'
+import { AUTO, DEFAULTS, HEX_KEYS, accept, isObject, minutesText, parseDuration, rowOf } from './settings'
 
 /** Each setting, for the model; the unit and range are added from its reader. */
 const ABOUT: Record<keyof BeatSettings, string> = {
   defaultOn: 'New sessions start beating; open sessions keep theirs.',
   interval:
-    `Minutes idle before a beat, for sessions without their own; auto beats at ${AUTO['1h']} on a one-hour cache and ${AUTO['5m']} on a five-minute one, reading which the session has (state's cacheTtl).`,
-  stopAfterHours: 'Beating stops after this long without a message from the user.',
+    `Minutes idle before a beat; auto beats at ${AUTO['1h']} on a one-hour cache and ${AUTO['5m']} on a five-minute one, reading which the session has (state's cacheTtl).`,
+  stopAfterHours: 'Beating stops after this long without a message from the user. A session with a keep-alive time (session.keepAliveMinutes) keeps to that instead.',
   stopAtUsage: 'Beating stops once any usage limit reaches this.',
   onCold: "If the cache goes cold before a beat reaches it (the computer slept, or retries ran past its lifetime): wait, and beat again after the user's next message, or stop beating.",
   skipSmall: 'Skips beating chats smaller than skipSmallTokens.',
@@ -26,7 +26,7 @@ const ABOUT: Record<keyof BeatSettings, string> = {
   heartSpeed: "The prompt heart's animation speed: a name, or a frame time.",
   heartTiming: 'The prompt heart: lubdub beats twice, then rests; linear plays evenly.',
   statusLine: 'The turn line, under the latest turn: spaced (after a blank line), below (right under it), or off. On desktop it sits above the prompt.',
-  showCountdown: 'Shows the time to the next beat in the turn line.',
+  showCountdown: 'Shows the time to the next beat, and the time left on a keep-alive time, in the turn line.',
   showTokens: 'Shows the tokens the last beat kept warm in the turn line.',
   statusHeart: "What the heart starting the turn line plays: beat (one heart, filling in time), off (still), or one of the prompt heart's animations.",
   lineColor: 'The turn line\'s color: dim, a theme color, a preset, or custom (lineHex).',
@@ -82,8 +82,10 @@ export const STATE: ToolSpec = {
     "cachebeat's state in this session, every setting as it applies here, and this folder's own settings.",
     [
       '`settings` are the values in effect in this session: this folder\'s own over those for all folders. `folder` is this session\'s folder (`path`) and the settings it has of its own (`own`). `allFolders`, shown while the folder has any of its own, has the settings for all folders.',
-      "`nextBeat` is `in 42m` (mid-turn too: counted from the end of the turn's last request, for a turn that goes quiet), `due now` (the time has come), `50m after the request on its way` (a request of the turn is being answered), `after this turn` (a turn whose beats wait for its end), `after the next turn` (nothing cached to keep warm yet), or null when off or skipping.",
-      '`intervalFrom` is `session` when this session has its own interval, `folder` when it follows this folder\'s own, `all folders` when it follows the interval for all folders in minutes, and `auto` when that is auto.',
+      "`nextBeat` is `in 42m` (mid-turn too: counted from the end of the turn's last request, for a turn that goes quiet), `due now` (the time has come), `50m after the request on its way` (a request of the turn is being answered), `after this turn` (a turn whose beats wait for its end), `after the next turn` (nothing cached to keep warm yet), `none needed` (a keep-alive time is set and the cache stays warm until it is up), or null when off or skipping.",
+      '`intervalFrom` is `folder` when the interval is this folder\'s own, `all folders` when it follows the interval for all folders in minutes, and `auto` when that is auto.',
+      "`keepAliveUntil` (a UTC timestamp), `keepAliveUntilLocal` (the same time on the user's clock, like `4:30 PM`, with the weekday when it isn't today) and `keepAliveMinutesLeft` are set while this session has a keep-alive time (`set`'s `keepAliveMinutes`): beats keep the cache warm until then, and the session turns off. They are null when it has none. Tell the user `keepAliveUntilLocal`, not the UTC time.",
+      "`intervalMinutes` is the beat interval in effect here (what auto works out to). It is read-only: `set` changes it through `settings.interval` or `folder.interval`.",
       "`cacheTtl` is how long this session's cache lives, `1h` or `5m`, worked out on each call from Claude Code's cache settings and whether a subscription is within its usage; an auto interval beats within it (50 or 4 minutes).",
       "`cache` is whether this session's prompt cache is likely still warm, judged by the time since it was last read against its lifetime, as Claude Code judges it: `state` (warm, cold, or unknown before anything is cached), minutes since the last read, minutes left or minutes cold, the conversation's size in tokens, and `recacheUsd`, an estimate of what the next message pays to cache it again (null when unknown). `recacheUsd` and `lastBeatUsd` are estimates in dollars at Anthropic's API prices, written `≈$` when you say them: a subscription isn't billed per token, so there they are what the same requests would cost on the API, to compare.",
       '`skipping`, when set, says why beats skip this chat (under the skipSmallTokens minimum).',
@@ -97,19 +99,19 @@ export const STATE: ToolSpec = {
 export const SET: ToolSpec = {
   name: 'set',
   description: [
-    "Changes cachebeat, which keeps this session's prompt cache warm while it sits idle by sending a small background request, a beat, shortly before the cache would expire. Change only what the user asks for.",
-    '`session` is this session alone. `settings` is saved for all folders and used by every session, open ones included: `settings.interval` is the default interval, `settings.defaultOn` whether new sessions start on (open sessions keep theirs). `folder` is saved for this session\'s folder alone (state\'s `folder.path`), takes any setting, and wins over `settings` there; `null` for one setting drops it, so it follows all folders again, and `folder: null` drops every one. In `settings`, `null` puts a setting back to its default. When you change a setting, say where it applies: all folders, or this folder by its path, since a subfolder or another worktree has settings of its own.',
-    'A request that names no scope ("turn it on", "beat every 20 minutes") is for this session. "In this repo", "in this folder", "here" or "for this project" mean `folder`. "Default", "new sessions", "every session", "everywhere", "always" or "from now on" mean `settings`. If you can\'t tell which the user means, ask. A change to `settings` doesn\'t reach a setting this folder has its own of (`state`\'s `folder.own`): tell the user.',
+    "Changes cachebeat, which keeps this session's prompt cache warm while it sits idle by sending a small background request, a beat, shortly before the cache would go cold. Change only what the user asks for.",
+    '`session` is this session alone. `settings` is saved for all folders and used by every session, open ones included: `settings.interval` is the beat interval, the minutes idle before a beat (or auto), and `settings.defaultOn` whether new sessions start on (open sessions keep theirs). `folder` is saved for this session\'s folder alone (state\'s `folder.path`), takes any setting, and wins over `settings` there; `null` for one setting drops it, so it follows all folders again, and `folder: null` drops every one. In `settings`, `null` puts a setting back to its default. When you change a setting, say where it applies: all folders, or this folder by its path, since a subfolder or another worktree has settings of its own.',
+    'A request that names no scope ("turn it on", "keep it warm for 2 hours") is for this session. "In this repo", "in this folder", "here" or "for this project" mean `folder`. "Default", "new sessions", "every session", "everywhere", "always" or "from now on" mean `settings`. The beat interval has no session scope: "beat every 20 minutes" is `settings.interval`, or `folder.interval` when the user says this repo or folder. If you can\'t tell which the user means, ask. A change to `settings` doesn\'t reach a setting this folder has its own of (`state`\'s `folder.own`): tell the user.',
     "Each beat counts toward the user's usage. The first time in a conversation a change starts beating or changes how often a beating session beats, say so once.",
-    'Setting `intervalMinutes` turns beating on too, unless `enabled: false` comes with it. Saving an interval in `settings` or `folder` drops this session\'s own, so it beats at the saved one, unless `intervalMinutes` comes with it; `intervalMinutes: null` alone makes it follow the settings.',
+    '`session.keepAliveMinutes` keeps the cache warm for that long from now, then turns this session off: a fixed deadline that messages in between don\'t extend. It turns beating on too, so it can\'t come with `enabled: false`; null drops the time, and the session keeps beating with no limit. While a keep-alive time is set, `stopAfterHours` doesn\'t apply; a usage limit or an API error still stops it. It is not the beat interval, which is `settings.interval`.',
     'Nothing changes if any value is invalid, and the refusal names each one. Subagents can read `state` but not call this. Returns what changed, this session\'s state, and the changed settings: for all folders, and for this folder with its `path`, which you name to the user.',
   ].join('\n\n'),
   inputSchema: object({
     session: object({
       enabled: { type: 'boolean', description: 'Beat in this session.' },
-      intervalMinutes: {
-        anyOf: [{ type: 'number', minimum: parseMinutes.min, maximum: parseMinutes.max }, { type: 'null' }],
-        description: `This session's interval in minutes, which turns beating on; null follows settings.interval, auto included. (${range(parseMinutes)})`,
+      keepAliveMinutes: {
+        anyOf: [{ type: 'number', minimum: parseDuration.min, maximum: parseDuration.max }, { type: 'null' }],
+        description: `Keeps the cache warm for this many minutes from now, then turns this session off; turns beating on. null drops the time. (${range(parseDuration)})`,
       },
     }),
     settings: object(Object.fromEntries(KEYS.map(k => [k, field(k)]))),
@@ -121,11 +123,11 @@ export const SET: ToolSpec = {
 }
 
 /**
- * A `set` call's input, as read: this session's switch and interval (null follows the settings), the
+ * A `set` call's input, as read: this session's switch and keep-alive time (null drops it), the
  * settings to save for all folders, and this folder's own to save and drop (null drops every one).
  */
 export type SetChange = {
-  enabled?: boolean; intervalMinutes?: number | null; patch: Partial<BeatSettings>
+  enabled?: boolean; keepAliveMinutes?: number | null; patch: Partial<BeatSettings>
   folder?: { own: Partial<BeatSettings>; drop: (keyof BeatSettings)[] } | null
 }
 
@@ -144,10 +146,13 @@ export function parseSet(input: { session?: unknown; settings?: unknown; folder?
     if (k === 'enabled') {
       if (typeof v === 'boolean') change.enabled = v
       else bad.push(`session.enabled takes true or false, not ${said(v)}`)
+    } else if (k === 'keepAliveMinutes') {
+      const m = v === null ? null : typeof v === 'number' ? (v >= parseDuration.min && v <= parseDuration.max ? Math.round(v) : undefined) : typeof v === 'string' ? parseDuration(v) : undefined
+      if (m !== undefined) change.keepAliveMinutes = m
+      else bad.push(`session.keepAliveMinutes takes ${range(parseDuration)} or null, not ${said(v)}`)
     } else if (k === 'intervalMinutes') {
-      const m = v === null ? null : typeof v === 'number' || typeof v === 'string' ? parseMinutes(String(v)) : undefined
-      if (m !== undefined) change.intervalMinutes = m
-      else bad.push(`session.intervalMinutes takes ${range(parseMinutes)} or null, not ${said(v)}`)
+      // a session still holding the schema from before the interval became a setting
+      bad.push('session has no intervalMinutes: the beat interval is settings.interval (or folder.interval), and session.keepAliveMinutes keeps the cache warm for that long')
     } else bad.push(`session has no ${k}`)
   }
   for (const [k, v] of Object.entries(settings)) {
@@ -176,8 +181,11 @@ export function parseSet(input: { session?: unknown; settings?: unknown; folder?
     }
     change.folder = folder
   }
-  // an interval of its own is asked for to beat at, as `/cachebeat <minutes>` takes it
-  if (typeof change.intervalMinutes === 'number') change.enabled ??= true
+  // a keep-alive time is asked for to beat through, as `/cachebeat 2h` takes it
+  if (typeof change.keepAliveMinutes === 'number') {
+    if (change.enabled === false) bad.push('session.keepAliveMinutes keeps this session beating for that long, so it can\'t come with enabled: false')
+    change.enabled ??= true
+  }
   return bad.length ? { error: `nothing changed: ${bad.join('; ')}` } : change
 }
 
@@ -194,8 +202,8 @@ export function label(key: keyof BeatSettings) {
  */
 export function summary(change: SetChange, s: BeatSettings, path: string) {
   const here = [
-    change.enabled !== undefined && (change.enabled ? 'on' : 'off'),
-    change.intervalMinutes !== undefined && (change.intervalMinutes === null ? 'its own interval dropped' : `every ${change.intervalMinutes}m`),
+    change.keepAliveMinutes ? `on for ${minutesText(change.keepAliveMinutes)}` : change.enabled !== undefined && (change.enabled ? 'on' : 'off'),
+    change.keepAliveMinutes === null && 'without a time limit',
   ].filter(Boolean)
   const each = (patch: Partial<BeatSettings>) => (Object.entries(patch) as [keyof BeatSettings, Value][]).map(([key, v]) =>
     `${label(key)} ${HEX_KEYS.includes(key) ? v : shown(rowOf(key)!.row, v, s)}`,

@@ -1,13 +1,14 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import type { Saved } from '../types'
 import { VARIANTS, cells, loopIndex, previewFrame, slotText, slotWidths, variant } from './animations'
 import { PANE, cut } from './pane'
 import { TTL_MS, viewOf } from './cache'
 import { isPriced, learnRate, money, priceOf, writeRate } from './prices'
 import type { Learned } from './prices'
-import { DEADLINE, IDLE, RETRY, STEP, fmt } from './register'
-import { DEFAULTS, EPISODE, accept, glyphs, lookOf, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
+import { DEADLINE, IDLE, RETRY, STEP, clockText, fmt, restored } from './register'
+import { DEFAULTS, EPISODE, SESSION_HELP, accept, glyphs, lookOf, minutesText, mixedMode, normalize, parseDuration, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
 
 /** The tools as the model calls them: `mcp__<plugin>__<name>`, spelled out as register.tsx's matchers are. */
@@ -273,10 +274,8 @@ test('commands answer for the state they find', async ($: Engine, on: On) => {
   expect(await cmd($, 'off')).toBe('this session: already off')
   expect(await cmd($, 'on')).toBe('this session: on, every 50m idle · starts after your next turn')
   expect(await cmd($, 'on')).toBe('this session: already on, every 50m idle · starts after your next turn')
-  expect(await cmd($, '5')).toBe('this session: interval 50m → 5m · starts after your next turn')
-  expect(await cmd($, 'on 5')).toBe('this session: already on, every 5m idle · starts after your next turn')
   expect(await cmd($, 'off')).toBe('this session: off')
-  expect(await cmd($, 'bogus')).toBe('usage: /cachebeat [on|off|<minutes>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]')
+  expect(await cmd($, 'bogus')).toBe('usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]')
 })
 
 test('a global default on starts a new session beating', async ($: Engine, on: On) => {
@@ -295,14 +294,14 @@ test('global on sets the default and turns this session on; global off the rever
   expect(stored(store).defaultOn).toBe(false)
 })
 
-test('minutes alone set this session\'s interval; global minutes set all folders\', which this session follows from then', async ($: Engine, on: On) => {
+test('global minutes set the interval for all folders, which this session follows', async ($: Engine, on: On) => {
   const { store } = await setup($, on, { settings: { intervalScope: 'global' } as never }) // 0.7's "the default" is gone
-  await cmd($, '7')
+  await cmd($, 'on')
   expect(stored(store).interval).toBe('auto')
   await $.turn.complete(turn)
   expect(await cmd($, 'global 9')).toBe('all folders: every 9m idle · this session: on')
   expect(stored(store).interval).toBe(9)
-  expect(await cmd($, '')).toBe('on, every 9m idle · 0 beats · next beat in 9m') // its own 7m dropped
+  expect(await cmd($, '')).toBe('on, every 9m idle · 0 beats · next beat in 9m')
   expect(store.get('settings')).toEqual({ interval: 9 })
 })
 
@@ -319,8 +318,8 @@ test('on mid-idle beats at lastTurn + IDLE, then every IDLE', async ($: Engine, 
 })
 
 test('now beats at once and reschedules from it', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '5')
+  const { clock, forks } = await setup($, on, { settings: { interval: 5 } })
+  await cmd($, 'on')
   expect(await cmd($, 'now')).toBe('nothing to keep warm until this session has a turn')
   expect(await cmd($, '')).toContain('on, every 5m idle')
   await $.turn.complete(turn)
@@ -331,20 +330,21 @@ test('now beats at once and reschedules from it', async ($: Engine, on: On) => {
 })
 
 test('a new interval reschedules from the last cache read', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
   await $.turn.complete(turn)
-  await cmd($, '3')
+  await cmd($, 'on')
   await clock.advance(3 * M) // beat 1 at 3
-  expect(await cmd($, '4')).toBe('this session: interval 3m → 4m · next beat in 4m')
+  await cmd($, 'global 4')
+  expect(await cmd($, '')).toBe('on, every 4m idle · 1 beat · next beat in 4m')
   await clock.advance(4 * M)
   expect(forks).toEqual([3 * M, 7 * M])
 })
 
 test('turned on within the hour after a turn but past the interval, it beats at once', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect(await cmd($, '3')).toBe('this session: on, every 3m idle · next beat due now')
+  expect(await cmd($, 'on')).toBe('this session: on, every 3m idle · next beat due now')
   await clock.settle()
   expect(forks).toEqual([10 * M])
 })
@@ -365,8 +365,8 @@ test('off, a new turn and a subagent turn each keep it from beating', async ($: 
 })
 
 test('one status line, under the latest turn: counts the session\'s beats and down to the next', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { settings: { statusHeart: 'off', showTokens: false } }) // a still heart, no tokens: the countdown is what's checked
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3, statusHeart: 'off', showTokens: false } }) // a still heart, no tokens: the countdown is what's checked
+  await cmd($, 'on')
   await $.turn.complete(turn)
   expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 3m']) // no beat yet
   await clock.advance(3 * M)
@@ -382,8 +382,8 @@ test('one status line, under the latest turn: counts the session\'s beats and do
 })
 
 test('the beat line goes after a blank line, or nowhere; with the tokens kept', async ($: Engine, on: On) => {
-  const { clock, store } = await setup($, on, { settings: { statusLine: 'spaced', showTokens: true } })
-  await cmd($, '3')
+  const { clock, store } = await setup($, on, { settings: { interval: 3, statusLine: 'spaced', showTokens: true } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await draw($, row('r1'))
   await clock.advance(3 * M)
@@ -399,13 +399,13 @@ test('the beat line goes after a blank line, or nowhere; with the tokens kept', 
 })
 
 test('a /clear starts the count afresh, still on at the same interval', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
-  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 1 beat · next beat in 3m')
+  expect(await cmd($, '')).toBe('on, every 3m idle · 1 beat · next beat in 3m')
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 0 beats · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 3m idle · 0 beats · starts after your next turn')
   await clock.advance(10 * M)
   expect(forks).toHaveLength(1) // nothing to fork until the new conversation has a turn
   await $.turn.complete(turn)
@@ -414,16 +414,16 @@ test('a /clear starts the count afresh, still on at the same interval', async ($
 })
 
 test('with no closing row seen, a beat logs a line instead', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on)
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs).toEqual(['♥ cache renewed (90,000 read, 0 written · ≈$0.02)'])
 })
 
 test('a beat can log and toast both, closing row or not', async ($: Engine, on: On) => {
-  const { clock, logs, toasts } = await setup($, on, { settings: { onBeat: 'both' } })
-  await cmd($, '3')
+  const { clock, logs, toasts } = await setup($, on, { settings: { interval: 3, onBeat: 'both' } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await draw($, row('r1'))
   await clock.advance(3 * M)
@@ -441,8 +441,8 @@ test('a stop can log and toast both', async ($: Engine, on: On) => {
 })
 
 test('a beat can toast', async ($: Engine, on: On) => {
-  const { clock, toasts } = await setup($, on, { settings: { onBeat: 'toast' } })
-  await cmd($, '3')
+  const { clock, toasts } = await setup($, on, { settings: { interval: 3, onBeat: 'toast' } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
@@ -468,8 +468,8 @@ test('stops at the deadline after the last real turn', async ($: Engine, on: On)
 })
 
 test('the deadline is a setting, and a stop can toast', async ($: Engine, on: On) => {
-  const { clock, forks, logs, toasts } = await setup($, on, { settings: { stopAfterHours: 1, onStop: 'toast' } })
-  await cmd($, '20')
+  const { clock, forks, logs, toasts } = await setup($, on, { settings: { interval: 20, stopAfterHours: 1, onStop: 'toast' } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(2 * 60 * M)
   expect(forks).toEqual([20 * M, 40 * M])
@@ -496,10 +496,10 @@ test('stops at the usage threshold set', async ($: Engine, on: On) => {
 })
 
 test('under the minimum context it says beats will skip, once, and arms when a turn grows it', async ($: Engine, on: On) => {
-  const world = { contextTokens: 8_000, settings: { skipSmall: true } }
+  const world = { contextTokens: 8_000, settings: { skipSmall: true, interval: 3 } }
   const { clock, forks, logs } = await setup($, on, world)
   await $.turn.complete(turn)
-  expect(await cmd($, '3')).toBe('this session: on, every 3m idle · beats skip: this chat is 8k tokens, under your 20k minimum')
+  expect(await cmd($, 'on')).toBe('this session: on, every 3m idle · beats skip: this chat is 8k tokens, under your 20k minimum')
   expect(logs).toEqual(['beats will skip: this chat is 8k tokens, under your 20k minimum'])
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await $.turn.complete(turn)
@@ -584,8 +584,8 @@ test('the heart rides the hint row as its dim tail: still while waiting, beating
 })
 
 test('a beat plays the blast in place of the heartbeat', async ($: Engine, on: On) => {
-  const { clock, tails } = await setup($, on)
-  await cmd($, '3')
+  const { clock, tails } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M + 3 * TICK + TICK / 2)
   await draw($, HINT)
@@ -726,8 +726,8 @@ test('the store keeps only what differs from the defaults', async ($: Engine, on
 })
 
 test('by default the beat line keeps a blank line from the turn row', async ($: Engine, on: On) => {
-  const { clock } = await setup($, on)
-  await cmd($, '3')
+  const { clock } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await draw($, row('r1'))
   await clock.advance(3 * M)
@@ -759,7 +759,7 @@ type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, lastBeatUsd: null, nextBeat: null, skipping: null, paused: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', keepAliveUntil: null, keepAliveUntilLocal: null, keepAliveMinutesLeft: null, cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, lastBeatUsd: null, nextBeat: null, skipping: null, paused: null }
 const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheUsd: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
@@ -788,15 +788,26 @@ test('state on a fresh session: off, at the default interval, the settings as th
 
 const set = async ($: Engine, args: Args) => JSON.parse((await call($, 'set', args)).result as string)
 
-test('a session interval turns beating on and leaves the default; null follows it again', async ($: Engine, on: On) => {
-  const { store } = await setup($, on)
-  const on20 = { ...FRESH, enabled: true, intervalMinutes: 20, intervalFrom: 'session', nextBeat: 'after the next turn' }
-  expect(await set($, { session: { intervalMinutes: 20 } })).toEqual({
-    changed: ['session.enabled', 'session.intervalMinutes'], session: on20, settings: {},
+test('a keep-alive time turns beating on and leaves the interval; null drops it', async ($: Engine, on: On) => {
+  const { store, clock } = await setup($, on)
+  const until = new Date(clock.now() + 120 * M).toISOString()
+  const local = clockText(clock.now() + 120 * M, clock.now())
+  expect(await set($, { session: { keepAliveMinutes: 120 } })).toEqual({
+    changed: ['session.enabled', 'session.keepAliveMinutes'],
+    session: { ...FRESH, enabled: true, keepAliveUntil: until, keepAliveUntilLocal: local, keepAliveMinutesLeft: 120, nextBeat: 'after the next turn' }, settings: {},
   })
   expect(stored(store).interval).toBe('auto')
-  expect((await set($, { session: { intervalMinutes: null } })).session).toEqual({ ...FRESH, enabled: true, nextBeat: 'after the next turn' })
-  expect((await set($, { session: { intervalMinutes: 30, enabled: false } })).session.enabled).toBe(false)
+  expect(await set($, { session: { keepAliveMinutes: null } })).toEqual({
+    changed: ['session.keepAliveMinutes'], session: { ...FRESH, enabled: true, nextBeat: 'after the next turn' }, settings: {},
+  })
+  expect((await set($, { session: { keepAliveMinutes: null } })).changed).toEqual([]) // none to drop
+})
+
+test('turning off through the tool drops the keep-alive time with it', async ($: Engine, on: On) => {
+  await setup($, on)
+  await set($, { session: { keepAliveMinutes: 120 } })
+  const off = await set($, { session: { enabled: false } })
+  expect([off.changed, off.session.keepAliveUntil, off.session.keepAliveMinutesLeft]).toEqual([['session.enabled'], null, null])
 })
 
 test('set answers with what changed and those settings alone; null resets a setting', async ($: Engine, on: On) => {
@@ -836,11 +847,17 @@ test('settings take the pane\'s values: named or custom, with units', async ($: 
 test('a call with any bad value is refused whole, saying what each takes', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   const deny = async (args: Args) => (await call($, 'set', args)).deny
-  expect(await deny({ session: { intervalMinutes: 90 } })).toBe('nothing changed: session.intervalMinutes takes 1–55 minutes or null, not 90')
+  expect(await deny({ session: { keepAliveMinutes: 4 } })).toBe('nothing changed: session.keepAliveMinutes takes 5–2880 minutes or null, not 4')
+  expect(await deny({ session: { keepAliveMinutes: 2881 } })).toBe('nothing changed: session.keepAliveMinutes takes 5–2880 minutes or null, not 2881')
+  expect(await deny({ session: { keepAliveMinutes: 30, enabled: false } }))
+    .toBe('nothing changed: session.keepAliveMinutes keeps this session beating for that long, so it can\'t come with enabled: false')
+  // a session still holding the schema from before the interval became a setting
+  expect(await deny({ session: { intervalMinutes: 20 } }))
+    .toBe('nothing changed: session has no intervalMinutes: the beat interval is settings.interval (or folder.interval), and session.keepAliveMinutes keeps the cache warm for that long')
   expect(await deny({ settings: { variant: 'nope' } })).toStartWith('nothing changed: settings.variant takes classic, pulse,')
   expect(await deny({ settings: { skipSmallTokens: 5 } })).toBe('nothing changed: settings.skipSmallTokens takes 1000–1000000 tokens or null, not 5')
   expect(await deny({ settings: { bogus: 1 }, session: 'on' })).toBe('nothing changed: session is an object, not "on"; settings has no bogus')
-  expect(await deny({ session: { intervalMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, heartTiming: 'fast' } }))
+  expect(await deny({ session: { keepAliveMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, heartTiming: 'fast' } }))
     .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.heartTiming takes lubdub, linear, or null, not "fast"')
   expect(store.has('settings')).toBe(false)
   expect((await stateNow($)).session).toEqual(FRESH)
@@ -882,8 +899,9 @@ test('a subagent can read, never change', async ($: Engine, on: On) => {
 
 test('a call is one dim line in the transcript, its answer not drawn', async ($: Engine, on: On) => {
   await setup($, on)
-  const change = { session: { enabled: true, intervalMinutes: 20 }, settings: { interval: 30, heartPlacement: 'line' } }
-  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat · this session on, every 20m · all folders: Beat after idle 30m, Prompt heart placement own line'])
+  const change = { session: { enabled: true, keepAliveMinutes: 120 }, settings: { interval: 30, heartPlacement: 'line' } }
+  expect(await draw($, toolRow('ToolUse', TOOL.set, change))).toEqual(['cachebeat · this session on for 2h · all folders: Beat after idle 30m, Prompt heart placement own line'])
+  expect(await draw($, toolRow('ToolUse', TOOL.set, { session: { keepAliveMinutes: null } }))).toEqual(['cachebeat · this session without a time limit'])
   expect(await draw($, toolRow('ToolUse', TOOL.state, {}))).toEqual(['cachebeat · read the state'])
   expect(await draw($, toolRow('ToolResult', TOOL.set, change))).toEqual([''])
   expect(await draw($, toolRow('ToolResult', TOOL.state, {}))).toEqual([''])
@@ -993,7 +1011,7 @@ test('commands and turns arriving together leave one beat armed', async ($: Engi
   const { clock, forks } = await setup($, on)
   await cmd($, 'on')
   await $.turn.complete(turn)
-  await Promise.all([cmd($, '5'), $.turn.complete(turn), cmd($, '5'), call($, 'state')])
+  await Promise.all([cmd($, 'global 5'), $.turn.complete(turn), cmd($, 'global 5'), call($, 'state')])
   await clock.advance(5 * M)
   expect(forks).toEqual([5 * M])
   await clock.advance(5 * M)
@@ -1181,17 +1199,17 @@ test('r takes the focused setting back to its default; a custom value stays in i
   await ui.unmount()
 })
 
-const USAGE = 'usage: /cachebeat [on|off|<minutes>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
+const USAGE = 'usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
 
-test('a folder\'s own settings win over all folders\', for starting on and the interval; a session\'s own interval wins over both', async ($: Engine, on: On) => {
+test('a folder\'s own settings win over all folders\', for starting on and the interval', async ($: Engine, on: On) => {
   const { clock, forks } = await setup($, on, { folders: { [HOME]: { defaultOn: true, interval: 5 } } })
   expect(await cmd($, '')).toBe('on, every 5m idle (this folder\'s) · 0 beats · starts after your next turn')
   expect((await stateNow($)).session.intervalFrom).toBe('folder')
   await $.turn.complete(turn)
   await clock.advance(5 * M)
   expect(forks).toEqual([5 * M])
-  expect(await cmd($, '7')).toBe('this session: interval 5m → 7m · next beat in 7m')
-  expect(await cmd($, '')).toBe('on, every 7m idle (this session\'s) · 1 beat · next beat in 7m')
+  expect(await cmd($, 'local 7')).toBe(`this folder (${HOME}): every 7m idle · this session: on`)
+  expect(await cmd($, '')).toBe('on, every 7m idle (this folder\'s) · 1 beat · next beat in 7m')
 })
 
 test('another folder\'s settings don\'t apply', async ($: Engine, on: On) => {
@@ -1294,32 +1312,26 @@ test('the menu opens on this folder\'s settings when it has its own; This sessio
   await ui.unmount()
 })
 
-test('a session\'s own interval shows on its row, r drops it, and picking an interval does too', async ($: Engine, on: On) => {
-  await setup($, on)
-  await cmd($, '7')
+test('a keep-alive time shows on the session row, r drops it, and picking an interval keeps it', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on)
+  await cmd($, '2h')
+  const until = clockText(clock.now() + 120 * M, clock.now())
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect((await ui.find({ key: 'row:interval' }))?.text).toBe('Beat after idle       7m · this session ›')
-  await move($, 'row:interval')
-  expect(await ui.find({ type: 'Text', text: '7m for this session only; otherwise auto. r drops it.' })).toBeDefined()
-  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('back to auto')
-  await ui.press({ key: 'resetRow' })
-  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · starts after your next turn')
-  await cmd($, '7')
+  expect((await ui.find({ key: 'session' }))?.text).toBe(`${'This session'.padEnd(22)}on · until ${until}`)
+  expect(until).toMatch(/^(\w{3} )?\d{1,2}:\d{2}/)
+  await move($, 'session')
+  expect(await ui.find({ type: 'Text', text: `${SESSION_HELP} It keeps the cache warm until ${until}, then turns off. r drops that time.` })).toBeDefined()
+  expect((await ui.find({ key: 'resetRow' }))?.text).toBe('drop the time limit')
   await ui.press({ key: 'row:interval' })
-  await ui.press({ key: 'opt:3' }) // 30m, for all folders: this session follows it
+  await ui.press({ key: 'opt:3' }) // 30m for all folders: a setting, which leaves this session's time alone
+  expect(await cmd($, '')).toBe('on, every 30m idle · 2h left · 0 beats · starts after your next turn')
+  await move($, 'session')
+  await ui.press({ key: 'resetRow' })
   expect(await cmd($, '')).toBe('on, every 30m idle · 0 beats · starts after your next turn')
+  expect((await ui.find({ key: 'session' }))?.text).toBe(`${'This session'.padEnd(22)}on`)
+  expect(await ui.find({ key: 'resetRow' })).toBeUndefined()
   await ui.unmount()
-})
-
-test('a session\'s own interval gives way to a saved one by every route, and stays dropped across a reload, on or off', async ($: Engine, on: On) => {
-  await setup($, on)
-  await cmd($, '7')
-  await cmd($, 'off')
-  await set($, { settings: { interval: 30 } }) // Claude, as the menu and global <minutes> do
-  expect((await stateNow($)).session.intervalFrom).toBe('all folders')
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true }) // a reload reads what was saved
-  expect(await cmd($, 'on')).toBe('this session: on, every 30m idle · starts after your next turn')
 })
 
 test('Claude sets this folder\'s own settings, names it, drops one, and drops them all', async ($: Engine, on: On) => {
@@ -1359,31 +1371,31 @@ test('a path is cut at its own separator, on Windows too', () => {
   expect(cut('/x/a-very-long-folder-name-indeed', 12)).toBe('…name-indeed')
 })
 
-test('a /clear keeps this session on, at its own interval; Reset all drops that interval with the rest', async ($: Engine, on: On) => {
-  const { store } = await setup($, on)
-  await cmd($, '7')
+test('a /clear keeps this session on, with its keep-alive time; Reset all puts the interval back with the rest', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { settings: { interval: 7 } })
+  await cmd($, '3h')
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  expect(await cmd($, '')).toBe('on, every 7m idle (this session\'s) · 0 beats · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 7m idle · 3h left · 0 beats · starts after your next turn')
   await cmd($, 'settings')
   const ui = await $.ui.mount(SETTINGS_PANE)
   await ui.press({ key: 'reset' })
   await ui.press({ key: 'reset' })
   expect(store.get('settings')).toEqual({})
-  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 50m idle · 3h left · 0 beats · starts after your next turn')
   await ui.unmount()
 })
 
 test('a beat is tagged, so a request log tells it from the user\'s messages', async ($: Engine, on: On) => {
-  const { clock, prompts } = await setup($, on)
-  await cmd($, '3')
+  const { clock, prompts } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(prompts).toEqual(['[cachebeat] Automated prompt cache keep-alive, not a message from the user. Do not continue any task or use any tool. Reply with a single period and nothing else.'])
 })
 
 test('after /rewind, beats wait for the next turn instead of warming the conversation as it was', async ($: Engine, on: On) => {
-  const { clock, forks, logs, rewind, talk } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks, logs, rewind, talk } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   talk('long question')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
@@ -1406,8 +1418,8 @@ const step = async ($: Engine, turnId: string, index: number) => {
 }
 
 test('a turn gone quiet for the interval gets a beat, counted from its last request, and still ends as itself', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'run the tests', turnId: 't2' })
   await clock.advance(1 * M)
@@ -1422,13 +1434,13 @@ test('a turn gone quiet for the interval gets a beat, counted from its last requ
   await clock.advance(1 * M)
   await step($, 't2', 1) // the tool ends, the next request goes out at 8m
   await $.turn.complete({ ...turn, turnId: 't2' })
-  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 2 beats · next beat in 3m')
+  expect(await cmd($, '')).toBe('on, every 3m idle · 2 beats · next beat in 3m')
   expect(await cmd($, 'now')).not.toBe('a turn is running; the beat waits for it to end') // the turn is over
 })
 
 test('a mid-turn beat says the task is under way', async ($: Engine, on: On) => {
-  const { clock, prompts } = await setup($, on)
-  await cmd($, '3')
+  const { clock, prompts } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'run the tests', turnId: 't2' })
   await step($, 't2', 0)
@@ -1437,8 +1449,8 @@ test('a mid-turn beat says the task is under way', async ($: Engine, on: On) => 
 })
 
 test('a turn whose request sent the conversation anew gets no beat until its next request', async ($: Engine, on: On) => {
-  const { clock, forks, reads } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks, reads } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't1' })
   reads.push(usage(30_000, 14_000)) // the session's first request: 44k cached
   await step($, 't1', 0)
@@ -1456,8 +1468,8 @@ test('a turn whose request sent the conversation anew gets no beat until its nex
 })
 
 test('a request reading a few tokens short of what the last one cached still gets its beat mid-turn', async ($: Engine, on: On) => {
-  const { clock, forks, reads } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks, reads } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't1' })
   reads.push(usage(44_923, 66)) // 44,989 cached
   await step($, 't1', 0)
@@ -1471,8 +1483,8 @@ test('a request reading a few tokens short of what the last one cached still get
 })
 
 test('a turn whose requests keep coming needs no beat', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'refactor', turnId: 't2' })
   for (let i = 0; i < 5; i++) {
@@ -1485,8 +1497,8 @@ test('a turn whose requests keep coming needs no beat', async ($: Engine, on: On
 
 test('a beat that can\'t reach what the last request cached waits for the next turn, instead of writing it every time', async ($: Engine, on: On) => {
   // the turn's request read 90k; a beat reads 32k and writes 12k: the conversation was cached anew, out of its reach
-  const { clock, forks, logs } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(32_000, 12_000) }] })
-  await cmd($, '3')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(32_000, 12_000) }] })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await step($, 't2', 0)
   await $.turn.complete({ ...turn, turnId: 't2' })
@@ -1495,12 +1507,12 @@ test('a beat that can\'t reach what the last request cached waits for the next t
   expect(logs).toContain('beats wait for your next turn: Claude Code cached this conversation anew, out of a beat\'s reach')
   await clock.advance(9 * M)
   expect(forks).toHaveLength(1) // no beat writing the same again
-  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 0 beats · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 3m idle · 0 beats · starts after your next turn')
 })
 
 test('soon after a request, a beat writing more than it read missed the cache\'s place, not the cache: it waits, never stops', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(30_000, 60_000) }] })
-  await cmd($, '3')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(30_000, 60_000) }] })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't2' })
   await step($, 't2', 0)
   await $.turn.complete({ ...turn, turnId: 't2' })
@@ -1513,8 +1525,8 @@ test('soon after a request, a beat writing more than it read missed the cache\'s
 // what code review found in 0.9.0's first draft, each of these failing on it
 
 test('stop after idle counts from the user\'s last message, not the last turn\'s end', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { settings: { stopAfterHours: 1 } })
-  await cmd($, '50')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 50, stopAfterHours: 1 } })
+  await cmd($, 'on')
   await $.turn.complete(turn) // 0m
   await clock.advance(40 * M)
   await $.turn.start({ text: 'run the long build', turnId: 't2' }) // the user's message at 40m
@@ -1525,8 +1537,8 @@ test('stop after idle counts from the user\'s last message, not the last turn\'s
 })
 
 test('a tool\'s result landing mid-turn is not a rewind', async ($: Engine, on: On) => {
-  const { clock, forks, logs, add } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks, logs, add } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'two tools', turnId: 't2' })
   add('user', 'two tools')
@@ -1540,8 +1552,8 @@ test('a tool\'s result landing mid-turn is not a rewind', async ($: Engine, on: 
 })
 
 test('a beat writing a long answer before its cache mark is renewing, not out of reach: mid-turn, or after later turns', async ($: Engine, on: On) => {
-  const { clock, forks, logs, reads } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(88_000, 1_500) }] })
-  await cmd($, '3')
+  const { clock, forks, logs, reads } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(88_000, 1_500) }] })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't1' })
   reads.push(usage(80_000, 8_000)) // 88k cached
   await step($, 't1', 0)
@@ -1557,8 +1569,8 @@ test('a beat writing a long answer before its cache mark is renewing, not out of
 
 test('a mid-turn beat that fails for a moment is tried again a minute later', async ($: Engine, on: On) => {
   const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
-  const { clock, forks } = await setup($, on, { fork: [err, ok] })
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, fork: [err, ok] })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -1566,12 +1578,12 @@ test('a mid-turn beat that fails for a moment is tried again a minute later', as
   expect(await cmd($, '')).toContain('next beat in 1m') // the retry, counted down
   await clock.advance(1 * M)
   expect(forks).toEqual([3 * M, 4 * M])
-  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 1 beat · next beat in 3m')
+  expect(await cmd($, '')).toBe('on, every 3m idle · 1 beat · next beat in 3m')
 })
 
 test('a conversation\'s first turn gets no mid-turn beat: its next request may cache it anew', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.start({ text: 'build', turnId: 't1' })
   await step($, 't1', 0)
   await clock.advance(9 * M)
@@ -1582,8 +1594,8 @@ test('a conversation\'s first turn gets no mid-turn beat: its next request may c
 })
 
 test('a beat whose fork asked twice shows what the conversation\'s cache holds, not both reads', async ($: Engine, on: On) => {
-  const { clock, reads } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(91_000, 0) }] })
-  await cmd($, '3')
+  const { clock, reads } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(91_000, 0) }] })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't1' })
   reads.push(usage(40_000, 6_000)) // 46k cached
   await step($, 't1', 0)
@@ -1608,8 +1620,8 @@ test('a resumed conversation (--resume, --continue) waits for the next turn, and
 })
 
 test('/resume within a session waits for the next turn, and never switches beating off', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { fork: [ok, { isAnswered: false, reason: 'nothing-to-fork', usage: usage(0, 0) }, ok] })
-  await cmd($, '3')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 3 }, fork: [ok, { isAnswered: false, reason: 'nothing-to-fork', usage: usage(0, 0) }, ok] })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(1 * M)
   await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
@@ -1619,7 +1631,7 @@ test('/resume within a session waits for the next turn, and never switches beati
   expect(logs).toContain('beats wait for your next turn: this conversation was resumed')
   await clock.advance(9 * M)
   expect(forks).toEqual([]) // the beat set before the /resume does not come
-  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 0 beats · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 3m idle · 0 beats · starts after your next turn')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(forks).toEqual([13 * M + 1000])
@@ -1628,8 +1640,8 @@ test('/resume within a session waits for the next turn, and never switches beati
 // what code review found in 0.9.0's second draft, each of these failing on it
 
 test('mid-turn, a chat under the minimum waits for the turn to grow it, rather than trying again at once', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { settings: { skipSmall: true }, contextTokens: 8_000 })
-  await cmd($, '3')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 3, skipSmall: true }, contextTokens: 8_000 })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -1640,8 +1652,8 @@ test('mid-turn, a chat under the minimum waits for the turn to grow it, rather t
 })
 
 test('a mid-turn beat writing a big tool result past its cache mark is no sign the cache lapsed', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(15_000, 40_000) }] })
-  await cmd($, '3')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(15_000, 40_000) }] })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'read the big file', turnId: 't2' })
   await step($, 't2', 0)
@@ -1652,8 +1664,8 @@ test('a mid-turn beat writing a big tool result past its cache mark is no sign t
 })
 
 test('a message added between turns (a ! command\'s output) is not a rewind', async ($: Engine, on: On) => {
-  const { clock, forks, logs, talk, add } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks, logs, talk, add } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   talk('question')
   await $.turn.complete(turn)
   add('user', '<bash-stdout>README.md</bash-stdout>')
@@ -1663,8 +1675,8 @@ test('a message added between turns (a ! command\'s output) is not a rewind', as
 })
 
 test('an interval saved mid-turn moves the turn\'s beat', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -1682,8 +1694,8 @@ test('an interval saved mid-turn moves the turn\'s beat', async ($: Engine, on: 
 
 test('a ! command\'s output pushing the conversation past the 4096 listed is not a rewind', async ($: Engine, on: On) => {
   const many = Array.from({ length: 4093 }, (_, i) => said(i % 2 ? 'assistant' : 'user', `m${i}`))
-  const { clock, forks, logs, add, talk } = await setup($, on, { chat: many })
-  await cmd($, '3')
+  const { clock, forks, logs, add, talk } = await setup($, on, { settings: { interval: 3 }, chat: many })
+  await cmd($, 'on')
   talk('q') // 4095 messages as the turn ends
   await $.turn.complete(turn)
   add('user', '! ls'); add('user', '<bash-stdout>README.md</bash-stdout>') // 4097: the newest 4096 listed
@@ -1693,8 +1705,8 @@ test('a ! command\'s output pushing the conversation past the 4096 listed is not
 })
 
 test('an idle beat after a later turn, writing a long answer, renews rather than pausing', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(88_000, 1_500) }] })
-  await cmd($, '3')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(88_000, 1_500) }] })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await step($, 't1', 0)
   await $.turn.complete({ ...turn, turnId: 't1' })
@@ -1722,8 +1734,8 @@ test('an interval another session saves, picked up mid-turn, moves the turn\'s b
 })
 
 test('/resume within a session leaves beats paused, as the state says', async ($: Engine, on: On) => {
-  const { clock } = await setup($, on)
-  await cmd($, '3')
+  const { clock } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(1 * M)
   await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
@@ -1731,8 +1743,8 @@ test('/resume within a session leaves beats paused, as the state says', async ($
 })
 
 test('the /resume line waits for the resumed conversation to be drawn', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on)
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
   await $.classic.SessionStart({ source: 'resume' } as never)
@@ -1742,8 +1754,8 @@ test('the /resume line waits for the resumed conversation to be drawn', async ($
 })
 
 test('a hot reload mid-conversation is not a resume', async ($: Engine, on: On) => {
-  const { clock, forks, logs, talk } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks, logs, talk } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   talk('q')
   await $.turn.complete(turn)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true }) // a reload
@@ -1753,8 +1765,8 @@ test('a hot reload mid-conversation is not a resume', async ($: Engine, on: On) 
 })
 
 test('a turn interrupted before any request: the count goes on from the last warm request', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(1 * M)
   await $.turn.start({ text: 'oops', turnId: 't2' })
@@ -1764,8 +1776,8 @@ test('a turn interrupted before any request: the count goes on from the last war
 })
 
 test('a message sent while an idle beat is on its way starts a turn', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on, { during: async n => { if (n === 1) await $.turn.start({ text: 'hi', turnId: 't2' }) } })
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, during: async n => { if (n === 1) await $.turn.start({ text: 'hi', turnId: 't2' }) } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(forks).toEqual([3 * M])
@@ -1773,8 +1785,8 @@ test('a message sent while an idle beat is on its way starts a turn', async ($: 
 })
 
 test('the running turn ending while its mid-turn beat is on its way ends it', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on, { during: async n => { if (n === 1) await $.turn.complete({ ...turn, turnId: 't2' }) } })
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, during: async n => { if (n === 1) await $.turn.complete({ ...turn, turnId: 't2' }) } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -1785,10 +1797,10 @@ test('the running turn ending while its mid-turn beat is on its way ends it', as
 
 test('a failed beat is not retried when a request warmed the cache meanwhile', async ($: Engine, on: On) => {
   const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
-  const { clock, forks } = await setup($, on, { fork: [err, ok], during: async n => {
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, fork: [err, ok], during: async n => {
     if (n === 1) { await $.turn.start({ text: 'build', turnId: 't2' }); await step($, 't2', 0) }
   } })
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M) // the beat fails; the turn's request warmed the cache at 3m
   await clock.advance(2 * M + 59_000)
@@ -1799,10 +1811,10 @@ test('a failed beat is not retried when a request warmed the cache meanwhile', a
 
 test('a retry cancels the timer it replaces', async ($: Engine, on: On) => {
   const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
-  const { clock, forks } = await setup($, on, { fork: [err, ok], during: async n => {
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, fork: [err, ok], during: async n => {
     if (n === 1) { await $.turn.start({ text: 'oops', turnId: 't2' }); await $.turn.complete({ ...turn, turnId: 't2', usage: undefined } as never) }
   } })
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M) // fails; a turn interrupted before any request re-armed meanwhile
   await clock.advance(1 * M)
@@ -1810,10 +1822,10 @@ test('a retry cancels the timer it replaces', async ($: Engine, on: On) => {
 })
 
 test('out of reach is judged on the cache as it was when the beat started', async ($: Engine, on: On) => {
-  const { clock, logs, reads } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(32_000, 12_000) }], during: async n => {
+  const { clock, logs, reads } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(32_000, 12_000) }], during: async n => {
     if (n === 1) { await $.turn.start({ text: 'more', turnId: 't2' }); reads.push(usage(32_000, 12_000)); await step($, 't2', 0) }
   } })
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await step($, 't1', 0)
   await $.turn.complete({ ...turn, turnId: 't1' })
@@ -1822,13 +1834,13 @@ test('out of reach is judged on the cache as it was when the beat started', asyn
 })
 
 test('/resume starts another conversation: its count and its first-turn hold from zero', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(forks).toEqual([3 * M])
   await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
-  expect(await cmd($, '')).toBe('on, every 3m idle (this session\'s) · 0 beats · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 3m idle · 0 beats · starts after your next turn')
   await $.turn.start({ text: 'build', turnId: 't2' }) // the resumed conversation's first turn here
   await step($, 't2', 0)
   await clock.advance(9 * M)
@@ -1836,8 +1848,8 @@ test('/resume starts another conversation: its count and its first-turn hold fro
 })
 
 test('an idle beat after the first turn reading a few tokens short, writing a long answer, renews', async ($: Engine, on: On) => {
-  const { clock, forks, logs, reads } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(44_964, 1_200) }] })
-  await cmd($, '3')
+  const { clock, forks, logs, reads } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(44_964, 1_200) }] })
+  await cmd($, 'on')
   await $.turn.start({ text: 'hi', turnId: 't1' })
   reads.push(usage(44_923, 66)) // 44,989 cached
   await step($, 't1', 0)
@@ -1850,10 +1862,10 @@ test('an idle beat after the first turn reading a few tokens short, writing a lo
 /** The line a mid-turn beat sends, which a fork's own turn would carry on an engine that raises one. */
 const ASK_MID = '[cachebeat] Automated prompt cache keep-alive, not a message from the user. The request above is already being carried out elsewhere: do not start or continue it, and do not use any tool. Reply with a single period and nothing else.'
 test('a mid-turn fork raising its own turn events neither starts nor ends a turn', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on, { during: async n => {
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, during: async n => {
     if (n === 1) { await $.turn.start({ text: ASK_MID, turnId: 'f1' }); await $.turn.complete({ ...turn, turnId: 'f1' }) }
   } })
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -1865,8 +1877,8 @@ test('a mid-turn fork raising its own turn events neither starts nor ends a turn
 })
 
 test('after a compaction, the conversation\'s next turn counts as its first: no mid-turn beat in it', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on)
-  await cmd($, '3')
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.complete(turn) // two turns in
   await $.session.compact({ messages: [said('user', 'summary')] } as never)
@@ -1877,8 +1889,8 @@ test('after a compaction, the conversation\'s next turn counts as its first: no 
 })
 
 test('state says what the last beat read and wrote', async ($: Engine, on: On) => {
-  const { clock } = await setup($, on, { fork: [{ isAnswered: true, text: '.', usage: usage(44_783, 12) }] })
-  await cmd($, '3')
+  const { clock } = await setup($, on, { settings: { interval: 3 }, fork: [{ isAnswered: true, text: '.', usage: usage(44_783, 12) }] })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect((await stateNow($)).session).toMatchObject({ lastBeatReadTokens: 44_783, lastBeatWrittenTokens: 12 })
@@ -1952,8 +1964,8 @@ test('a five-minute cache that a sleep let lapse is cold, not written afresh by 
 })
 
 test('a beat on time for an interval past the cache\'s lifetime still finds the cache not served', async ($: Engine, on: On) => {
-  const { clock, forks, logs } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, fork: [{ ...ok, usage: usage(0, 90_000) }] })
-  await cmd($, '10')
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 10 }, env: { FORCE_PROMPT_CACHING_5M: '1' }, fork: [{ ...ok, usage: usage(0, 90_000) }] })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(10 * M)
   expect(forks).toEqual([10 * M])
@@ -2052,7 +2064,7 @@ test('a new schedule while a step is being checked leaves one chain of steps, no
   let release!: () => void
   holdNow(new Promise<void>(r => (release = r)))
   await clock.advance(STEP) // the step's check starts, and waits on the time
-  await cmd($, '5') // a new interval arms its own chain meanwhile
+  await cmd($, 'global 5') // a new interval arms its own chain meanwhile
   release()
   await clock.settle()
   const before = afters()
@@ -2080,8 +2092,8 @@ test('a five-minute cache a short sleep let lapse, short of the late mark, is co
 })
 
 test('a custom interval on a five-minute cache: a sleep leaves it cold, with the age said', async ($: Engine, on: On) => {
-  const t = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
-  await cmd($, '10')
+  const t = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, settings: { interval: 10 } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await t.clock.advance(9 * M)
   t.sleep(10 * M)
@@ -2106,15 +2118,16 @@ test('a retry while a step is being checked leaves one chain of steps, not two',
   let release!: () => void
   const world: World = {
     fork: [err, ok],
+    settings: { interval: 5 },
     during: async n => { // beat 1 is on its way: a new interval arms a chain, whose first check waits on the time
       if (n !== 1) return
-      await cmd($, '3')
+      await cmd($, 'global 3')
       t.holdNow(new Promise<void>(r => (release = r)))
       await t.clock.settle()
     },
   }
   t = await setup($, on, world)
-  await cmd($, '5')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await t.clock.advance(5 * M) // beat 1 fails; its retry arms the chain the parked check must not run beside
   const before = t.afters()
@@ -2220,8 +2233,8 @@ test('money: cents above a cent, four decimals below it, and a floor', () => {
 })
 
 test('an idle beat costs what the session\'s cost rose by, as the log and the state say', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { forkUsd: 0.00123 }) // list price for this fork would be ≈$0.02
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 }, forkUsd: 0.00123 }) // list price for this fork would be ≈$0.02
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.0012)')
@@ -2229,8 +2242,8 @@ test('an idle beat costs what the session\'s cost rose by, as the log and the st
 })
 
 test('a beat in a running turn is priced from its usage: the turn\'s own requests are in the same difference', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { forkUsd: 5 })
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 }, forkUsd: 5 })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -2240,8 +2253,8 @@ test('a beat in a running turn is priced from its usage: the turn\'s own request
 })
 
 test('a priced beat\'s own writes are at the five-minute rate, though the conversation\'s cache lasts an hour', async ($: Engine, on: On) => {
-  const { clock } = await setup($, on, { fork: [{ ...ok, usage: usage(89_000, 1_000) }] })
-  await cmd($, '3')
+  const { clock } = await setup($, on, { settings: { interval: 3 }, fork: [{ ...ok, usage: usage(89_000, 1_000) }] })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -2250,42 +2263,42 @@ test('a priced beat\'s own writes are at the five-minute rate, though the conver
 })
 
 test('a rise no usage could cost is other requests\' and not the beat\'s: the usage is priced', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { forkUsd: 5 }) // a background request landed in the same difference
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 }, forkUsd: 5 }) // a background request landed in the same difference
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
 })
 
 test('a rise just under the bound is taken: fast mode doubles the list price', async ($: Engine, on: On) => {
-  const { clock } = await setup($, on, { forkUsd: 0.045 }) // the usage's list price is $0.01804: 2.49 times
-  await cmd($, '3')
+  const { clock } = await setup($, on, { settings: { interval: 3 }, forkUsd: 0.045 }) // the usage's list price is $0.01804: 2.49 times
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect((await stateNow($)).session.lastBeatUsd).toBe(0.045)
 })
 
 test('a rise just over the bound is not', async ($: Engine, on: On) => {
-  const { clock } = await setup($, on, { forkUsd: 0.046 }) // 2.55 times
-  await cmd($, '3')
+  const { clock } = await setup($, on, { settings: { interval: 3 }, forkUsd: 0.046 }) // 2.55 times
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect((await stateNow($)).session.lastBeatUsd).toBe(0.01804)
 })
 
 test('a turn that begins while an idle beat is on its way leaves the difference to the turn, so the usage is priced', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { forkUsd: 5, during: async n => { if (n === 1) await $.turn.start({ text: 'hi', turnId: 't2' }) } })
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 }, forkUsd: 5, during: async n => { if (n === 1) await $.turn.start({ text: 'hi', turnId: 't2' }) } })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
 })
 
 test('a mid-turn beat is priced from its usage even when the turn ends meanwhile without a request', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { forkUsd: 5, during: async n => {
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 }, forkUsd: 5, during: async n => {
     if (n === 1) await $.turn.complete({ ...turn, turnId: 't2', usage: undefined } as never) // ends: busy again false, the cache not warmed
   } })
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await $.turn.start({ text: 'build', turnId: 't2' })
   await step($, 't2', 0)
@@ -2294,36 +2307,36 @@ test('a mid-turn beat is priced from its usage even when the turn ends meanwhile
 })
 
 test('a turn that begins and ends its request while an idle beat is on its way is not in the beat\'s price either', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { forkUsd: 5, during: async n => {
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 }, forkUsd: 5, during: async n => {
     if (n === 1) { await $.turn.start({ text: 'hi', turnId: 't2' }); await step($, 't2', 0); await $.turn.complete({ ...turn, turnId: 't2' }) }
   } })
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs.at(-1)).toContain('≈$0.02)')
 })
 
 test('a session cost the engine does not report, or one that did not move, leaves the beat priced from its usage', async ($: Engine, on: On) => {
-  const { clock, logs } = await setup($, on, { noCost: true, forkUsd: 5 })
-  await cmd($, '3')
+  const { clock, logs } = await setup($, on, { settings: { interval: 3 }, noCost: true, forkUsd: 5 })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
 })
 
 test('on a model the table does not have, an idle beat still shows the cost it measured', async ($: Engine, on: On) => {
-  const { clock, logs, switchTo } = await setup($, on, { forkUsd: 0.5 })
+  const { clock, logs, switchTo } = await setup($, on, { settings: { interval: 3 }, forkUsd: 0.5 })
   switchTo('claude-future-9')
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.50)')
 })
 
 test('on a model the table does not have, a beat the cost cannot price shows no price', async ($: Engine, on: On) => {
-  const { clock, logs, switchTo } = await setup($, on)
+  const { clock, logs, switchTo } = await setup($, on, { settings: { interval: 3 } })
   switchTo('claude-future-9')
-  await cmd($, '3')
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written)')
@@ -2340,8 +2353,8 @@ test('a beat that wrote its cache afresh still records its cost: the expensive o
 })
 
 test('the last beat\'s cost is kept across a reload', async ($: Engine, on: On) => {
-  const { clock } = await setup($, on, { forkUsd: 0.002 })
-  await cmd($, '3')
+  const { clock } = await setup($, on, { settings: { interval: 3 }, forkUsd: 0.002 })
+  await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -2378,4 +2391,257 @@ test('the engine\'s estimate on a model switch gives the re-cache rate only wher
   switchTo('claude-future-9')
   await sw({ to_model: 'claude-future-9', pricing: 'catalog', estimated_cache_write_usd: 0.5 })
   expect(await recache()).toBe(0.6) // 120,000 × the engine's $5/MTok: a model the table lacks
+})
+
+
+// ---- the keep-alive time: /cachebeat 2h keeps the cache warm that long, then turns this session off ----
+
+const H = 60 * M
+
+test('a keep-alive time reads a unit, in hours and minutes, within 5 minutes to 48 hours', () => {
+  expect(['30m', '2h', '1h30m', '1h 30m', '1.5h', '90min', '0.5h', '5m', '48h', ' 2H ', '2 hours', '45 minutes'].map(parseDuration))
+    .toEqual([30, 120, 90, 90, 90, 90, 30, 5, 2880, 120, 120, 45])
+  // no unit (the old meaning of a bare number), nothing, a stray unit, out of range
+  expect(['30', '1.5', '', 'h', '2x', '1h30', '4m', '49h', '2881m', '1m'].map(parseDuration)).toEqual(Array(10).fill(undefined))
+  expect([5, 59, 60, 90, 125, 2880].map(minutesText)).toEqual(['5m', '59m', '1h', '1h 30m', '2h 5m', '48h'])
+})
+
+test('/cachebeat 2h turns this session on until then, from the command', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on)
+  const until = clockText(clock.now() + 2 * H, clock.now())
+  expect(await cmd($, '2h')).toBe(`this session: on until ${until} (2h), every 50m idle · starts after your next turn`)
+  expect(await cmd($, '')).toBe('on, every 50m idle · 2h left · 0 beats · starts after your next turn')
+  await $.turn.complete(turn)
+  await clock.advance(30 * M)
+  expect(await cmd($, '')).toBe('on, every 50m idle · 1h 30m left · 0 beats · next beat in 20m') // counted from the command, not the turn
+  // the UTC time an agent could misread by the zone's offset, and the same time on the user's clock
+  expect((await stateNow($)).session).toMatchObject({
+    enabled: true, keepAliveMinutesLeft: 90, keepAliveUntil: new Date(2 * H).toISOString(), keepAliveUntilLocal: clockText(2 * H, 2 * H),
+  })
+})
+
+test('a keep-alive time can be typed with a space, or after on', async ($: Engine, on: On) => {
+  await setup($, on)
+  expect(await cmd($, '1h 30m')).toStartWith('this session: on until ')
+  expect((await stateNow($)).session.keepAliveMinutesLeft).toBe(90)
+  expect(await cmd($, 'on 45m')).toStartWith('this session: on until ') // replaces the time
+  expect((await stateNow($)).session.keepAliveMinutesLeft).toBe(45)
+})
+
+test('a bare number changes nothing and says what it means now', async ($: Engine, on: On) => {
+  const { store } = await setup($, on)
+  const said = 'nothing changed: a time needs its unit now. /cachebeat 2h keeps the cache warm for 2 hours, then turns off. The beat interval is a setting: /cachebeat global 30, or /cachebeat settings.'
+  expect(await cmd($, '30')).toBe(said)
+  expect(await cmd($, '')).toBe('off')
+  await cmd($, '2h')
+  expect(await cmd($, '30')).toBe(said)
+  expect((await stateNow($)).session.keepAliveMinutesLeft).toBe(120) // the time stays
+  expect(store.has('settings')).toBe(false)
+})
+
+test('a time out of range, or without sense, is refused with what it takes', async ($: Engine, on: On) => {
+  await setup($, on)
+  const takes = (said: string) => `nothing changed: /cachebeat takes a time from 5m to 48h with its unit, like 30m, 2h or 1h30m, not "${said}".`
+  expect(await cmd($, '1m')).toBe(takes('1m'))
+  expect(await cmd($, '72h')).toBe(takes('72h'))
+  expect(await cmd($, '2x')).toBe(takes('2x'))
+  expect(await cmd($, '1.5')).toBe(takes('1.5'))
+  expect(await cmd($, '')).toBe('off')
+})
+
+test('beats keep the cache warm until the time is up, then this session turns off, as asked', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on)
+  await $.turn.complete(turn)
+  await cmd($, '2h')
+  await clock.advance(2 * H - 1)
+  expect(forks).toEqual([50 * M, 100 * M]) // the cache at 100m lasts to 160m: the beat that would follow is not needed
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, nextBeat: 'none needed' })
+  expect(await cmd($, '')).toBe('on, every 50m idle · 1m left · 2 beats · no more beats needed')
+  await clock.advance(1)
+  expect(logs.filter(l => l.startsWith('stopped'))).toEqual([`stopped: kept warm until ${clockText(2 * H, 2 * H)}, as asked`])
+  expect(await cmd($, '')).toBe('off')
+  const state = await stateNow($)
+  expect([state.session.enabled, state.session.keepAliveUntil, state.session.nextBeat]).toEqual([false, null, null])
+  await clock.advance(3 * H)
+  expect(forks.length).toBe(2)
+})
+
+test('no beat is armed when the cache outlives the time without one', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on)
+  await $.turn.complete(turn)
+  expect(await cmd($, '55m')).toEndWith('every 50m idle · no more beats needed') // the hour's cache read now lasts past 55m
+  await clock.advance(54 * M)
+  expect(forks).toEqual([])
+  await clock.advance(1 * M)
+  expect(forks).toEqual([])
+  expect(logs).toHaveLength(1)
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+test('a keep-alive time past what the cache lasts gets the beats it needs, a five-minute cache every four minutes', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
+  await $.turn.complete(turn)
+  await cmd($, '12m')
+  await clock.advance(12 * M)
+  expect(forks).toEqual([4 * M, 8 * M]) // 8m's beat keeps it to 13m, past the 12m asked for
+})
+
+test('Stop after idle does not apply while a keep-alive time is set, and does again after on', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { settings: { stopAfterHours: 1 } })
+  await $.turn.complete(turn)
+  await cmd($, '5h')
+  await clock.advance(2 * H)
+  expect(forks.length).toBe(2) // 2h since the last message, past the hour it stops at
+  expect((await stateNow($)).session.enabled).toBe(true)
+  expect(await cmd($, 'on')).toStartWith('this session: on with no time limit, every 50m idle · next beat in ')
+  expect((await stateNow($)).session.keepAliveUntil).toBeNull()
+  await clock.advance(1 * H)
+  expect(logs.at(-1)).toBe('stopped: 1h since your last message')
+})
+
+test('on and off drop the keep-alive time', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, '2h')
+  expect(await cmd($, 'on')).toBe('this session: on with no time limit, every 50m idle · starts after your next turn')
+  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · starts after your next turn')
+  await cmd($, '2h')
+  expect(await cmd($, 'off')).toBe('this session: off')
+  expect(await cmd($, 'on')).toBe('this session: on, every 50m idle · starts after your next turn') // no time left from before
+})
+
+test('the same time typed again moves the deadline from now', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on)
+  await cmd($, '2h')
+  await clock.advance(30 * M)
+  await cmd($, '2h')
+  expect((await stateNow($)).session.keepAliveMinutesLeft).toBe(120)
+})
+
+test('the time is up even while beats wait for a turn', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on)
+  await cmd($, '30m') // no turn yet: nothing cached, so beats wait for one
+  await clock.advance(29 * M)
+  expect((await stateNow($)).session.enabled).toBe(true)
+  await clock.advance(1 * M)
+  expect(logs).toEqual([`stopped: keep-alive time up (${clockText(30 * M, 30 * M)})`]) // it never kept anything warm
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+test('a turn running when the time is up ends it at its own end', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on)
+  await $.turn.complete(turn)
+  await cmd($, '10m')
+  await clock.advance(8 * M)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(5 * M) // 13m: the 10m is past, the turn goes on
+  expect((await stateNow($)).session.enabled).toBe(true)
+  expect(logs).toEqual([])
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  expect((await stateNow($)).session.enabled).toBe(false)
+  expect(logs).toEqual([`stopped: kept warm until ${clockText(10 * M, 13 * M)}, as asked`])
+})
+
+test('a sleep past the time ends it at the first step after waking', async ($: Engine, on: On) => {
+  const { clock, sleep, logs, forks } = await setup($, on)
+  await $.turn.complete(turn)
+  await cmd($, '2h')
+  await clock.advance(10 * M)
+  sleep(4 * H)
+  await clock.advance(STEP)
+  expect(forks).toEqual([])
+  expect(logs).toHaveLength(1)
+  expect(logs[0]).toStartWith('stopped: keep-alive time up (') // the cache lapsed in the sleep
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+test('a cache gone cold before the time is up is not called kept warm', async ($: Engine, on: On) => {
+  const { clock, logs, sleep } = await setup($, on)
+  await $.turn.complete(turn)
+  await cmd($, '3h')
+  await clock.advance(10 * M)
+  sleep(120 * M)
+  await clock.advance(STEP) // the step after waking finds the cache cold: beats wait for a turn
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: 'the cache went cold' })
+  await clock.advance(50 * M) // past the 3h
+  expect(logs.at(-1)).toBe(`stopped: keep-alive time up (${clockText(3 * H, 3 * H)})`)
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+test('beats waiting after /model did not keep the new model warm to the time, whatever the old cache holds', async ($: Engine, on: On) => {
+  const { clock, logs, switchTo } = await setup($, on)
+  await $.turn.complete(turn)
+  await cmd($, '30m') // the hour's cache outlives it
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(30 * M)
+  expect(logs.at(-1)).toBe(`stopped: keep-alive time up (${clockText(30 * M, 30 * M)})`)
+})
+
+test('past the time with a turn still running, the line and the status say it is up, not 1m left', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false } })
+  // the line as the desktop's band above the prompt draws it: in the kit with a turn running, which the real band skips while the engine works
+  const band = async () => (await draw($, BAND('desktop'))).filter(t => t !== 'engine').join('').replace('\u00a0', ' ')
+  await $.turn.complete(turn)
+  await cmd($, '10m')
+  expect(await band()).toBe('♡ 10m left')
+  await clock.advance(8 * M)
+  await $.turn.start({ text: 'build', turnId: 't2' })
+  await step($, 't2', 0)
+  await clock.advance(1 * M)
+  expect(await band()).toBe('♡ 1m left')
+  await clock.advance(6 * M) // 15m: the 10m is past, the turn goes on
+  expect(await band()).toBe("♡ time's up · ends after this turn")
+  expect(await cmd($, '')).toBe("on, every 50m idle · time's up · ends after this turn · 0 beats")
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  expect(await cmd($, '')).toBe('off')
+})
+
+test('a keep-alive time under a set interval judges the cache by its lifetime now, not as last read', async ($: Engine, on: On) => {
+  const world: World = { settings: { interval: 30 } }
+  const { clock, forks } = await setup($, on, world)
+  await $.turn.complete(turn)
+  world.isSubscription = false // credits pay from here, and no plan window is reported: the cache is written for five minutes
+  // through the tool: the command reads the lifetime itself. The hour it was would reach past 55m, the five minutes does not
+  expect((await set($, { session: { keepAliveMinutes: 55 } })).session.nextBeat).toBe('in 30m')
+  await clock.advance(30 * M)
+  expect(forks).toEqual([30 * M])
+})
+
+test('the turn line and the status show the time left, moving with the countdown', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { settings: { interval: 3, statusHeart: 'off' } })
+  await cmd($, '2h')
+  await $.turn.complete(turn)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 3m · 2h left'])
+  await clock.advance(3 * M)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×1 · 90k cached · next in 3m · 1h 57m left'])
+  await set($, { settings: { showCountdown: false } }) // the countdown row hides both
+  expect(await draw($, row('r1'))).toEqual(['engine', '♥ cache kept warm ×1 · 90k cached'])
+})
+
+test('an interval saved or a /clear leaves the keep-alive time as it was', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on)
+  await cmd($, '2h')
+  await clock.advance(10 * M)
+  await cmd($, 'global 9')
+  expect((await stateNow($)).session.keepAliveMinutesLeft).toBe(110)
+  await set($, { settings: { interval: 20 }, folder: { interval: 25 } })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, keepAliveMinutesLeft: 110, intervalMinutes: 25 })
+})
+
+test('a reload keeps the keep-alive time', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, '2h')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, keepAliveMinutesLeft: 120 })
+})
+
+// the kit's test hooks cannot write $.state, so this tests the reading of a saved state itself
+test('a saved state from before the interval became a setting loses its per-session interval and keeps the rest', () => {
+  const old = { enabled: true, idle: 7 * M, lastReal: null, lastWarm: 0, beats: 2 } as unknown as Saved // 0.9's: a session with its own 7-minute interval
+  const now = restored(old)
+  expect('idle' in now).toBe(false)
+  expect(now).toMatchObject({ enabled: true, keepUntil: null, lastWarm: 0, beats: 2, paused: null }) // a key it lacks takes its fresh value
+  expect(restored({ ...now, keepUntil: 5 * H }).keepUntil).toBe(5 * H)
 })
