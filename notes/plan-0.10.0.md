@@ -1,6 +1,6 @@
 # 0.10.0: cache state, keep-alive time, resume, cold guard, dollars, CacheTax
 
-Status: planned 2026-11-09, nothing built. Items 5 and 7 (the summary and CacheTax pages) are **provisional** until the user re-sends the reference screenshots: their content is settled here, their look isn't.
+Status: planned 2026-11-09, nothing built. The user answered the plan's questions the same day ("Decisions" at the end). Step 1 ships alone as 0.9.2. Items 5 and 7 (the summary and CacheTax pages) are **provisional** until the user re-sends the reference screenshots: their content is settled here, their look isn't.
 
 Line numbers are `dev` at `f58a51b` (0.9.1). The mod API is `.claude-plugin/types/claude-code/index.d.ts` (written `index.d.ts:N` below).
 
@@ -59,143 +59,193 @@ Step 0 below checks each one.
 
 ## The design
 
-### The shared cache state (built in step 1, read by items 1, 4, 5, 6 and 7)
+### Item 1 and the shared cache state: step 1, shipped alone as 0.9.2
 
-One pure module, `hooks/cache.ts`, plus one reader in `register.tsx`. Everything that says "warm", "cold", "cold for 2h" or "$ to re-cache" reads it. Nothing else works this out.
-
-```ts
-// hooks/cache.ts
-export type CacheFacts = {
-  lastWarm: number | null       // wall ms: the last request of the main conversation that read or wrote the cache (s.lastWarm)
-  source: 'request' | 'beat' | 'resume' | null // what set lastWarm
-  ttl: Ttl                      // effective: '5m' when s.isCacheShort, else the read ttl
-  contextTokens: number | null  // what the next request re-sends (chatSize)
-  usdPerMTokWrite: number | null // the re-cache rate for this model and ttl (step 2; null until then)
-}
-export type CacheView = {
-  state: 'warm' | 'cold' | 'unknown' // unknown: nothing cached yet in this conversation, and no resume hint
-  lastWarm: number | null
-  expiresAt: number | null       // lastWarm + ttl
-  coldSince: number | null       // expiresAt, once now is past it
-  ttl: Ttl
-  contextTokens: number | null
-  recacheUsd: number | null      // contextTokens × rate: what the next message pays to write it again (step 2)
-}
-export const TTL_MS: Record<Ttl, number> = { '5m': 5 * 60_000, '1h': 60 * 60_000 }
-export function viewOf(f: CacheFacts, now: number): CacheView
-```
-
-- **`viewOf` is pure:** no `$`, tested directly. The `register.tsx` reader that gathers the facts is `async function cacheNow($)`, named once in the file, for the 2.1.287 loader. It reads `$.clock.now()`, `chatSize($)` and the module's `ttl` / `s`.
-- **Warm or cold is by time,** as Claude Code judges it: `now < lastWarm + TTL_MS[ttl]`. The README and the tool text say "likely", and that each beat and turn confirms it.
-- **It works with beating off.** `markWarm` (register.tsx:575) runs on every turn request and at `turn.complete`, whether beating is on or not. So the cold guard and the summary work in sessions where cachebeat doesn't beat. Keep it that way: don't gate `markWarm` on `s.enabled`.
-- **A resume seeds it** (step 4): `lastWarm = now − seconds_since_last_response × 1000`, `source: 'resume'`.
-- **`state` (the tool) gains a `cache` object** with the view's fields, `lastWarm` and `coldSince` as ages in minutes. The tool *text* is static (claude-tools.md), so the description lists the fields and the values go in results.
-
-### Item 1: the sleep bug (step 1)
+This section is the whole brief for step 1. Read it with "What's definitive and what's inferred" above and "For every step, these bite" under "Steps, in order". Step 1 ships as **0.9.2** before the rest of 0.10.0 (the user's decision), so it must not depend on anything later: the session interval (`s.idle`) is still there in 0.9.2, and dollars are still `null`.
 
 **Current behavior:**
 - `schedule()` arms one `$.clock.after(ms)` for the whole interval (register.tsx:353) and records `s.nextAt = now + ms` in wall time (:352).
-- If P1 holds, a sleep stops the timer while `now()` jumps. After waking, `nextAt` is in the past, and the timer still owes what was left of its wait.
-- Three display sites clamp a past `nextAt`:
-  - `refreshLine` (:215): `fmt()` (:63) floors at 1m, giving "next in 1m"
-  - `stateOf` (:663): `in 1m`
-  - bare `/cachebeat` (:838–843) and `turnOn` (:608–611): `Math.max(0, …)`, then `when(0)`, giving "beating now"
+- The display sites disagree about a `nextAt` that has passed:
+  - `refreshLine` (:215) and `stateOf` (:663) go through `fmt()` (:63), which floors at 1m: "next in 1m", `in 1m`
+  - bare `/cachebeat` (:835–843) and `turnOn` (:607–613) take `Math.max(0, …)`, then `when(0)` (:567): "beating now"
 - When the late timer finally fires, `beat()` finds `since >= MAX_TTL` and **stops** cachebeat (:458).
-- **The countdown has no clock of its own:** only the animation tickers redraw it (:231, :243). With both animations off, it never moves between schedules. That's a pre-existing gap the fix closes as a side effect.
+- **The countdown has no clock of its own:** only the animation tickers redraw it (:231, :243). With both animations off, it never moves between schedules.
 
 **The cause,** found by reading the code and the bundle:
-- `$.clock.now()` is `Date.now()`, confirmed in the bundle. `$.clock.after` is a plain `setTimeout`: P1 is the inferred part.
-- After waking, `at − now < 0`, and the tickers' `refreshLine` redraws "1m" every second until the timer has run out the rest of its awake wait.
-- A real repeating "next in 1m" also comes from the RETRY loop (:497–500) while the network is down after waking. That one is truthful and stays.
+- `$.clock.now()` is `Date.now()`, confirmed in the bundle. `$.clock.after` is a plain `setTimeout`. That it stops during suspend is P1, inferred from libuv/Bun timing timers on the monotonic clock.
+- After waking, `nextAt − now < 0`, and the tickers' `refreshLine` redraws "1m" every second until the timer has run out the rest of its awake wait, up to a whole interval.
+- A real repeating "next in 1m" also comes from the RETRY loop (:497–500) while the network is still down after waking. That one is truthful and stays.
 
-**The design:** the wall-clock deadline is the authority, never a timer having fired. That's correct whether P1 holds or not.
+#### 1a. The shared cache state
 
-- **Wait in steps.** `schedule()` stops arming one long timer. It calls `armStep($)`, which waits `min(STEP, s.nextAt − now)` with `STEP = 60_000`.
-  - Each step calls `async function wallCheck($)`:
-    - reads `now`
-    - if `now >= s.nextAt`, runs `scheduledBeat($)`
-    - otherwise calls `refreshLine($)` and arms the next step
-  - The RETRY path (:497–500) sets `s.nextAt = now + RETRY` and calls `armStep($)` too, so there's one way to wait.
-  - A sleep then costs at most one step past waking.
-  - Keep the `scheduling` call counter (:332, :350, :357): only the newest `schedule()` call may arm. `armStep` writes the same `timer` variable `schedule()` and the RETRY path cancel.
-  - `wallCheck` never calls `schedule()` except through `beat()`, so `refreshLine` → `schedule` → `refreshLine` can't recurse.
-- **An expired cache waits by default (the user's decision), and a new setting chooses** (see "The **When the cache expired** setting" below).
-  - In `beat()`, before the fork, the cache counts as **expired** when either:
-    - `since >= MAX_TTL`, today's check at :458, or
-    - the beat is late (`since > idle() + 2 * STEP`, which only a suspended or stalled process causes) and `since >= TTL_MS[effective ttl]`. This catches a 5-minute cache that a 10-minute sleep let lapse. Without it, the beat would write the whole cache again and then stop as "not served".
-  - Expired with `cfg.onExpired === 'wait'`: `pause($, EXPIRED, …)` with `const EXPIRED = 'the cache expired'`. The log: `beats wait for your next turn: the cache expired (2h 14m since it was last read)`.
-  - Expired with `'stop'`: `stop($, …)`, as now, with today's message.
-  - A late beat whose cache is still inside the TTL beats as usual: a short sleep still beats in time to help.
-- **The expired line.** `refreshLine` gets a branch for `s.enabled && s.paused === EXPIRED`: `♡ cache expired 2h 14m ago · beats start again on your next message`. It reads `cacheNow($)`, so the age moves each step.
-- **One overdue wording everywhere.** Add one pure helper in register.tsx; it owns the word "in":
+One pure module, `hooks/cache.ts`, plus one reader in `register.tsx`. Everything that says "warm", "cold", "cold for 2h" or "$ to re-cache" reads it, in this step and every later one. Nothing else works this out.
+
+```ts
+// hooks/cache.ts: no `$`, no imports but types
+import type { Ttl } from '../types'
+
+export const TTL_MS: Record<Ttl, number> = { '5m': 5 * 60_000, '1h': 60 * 60_000 }
+
+export type CacheFacts = {
+  lastWarm: number | null        // wall ms: the main conversation's last request or beat that read or wrote the cache (s.lastWarm)
+  ttl: Ttl                       // effective: '5m' when s.isCacheShort, else the ttl cacheTtl() read
+  contextTokens: number | null   // what the next request re-sends (chatSize)
+  writeUsdPerToken: number | null // the re-cache rate; null until step 2 adds prices
+}
+export type CacheView = {
+  state: 'warm' | 'cold' | 'unknown' // unknown: nothing cached yet in this conversation (lastWarm null)
+  lastWarm: number | null
+  expiresAt: number | null       // lastWarm + TTL_MS[ttl]
+  coldFor: number | null         // ms since expiresAt, once now is past it; else null
+  ttl: Ttl
+  contextTokens: number | null
+  recacheUsd: number | null      // contextTokens × writeUsdPerToken, when both are known
+}
+
+export function viewOf(f: CacheFacts, now: number): CacheView
+```
+
+- **Warm or cold is by time,** as Claude Code judges it: warm while `now < lastWarm + TTL_MS[ttl]`. The tool text says "likely". Each beat and turn confirms it through its usage.
+- **The reader** is `async function cacheNow($: EngineInterface): Promise<CacheView>` in register.tsx. The name must be used nowhere else in the file (2.1.287's loader). It reads:
+  - `const now = await $.clock.now()` and `const size = await chatSize($)` (:315), each as a plain statement
+  - `s.lastWarm`, and `s.isCacheShort ? '5m' : ttl` for the TTL
+  - `writeUsdPerToken: null` in this step
+- **It works with beating off.** `markWarm` (:575) runs on every turn request and at `turn.complete`, whether beating is on or not. Keep it that way: don't gate `markWarm` on `s.enabled`. The cold guard (step 5) relies on it.
+- **`state` (the tool) gains `cache`,** built in `stateOf` (:658) from `cacheNow($)`:
 
   ```ts
-  const untilNext = (ms: number) => (ms <= 0 ? 'due now' : `in ${fmt(ms)}`)
+  cache: { state, ttl, lastReadMinutesAgo, minutesLeft, coldForMinutes, contextTokens, recacheUsd }
   ```
 
-  Every "next" text goes through it, and no caller writes "in" itself:
-  - `statusText` (pane.tsx:70–77) takes `next` as `untilNext`'s whole result. Its templates become `♡ next beat ${next}` and `· next ${next}`.
-    - The settings preview's sample call (pane.tsx:90) passes `'in 42m'` in place of `'42m'`.
-    - `refreshLine` (:215) passes `untilNext(at - now)`.
-  - `when()` (:564–567) returns `` `next beat ${untilNext(ms)}` `` for a number, so `ms === 0` reads `next beat due now`. Today it's `beating now`. Bare `/cachebeat` (:836–843) and `turnOn` (:608–611) both get it through `when()`.
-  - `stateOf` (:663): `nextBeat: untilNext(s.nextAt - now)`, so `in 42m` as today, or `due now`. Add `due now` to the `nextBeat` values listed in the `state` description (tools.ts:84).
+  - Minutes are whole numbers (`Math.floor`).
+  - `lastReadMinutesAgo` and `minutesLeft` are null with no `lastWarm`. `minutesLeft` is null once cold, and `coldForMinutes` is null while warm.
+  - Add one sentence to `STATE`'s description (tools.ts:80–90). The text is static, so it lists names, never values: "`cache` is whether this session's prompt cache is likely still warm, judged by the time since it was last read against its lifetime, as Claude Code judges it: `state` (warm, cold, or unknown before anything is cached), minutes since the last read, minutes left or minutes cold, the conversation's size in tokens, and `recacheUsd`, an estimate of what the next message pays to cache it again (null when unknown)."
 
-  `fmt()` itself is unchanged: it formats intervals, and `every()` uses it. A past deadline lasts at most one step.
-- **`stopAfterHours` is checked in `beat()`** (:457), before the expiry check. A long sleep past it still stops cachebeat at the first step after waking. That's unchanged and correct.
+#### 1b. Waiting by the wall clock
 
-**The When the cache expired setting**
+The wall-clock deadline is the authority, never a timer having fired. That's correct whether P1 holds or not.
 
-- **Key:** `onExpired: 'wait' | 'stop'`, default `'wait'`. It's in `BeatSettings` (types/index.d.ts) and `DEFAULTS` (settings.ts:4).
+- **Wait in steps.** `const STEP = 60_000` beside `RETRY` (:14). `schedule()` stops arming one long timer at :353. In its place it calls `armStep($, call, now)`, where `call` is the `scheduling` value that `schedule()` call took. `armStep` is a plain function: it works out `const wait = Math.min(STEP, Math.max(0, at - now))` first, from `const at = s.nextAt` checked non-null, then arms `timer = $.clock.after(wait, () => void wallCheck($, call))`. Nothing but `wait` and the arrow goes into the `$` call.
+- **`async function wallCheck($, call: number)`:**
+  1. reads `const now = await $.clock.now()`
+  2. if `s.nextAt === null`, returns (a reschedule cleared it)
+  3. if `now >= s.nextAt`, returns `scheduledBeat($)`
+  4. otherwise `await refreshLine($)` and `armStep($, call, now)`
+
+  Between steps 1 and 4 there's an `await`. If a `schedule()` call ran meanwhile, it armed its own chain, and this one must end there, or two chains run. That's the 0.7.0 two-timer bug (mods-gotchas.md, "Timing and events"). So `wallCheck` returns without acting when `call !== scheduling` after its `await`.
+- **The RETRY path** (:497–500) keeps setting `s.nextAt = now + RETRY` and calls `armStep($, scheduling, now)` in place of its own `$.clock.after`. There's then one way to wait.
+- **A sleep costs at most one step** past waking: the step's timer has at most 60s of awake time left.
+- **Keep the `scheduling` call counter** (:332, :350, :357): only the newest `schedule()` call may arm. `armStep` sets the same `timer` variable that `schedule()` (:333) and the RETRY path cancel. 
+- **No recursion:** `wallCheck` calls `refreshLine` and `armStep`, and `schedule()` only through `beat()`. `refreshLine` calls neither.
+- `armStep` and `wallCheck` are handed `$`: grep that both names are new in register.tsx.
+
+#### 1c. A cold cache waits, by default
+
+The user decided this, and asked for a setting to choose.
+
+- **When the cache counts as gone cold,** in `beat()`, just after the `stopAfterHours` check (:457), replacing :458:
+  - `since >= MAX_TTL`, as today, or
+  - the beat is late (`since > idle() + 2 * STEP`: a suspended or stalled process, or retries) and `since >= TTL_MS[effective ttl]`. An on-time beat never counts: a custom interval longer than the TTL keeps today's "not served" handling. This catches a 5-minute cache that a 10-minute sleep let lapse. Without it, the beat writes the whole cache again, then stops as "not served".
+- **Then, by the new setting `onCold`:**
+  - `'wait'` (the default): `await pause($, COLD, said)` with `said` = `` `the cache went cold (${fmt(since)} since it was last read)` ``, and return `` `beats wait for your next turn: ${said}` ``, as the other pauses in `beat()` do (:473). `const COLD = 'the cache went cold'` sits beside `MODEL_CHANGED` (:381). The log, through `pause`: `beats wait for your next turn: the cache went cold (2h 14m since it was last read)`.
+  - `'stop'`: return `stop($, …)` with the reason `the cache went cold (2h 14m since it was last read)`. This replaces today's "over an hour since the cache was last read, so it has expired" (the retry test at cachebeat.test.tsx:530–537 asserts it; see Tests).
+- **A late beat whose cache is still inside its TTL beats as usual:** a short sleep still beats in time to help.
+- **`stopAfterHours` is checked first** (:457), so a sleep past it still stops cachebeat at the first step after waking. That's unchanged.
+- **The cold line.** In `refreshLine` (:206), before the generic `s.paused` branch at :209: when `s.enabled && s.paused === COLD`, the text is `♡ cache went cold · beats start again on your next message`. The next turn's `markWarm` clears `s.paused` (:578), as for every pause.
+  - **No age in the line, on purpose:** while paused the pulse is `waiting`, so the tickers are stopped and no step timer runs (`nextAt` is null). Nothing would redraw a moving age, so it would go stale. The log line carries the age at the moment, and the Status page (step 6) shows it live.
+- **Where else this is reached, beyond sleep** (the user confirmed one rule for all of them):
+  - **Retries running past the cache's lifetime.** Transient errors are retried every minute (:497). Today they end in a stop; with `wait`, they pause.
+  - **`/cachebeat now` on a cache that has already gone cold.** `beatNow` (:558) goes into `beat()`, which today *switches cachebeat off*. With `wait`, it answers `beats wait for your next turn: the cache went cold (…)` and stays on.
+  - **A stalled process** (a debugger, `SIGSTOP`): the same as sleep.
+- **What it doesn't cover:**
+  - "**the cache was not served**" (:528–537), where a beat found the cache gone and wrote it again. That's evidence the TTL is shorter than cachebeat thought, and it keeps its own handling (stop, or switch `auto` to 4m).
+  - `nothing-to-fork` (:492) stays a stop.
+
+**The Cache gone cold setting**
+
+- **Key:** `onCold: 'wait' | 'stop'`, default `'wait'`, in `BeatSettings` (types/index.d.ts:37–68) and `DEFAULTS` (settings.ts:4).
 - **Row:** on the Limits tab, right after **Stop after idle** (settings.ts:287):
 
   ```ts
-  { key: 'onExpired', label: 'Cache expired', values: ['wait', 'stop'],
+  { key: 'onCold', label: 'Cache gone cold', values: ['wait', 'stop'],
     fmt: v => (v === 'wait' ? 'start on your next message' : 'stop'),
-    help: 'If the cache expires before a beat reaches it, as when your computer sleeps: wait and start beating again on your next message, or stop.' },
+    help: 'If the cache goes cold before a beat reaches it, as when your computer sleeps: start beating again on your next message, or stop.' },
   ```
 
+  Two values and no custom, so Enter flips it in place (`isFlip`).
 - **Validation:**
-  - `accept()` takes it through the row's `values`, with nothing to add.
-  - In `normalize()`, add `if (!['wait', 'stop'].includes(out.onExpired)) out.onExpired = DEFAULTS.onExpired`, as `onModelSwitch` has at :79.
+  - `accept()` takes it through the row's `values`; nothing to add.
+  - In `normalize()` (settings.ts:58), add `if (!['wait', 'stop'].includes(out.onCold)) out.onCold = DEFAULTS.onCold`, as `onModelSwitch` has at :79.
+  - `normalizeOwn` uses `accept`, so a folder's own value is checked too.
 - **Tool:**
   - The schema comes from the row by itself (`kinds()`, an enum).
-  - `ABOUT.onExpired` (tools.ts:10, a `Record` over every key, so `tsc` refuses a missing one): `'If the cache expires before a beat reaches it (the computer slept, or retries ran past its lifetime): wait, and beat again after the user\'s next message, or stop beating.'`
-  - `state` needs no new field: `settings.onExpired` is there, and `session.paused` reads `the cache expired`.
-  - Add `the cache expired` to `state`'s `paused` examples (tools.ts:88).
-- **Where else `since >= MAX_TTL` is reached, beyond sleep,** since the setting applies there too:
-  - **Retries running past the hour.** Transient errors retried every minute (:497) until the cache lapses. Today they stop; with `wait`, they pause.
-  - **`/cachebeat now` on a cache that has already expired.** `beatNow` (:558) goes into `beat()`, which today *switches cachebeat off*. With `wait`, it says the cache expired and beats start again after the next message. That's better for a command the user typed.
-  - **A stalled process** (a debugger, `SIGSTOP`): the same as sleep.
-- **What it doesn't cover:**
-  - "**the cache was not served**" (:528–537), where a beat found the cache gone and wrote it again. That's evidence the TTL is shorter than cachebeat thought, not an expiry, and it keeps its own handling (stop, or switch `auto` to 4m).
-  - `nothing-to-fork` (:492) stays a stop.
-- **It changes documented behavior.** README "When it stops on its own" lists "the cache is already gone, so there's nothing left to keep warm". That bullet covers both :458 and :492.
-  - Split it: keep "there's nothing to keep warm (no conversation to send)" for :492.
-  - Add under the list: `If the cache expires before a beat reaches it, as when your computer sleeps, beats wait and start again on your next message. Set **Cache expired** to stop to have it turn off instead.`
-  - The Limits table gets the row: `Cache expired | If the cache expires before a beat reaches it (say, your computer slept): wait and start again on your next message, or stop | start on your next message`.
-  - **Release notes:** a changed default. An expired cache used to switch cachebeat off; now it waits for your next message.
+  - `ABOUT` (tools.ts:10) is a `Record` over every key, so `tsc` refuses a missing one: `onCold: "If the cache goes cold before a beat reaches it (the computer slept, or retries ran past its lifetime): wait, and beat again after the user's next message, or stop beating."`
+  - `state` needs no new field: `settings.onCold` is there, and `session.paused` reads `the cache went cold`. Add that to the `paused` examples in `STATE`'s description (tools.ts:88).
 
-**Tests** (`hooks/cachebeat.test.tsx`):
-- **Simulating suspend.** Add `skew` to `World`, and a `clock.now` hook in `setup()` that adds it: `on('clock.now', async ($, e, next) => { const r = await next(e); return { value: r.value + skew } })`. **Check the hook order first.** If `mock.clock` answers `clock.now` without calling `next` above the test's hook, register the skew hook before `mock.clock(on)`. Moving `skew` forward without `clock.advance` is a sleep: wall time jumps, and no timer fires.
-- **The hook's result shape:** check whether the kit's `clock.now` resolves `{ value }` or a bare number beneath a hook (sonnetcache1 flagged it). Read what `next(e)` gives and pass it on in the same shape.
-- **Tests to add:**
-  - On, 10m after a turn, sleep 2h, `advance(STEP)`. No fork. The line reads `cache expired 2h … ago`. `state.session.paused` is `the cache expired`. `enabled` is still true.
-  - The same with `onExpired: 'stop'`: off, with today's message.
-  - A 5-minute cache (`env: { FORCE_PROMPT_CACHING_5M: '1' }`), sleep 10m: expired, with no fork. Before the fix, it forked and stopped as "not served".
-  - Sleep 20m inside a 1h TTL with the beat due at 50m (sleep at 45m). Within one step of waking, a beat forks.
-  - After the expired pause, a turn resumes beats at the normal interval.
+#### 1d. One overdue wording everywhere
+
+Add one pure helper in register.tsx, beside `fmt` (:63). It owns the word "in":
+
+```ts
+const untilNext = (ms: number) => (ms <= 0 ? 'due now' : `in ${fmt(ms)}`)
+```
+
+Every "next" text goes through it, and no caller writes "in" itself:
+- **`statusText`** (pane.tsx:70–77) takes `next` as `untilNext`'s whole result. Its templates become `♡ next beat ${next}` and `· next ${next}`.
+  - The settings preview's sample call (pane.tsx:90) passes `'in 42m'` in place of `'42m'`.
+  - `refreshLine` (:215) passes `untilNext(at - now)`.
+- **`when()`** (:564–567) returns `` `next beat ${untilNext(ms)}` `` for a number. So `ms === 0` reads `next beat due now` where it read `beating now`. Bare `/cachebeat` and `turnOn` both get it through `when()`. Update the test at cachebeat.test.tsx:326.
+- **`stateOf`** (:663): `nextBeat: untilNext(s.nextAt - now)`, so `in 42m` as today, or `due now`. Add `due now` to the `nextBeat` values in `STATE`'s description (tools.ts:84).
+- **`fmt()` itself is unchanged:** it formats intervals, and `every()` uses it. A past deadline now lasts at most one step.
+
+#### Tests (`hooks/cachebeat.test.tsx`)
+
+- **Simulating suspend.** Add `skew` to `World`, with a setter returned from `setup()` (`sleep: (ms) => (skew += ms)`), and a `clock.now` hook that adds it, so wall time jumps and no timer fires:
+  - **Check the hook order first.** A hook registered after `mock.clock(on)` may sit above or below it. If the mock answers `clock.now` without calling `next` above the test's hook, register the skew hook before `mock.clock(on)`.
+  - **Check the result shape:** whether `next(e)` beneath gives `{ value }` or a bare number. Pass it on in the same shape.
+- **`hooks/cache.ts` directly:** `viewOf` gives `unknown` with no `lastWarm`; `warm` with `expiresAt` 1ms ahead; `cold` with `coldFor` at the boundary; the 5-minute TTL; `recacheUsd` null when either input is null.
+- **Sleep, in the engine:**
+  - On, 10m after a turn, sleep 2h, `advance(STEP)`. No fork. The line reads `♡ cache went cold · beats start again on your next message`, and the log `beats wait for your next turn: the cache went cold (2h 10m since it was last read)`. `state.session.paused` is `the cache went cold`. `enabled` is still true. `state.cache.state` is `cold`.
+  - The same with `settings: { onCold: 'stop' }`: off, with `stopped: the cache went cold (…)`.
+  - A 5-minute cache (`env: { FORCE_PROMPT_CACHING_5M: '1' }`), sleep 10m, `advance(STEP)`: cold, no fork. Before the fix, it forked and stopped as "not served".
+  - Sleep 20m inside a 1h TTL, starting 45m after the turn (beat due at 50m): within one `STEP` of waking, a beat forks.
+  - After the cold pause, a turn starts beats again at the normal interval.
   - `/cachebeat now` 2h after the last turn: with `wait`, it pauses and stays on; with `stop`, it goes off.
-  - Transient errors retried past the hour: `wait` pauses and `stop` stops.
+  - Transient errors retried past the hour: the existing test at cachebeat.test.tsx:530–537 covers this and asserts the old stop. Under the default it now expects the pause (`the cache went cold` in the last log, still on). Add a copy with `settings: { onCold: 'stop' }` that keeps the old assertion's shape with the new message. The stub is `{ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }` (:522).
   - Sleep past `stopAfterHours`: stops with the existing message, under either value.
-  - Overdue wording: with `nextAt` in the past (skewed by 30s), the line, `state.session.nextBeat` and bare `/cachebeat` all say `due now`.
-  - With both animations off, the countdown moves each `STEP` (the line text changes from `next in 50m` to `next in 49m`).
-  - `normalize()` replaces a bad `onExpired` with the default, and the menu's custom-free row flips in place (`isFlip`).
+- **Wording:**
+  - With `nextAt` 30s in the past (skew 30s past a due beat, before the step fires), the line, `state.session.nextBeat` and bare `/cachebeat` all say `due now`.
+  - With `heartAnimate: false` and `lineAnimate: false`, the turn line's countdown moves each `STEP` (`next in 50m` → `next in 49m`).
+- **The setting:**
+  - `normalize()` replaces a bad `onCold` with the default.
+  - `set` with `settings: { onCold: 'stop' }` is accepted, and `'never'` is refused naming both values.
+  - The menu's Limits tab shows **Cache gone cold**, and Enter flips it.
+- **Unchanged:**
   - The existing "commands and turns arriving together" race test still passes with step timers.
-- **Gotcha:** with steps, `clock.advance(IDLE)` resolves about 50 step timers. Tests that count logs or forks are unaffected. A test that counts `clock.after` dispatches would need updating (none does today; check with `grep -n "clock.after" hooks/cachebeat.test.tsx`).
+  - All the existing tests pass, apart from :326 (`beating now` becomes `next beat due now`) and :530–537 (retries past the hour now pause), which change as said above.
+- **Gotcha:** with steps, `clock.advance(IDLE)` resolves about 50 step timers along the way. Tests that count logs or forks are unaffected. Check with `grep -n "clock.after" hooks/cachebeat.test.tsx` that no test counts `clock.after` dispatches.
 
-**README:** nothing new under Features. "When it stops on its own" and the Limits table change as "The **When the cache expired** setting" says.
+#### README (on `main` through the release; users only)
 
-**Risk:** `$.clock.after` at 60s steps is one host dispatch a minute while armed. That's negligible next to the 80ms animation tickers.
+- **"When it stops on its own"** (README:246–255): the bullet "the cache is already gone, so there's nothing left to keep warm" covers both :458 and :492. Make it "there's no conversation yet to keep warm" (for :492). Add after the list: `If the cache goes cold before a beat reaches it, as when your computer sleeps, cachebeat waits and starts beating again on your next message. Set **Cache gone cold** to stop to have it turn off instead.`
+- **The Limits table** (README:184–188) gets the row, after Stop after idle: `| Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop | start on your next message |`.
+- **"What you'll see":** the turn line paragraph (:129) adds that a cold cache reads `♡ cache went cold · beats start again on your next message`.
+- **"What it sends"** (:97): "Ask Claude, and it can tell you how much the last beat read and wrote, and whether the cache is likely still warm."
+
+#### Notes (`dev`, a separate commit)
+
+- mods-gotchas.md, "Timing and events": timers stop while the machine sleeps (P1, with what the probe found if step 0 ran it) and `$.clock.now()` doesn't. That's why beats wait in 60s steps against the wall-clock deadline.
+- claude-tools.md: `state.cache`, and why it says "likely".
+
+#### Releasing 0.9.2
+
+- Bump `version` in `.claude-plugin/plugin.json` to `0.9.2`. Then follow notes/README.md, "Releasing, step by step": branch `v0.9.2` off `main`, take the plugin files from `dev`, run the three checks, PR, validate the branch in the portal, fast-forward.
+- **The release notes' summary:**
+  - The turn line no longer sticks on "next in 1m" after your computer wakes from sleep. Beats catch up within a minute.
+  - **Changed default:** a cache that goes cold before a beat reaches it (after sleep, after retries, or `/cachebeat now` on a cold cache) used to switch cachebeat off. Now beats wait and start again on your next message. Set **Cache gone cold** to stop for the old behavior.
+  - Claude's `state` tool now reports whether the cache is likely still warm.
+
+**Risk:** a 60s `$.clock.after` is one host dispatch a minute while armed. That's negligible next to the 80ms animation tickers.
 
 ### Item 6: dollars (step 2)
 
@@ -219,9 +269,9 @@ export function viewOf(f: CacheFacts, now: number): CacheView
   - The beat log line: `♥ cache renewed (184,212 read, 12 written · ≈$0.02)`.
   - `state.session.lastBeatUsd`.
   - The CacheTax totals (step 7).
-  - **Not the turn line:** it's already tight. Open question Q6.
+  - **Not the turn line:** it's already tight (decided).
 - **Wording:** every figure is `≈$0.69`, and the first use on a page says "at API prices".
-  - **On a subscription** (`rateLimits.length > 0`), the summary and CacheTax add one dim line: "Your plan doesn't bill per token: these are what the same requests cost on the API, to compare." Open question Q5.
+  - **On a subscription** (`rateLimits.length > 0`), the summary and CacheTax add one dim line: "Your plan doesn't bill per token: these are what the same requests cost on the API, to compare." (Decided.)
 
 **Tests:**
 - `priceOf` and `writeRate` for a known model at both TTLs, and `null` for an unknown one.
@@ -239,7 +289,7 @@ export function viewOf(f: CacheFacts, now: number): CacheView
 - It also appears in the pane's `· this session` marker on **Beat after idle** (pane.tsx:210–229, `dropSession` register.tsx:1123).
 - claude-tools.md records the decision "A session interval turns beating on". This step reverses it; record that there.
 
-**The design** (open question Q2 has the alternatives):
+**The design** (decided with the user; see "Decisions"):
 
 - **`/cachebeat <duration>`:** on for this session, keeping the cache warm until `now + duration`. Then cachebeat turns itself off for the session: "kept warm for 2h, as asked".
   - The time counts from the command, a fixed deadline. Messages in between don't extend it.
@@ -310,8 +360,8 @@ export function viewOf(f: CacheFacts, now: number): CacheView
    - off: no line
 
 **The store record** (one key per session, so open sessions never overwrite each other):
-- `$.store` key `` `session:${id}` ``, value `{ v: 1, at, enabled, keepUntil, beats }`. `at` is the wall time of the last write.
-- Write it in `save()` only when `enabled`, `keepUntil` or `beats` changed since the last write. Track the last written triple in a module variable.
+- `$.store` key `` `session:${id}` ``, value `{ v: 1, at, enabled, keepUntil, beats, guard }` (`guard` from step 5 on: the session's cold guard override). `at` is the wall time of the last write.
+- Write it in `save()` only when `enabled`, `keepUntil` or `beats` changed since the last write. Track what was last written in a module variable. Step 5 adds `guard` to what's tracked.
 - **Never write in `session.end`.** Exits run under a 1.5s bound for the whole chain (`index.d.ts:11045`).
 - **Prune** at `session.start`: `$.store.keys()`, drop `session:*` older than 30 days.
 - **Risk:** a computed key in a `$` call's argument hasn't been through the directory scan. A template literal isn't a cast, so it should pass. Validate the step's branch in the portal (`404Mayank/cachebeat@<branch>`) before building on it. If it's flagged, fall back to one `sessions` key read fresh before each write, as `saveOwn` does (register.tsx:139), and accept the rare lost update.
@@ -350,44 +400,81 @@ export function viewOf(f: CacheFacts, now: number): CacheView
 
 ### Item 4: the cold guard (step 5)
 
-**The design** (open question Q3 has the defaults):
+**The design** (decided with the user; see "Decisions"):
 
-- **Setting:** a new `BeatSettings` key `coldGuard: boolean` on the **Limits** tab, for all folders and this folder through the existing scopes. A session override `s.guard: boolean | null` (null follows the setting) comes from `/cachebeat guard on|off` and the tool's `session.coldGuard`.
-  - The pane's **Cold guard** row shows `on · this session` when the session overrides it, and `r` drops the override. That's the same pattern the session interval marker used before step 3 removed it.
+- **Three new settings** in `BeatSettings` and `DEFAULTS`, on the **Limits** tab after **Cache gone cold**. They work for all folders and this folder through the existing scopes. The tool schema comes from the rows, and `ABOUT` needs an entry for each (`tsc` refuses a missing one).
+
+  ```ts
+  { key: 'coldGuard', label: 'Cold guard', values: [true, false], fmt: onOff,
+    help: "Holds your first message to a session whose cache has gone cold, says what sending it costs, and lets the next one through if you send again soon." },
+  { key: 'coldGuardWindow', label: '  send again within', values: [2, 3, 5], show: s => s.coldGuard, fmt: v => `${v}m`,
+    help: 'How long after a held message a second send goes through. After that, the next send is held again.',
+    custom: { placeholder: 'e.g. 4m', parse: parseWindow } },
+  { key: 'coldGuardTokens', label: '  chats from', values: [10_000, 20_000, 50_000, 100_000], show: s => s.coldGuard, fmt: v => `${tokens(Number(v))} tokens`,
+    help: 'The smallest chat the guard holds a message for: a smaller one is cheap to cache again.',
+    custom: { placeholder: 'e.g. 35k', parse: parseTokens } },
+  ```
+
+  - **Defaults:** `coldGuard: true`, `coldGuardWindow: 3`, and `coldGuardTokens: 20_000`, the same as `skipSmallTokens`'s default. Make the shared figure one `const SMALL_CHAT = 20_000` in settings.ts, used by both defaults.
+  - **`parseWindow`** is a new reader beside the others (settings.ts:192–196): `reader('minutes', { '': 1, m: 1, min: 1 }, 1, 15, true)`.
+  - **`normalize()`:** today it checks number settings only by type. Add range checks for the two numbers, through their readers, as `interval` has at :78: a stored `coldGuardWindow` of 90 falls back to 3.
+- **A session override:** `s.guard: boolean | null` in `Saved` (null follows the setting), from `/cachebeat guard on|off` and the tool's `session.coldGuard` (`true`/`false`/`null`).
+  - The pane's **Cold guard** row shows `on · this session` while the session overrides it, and `r` drops the override. That's the marker pattern step 3 removed from the interval, so reuse its shape.
+  - `/clear` keeps it, as `anotherConversation` keeps `enabled`. A resume restores it from the session record (step 4 adds `guard` to the record).
 - **The hook:** `on('prompt.submit', async ($, e, next) => …)`, with no `.catch`, so a failure lets the prompt through. It holds the prompt only when **all** of these hold:
-  1. The guard applies here (`s.guard ?? cfg.coldGuard`).
-  2. `e.origin.kind === 'composer'`. Not `plugin`, `sdk`, `peer` or a scheduled trigger: none of those is someone who can send again. `bridge` is open question Q3.
+  1. The guard applies here: `s.guard ?? cfg.coldGuard`.
+  2. `e.origin.kind === 'composer'`. Not `bridge` (Remote Control: how a held message shows there is unknown), `plugin`, `sdk`, `peer` or a scheduled trigger.
   3. `e.turnId === undefined` and `!busy`. Mid-turn, the cache is being read anyway.
   4. P6 decides whether slash and `!` commands reach this hook at all. If they do, skip text starting with `/` or `!`. If they don't, add no check: no handling for a case that can't happen.
-  5. `cacheNow($).state === 'cold'`. `unknown` (a new conversation, or a resume without a hint) never holds.
-  6. `contextTokens >= COLD_MIN`, 20,000. Smaller re-caches are cheap.
-  7. The guard isn't armed for this cold stretch.
-- **The first send** returns, without `next`: `{ drop: 'cachebeat: the cache has been cold for 2h 14m, so this message re-caches 184k tokens (≈$0.69 at API prices). Send again to go ahead.' }`. It sets `coldArmed = s.lastWarm`, a module variable, so the arm is tied to this cold stretch.
-- **The second send** (any text, any time while `coldArmed === s.lastWarm`) calls `next(e)` and warns: `$.ui.log('sent on a cold cache: cold for 2h 14m, about 184k tokens written again')`. P5's check also shows where a log during `prompt.submit` lands. If it lands badly, use a toast.
-- **Any turn that warms the cache** (`markWarm`) changes `s.lastWarm`, which disarms it. No timer.
-- **Counting** for step 7: a held send, and a cold send, with its tokens and dollars.
+  5. `(await cacheNow($)).state === 'cold'`, written as a plain statement first. `unknown` (a new conversation, or a resume without a hint) never holds.
+  6. `contextTokens >= cfg.coldGuardTokens`.
+  7. The guard isn't armed: see below.
+- **The arm** is two module variables: `armedFor` (the `s.lastWarm` it was armed on) and `armedUntil` (wall ms).
+  - **First send:** set `armedFor = s.lastWarm` and `armedUntil = now + cfg.coldGuardWindow × MIN`, then return without `next`:
 
-**If P5 shows the dropped text is lost,** holding a typed message is unacceptable. Use `$.ui.ask` in the hook instead: `Cache cold for 2h 14m: re-cache 184k tokens (≈$0.69)?` with `Send` and `Don't send`. `Send` calls `next(e)`, anything else drops. One extra keypress, and nothing is lost. Ask the user before switching (Q3).
+    ```
+    { drop: 'cachebeat: the cache has been cold for 2h 14m, so this message caches 184k tokens again (≈$0.69 at API prices). Send again within 3m to go ahead.' }
+    ```
+
+    Leave the `(≈$…)` out while `recacheUsd` is null.
+  - **A send while armed** (`armedFor === s.lastWarm && now < armedUntil`, any text) calls `next(e)` and warns with `$.ui.log('sent on a cold cache: cold for 2h 14m, 184k tokens cached again')`. P5's check also shows where a log during `prompt.submit` lands. If it lands badly, use a toast.
+  - **A send after the window** is held again, and re-arms.
+  - **A turn that warms the cache** changes `s.lastWarm`, so `armedFor` no longer matches. No timer is needed.
+- **Counting** for step 7: a held send, and a cold send with its tokens and dollars.
+- **The guard runs with beating off.** It's about the cache, not about beats, and `markWarm` runs either way.
+
+**If P5 shows the dropped text is lost** (decided with the user), use `$.ui.ask` in the hook instead of dropping:
+- Ask `Cache cold for 2h 14m: cache 184k tokens again (≈$0.69)?` with `Send` and `Don't send`.
+- `Send` calls `next(e)`. Anything else, a dismissal included (it rejects: use `.catch` on the ask call, then drop), returns the drop.
+- There's no arm and no window in that variant, and the window setting isn't added. Record which variant was built in the step's notes.
 
 **Risks:**
-- **The directory will likely flag a hook that refuses user prompts** (the policy-hold class of `DENIES_PERMISSION`, notes/directory.md). Plan a README line under "What it sends": `With Cold guard on, cachebeat holds back your first message to a session whose cache has gone cold, says what sending it will cost, and lets the next one through.` Validate the branch in the portal before merging to `main`.
+- **The directory will likely flag a hook that refuses user prompts** (the policy-hold class of `DENIES_PERMISSION`, notes/directory.md). Put a README line under "What it sends": `With Cold guard on, cachebeat holds back your first message to a session whose cache has gone cold, says what sending it will cost, and lets it through if you send again within a few minutes.` Validate the branch in the portal before merging to `main`.
 - **2.1.287:** P8.
-- **The guard runs with beating off** (see the shared state). That's by design: the guard is about the cache, not about beats.
 
 **Function names:** `guardColdSend($, e)` for the hook body, if it's pulled out.
 
 **Tests** (P7 decides how the event is raised):
-- Cold and big: the first send is dropped with the age and size, the second goes through with the warning.
-- Warm: goes through.
-- `unknown`: goes through.
-- Under `COLD_MIN`: goes through.
-- `origin` `plugin`: goes through.
-- Mid-turn (`turnId` set): goes through.
-- Guard off globally, on for the session: holds. And the reverse.
-- After a held send, a turn warms the cache, then it goes cold again: holds again (the arm was tied to the old stretch).
-- Resumed with `seconds_since_last_response` past the TTL: holds the first message.
+- **Holding:**
+  - Cold and big: the first send is dropped, naming the age, the size and `3m`. A second within 3m goes through with the warning.
+  - A second send after 3m 1s is held again, and a third within the new window goes through.
+  - After a held send, a turn warms the cache, then it goes cold again: the next send holds, since the arm was tied to the old stretch.
+  - Resumed with `seconds_since_last_response` past the TTL (step 4): the first message holds.
+- **Not holding:**
+  - Warm.
+  - `unknown`.
+  - Under `coldGuardTokens`.
+  - `origin` `plugin`, and `bridge`.
+  - Mid-turn (`turnId` set).
+- **Scopes:**
+  - Guard off for all folders, on for the session: holds. And the reverse.
+  - The folder's own `coldGuardWindow` applies.
+- **Settings:** `normalize` replaces an out-of-range window or token count.
 
-**README:** the Limits table row `Cold guard | Holds your first message to a session whose cache has gone cold, and tells you how long it's been cold and what sending will cost. Send again to go ahead. | <default from Q3>`, plus the directory line above, plus `/cachebeat guard on|off` in the Commands table.
+**README:**
+- The Limits table rows: `Cold guard | Holds your first message to a session whose cache has gone cold, and says how long it's been cold and what sending will cost. Send again within the window to go ahead. | on`, then `  send again within | … | 3 minutes`, then `  chats from | … | 20k tokens`.
+- The directory line above.
+- `/cachebeat guard on|off` in the Commands table.
 
 ### Item 5: bare `/cachebeat` shows a summary (step 6, provisional)
 
@@ -444,7 +531,7 @@ stats: {
   - A turn after an idle stretch with at least one beat whose first `turn.step` reads the cache (`got + MISSED >= cached`) adds `kept += 1` and `keptUsd += (cached × (writeRate − readRate))`.
   - **Net = `keptUsd − usd`,** and it can be negative. That's the honest number, and why the page is called CacheTax.
 - **A cold send** is a turn whose first step wrote more than it read after more than a TTL idle.
-- **Writes:** the record is written at most once per beat or turn end, through the same changed-only write as step 4. Retention is the same 30 days, by the record's `at`. Open question Q7.
+- **Writes:** the record is written at most once per beat or turn end, through the same changed-only write as step 4. Retention is the same 30 days, by the record's `at`.
 - **The page** (the CacheTax tab) aggregates with `$.store.keys()` and reads every `session:*`. That's a few hundred small JSON values at most. It shows today, 7 days and 30 days, and this session:
 
 ```
@@ -507,18 +594,19 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **How:** a scratch probe mod outside the repo (`claude --plugin-dir <probe>`), driven in tmux as mods-gotchas.md "/rewind" describes. P1 needs the user to suspend the machine.
 - **Why first:** P5 can change the cold guard's whole shape, P2 and P3 the resume design, and P4 the dollar source.
 
-### Step 1: cache state and the sleep fix (shared piece, item 1)
+### Step 1: cache state and the sleep fix, released as 0.9.2 (shared piece, item 1)
 
+- **The brief:** "Item 1 and the shared cache state" above, whole: 1a–1d, the tests, the README, the notes, and the release.
 - **Delivers:**
   - `hooks/cache.ts`, `cacheNow($)` and `state.cache`
   - step timers (`armStep`, `wallCheck`), the RETRY path included
-  - the expiry check and the `onExpired` setting (row, `normalize`, `ABOUT`)
-  - the expired turn line
+  - the cold check and the `onCold` setting (row, `normalize`, `ABOUT`)
+  - the cold turn line
   - `untilNext` at all four display sites
-  - README "When it stops on its own" and the Limits row
-- **Depends on:** step 0's P1 for the explanation only. The design is right either way.
-- **Bundles:** the shared piece with item 1, since the fix needs "cold for" and the shared piece needs a consumer to test against.
-- **Release:** this can ship alone as **0.9.2**, a bug fix. Open question Q8.
+  - README and notes
+  - release 0.9.2
+- **Depends on:** nothing. It doesn't wait for step 0: P1 only explains the bug, and the design is right whether it holds or not.
+- **Bundles:** the shared piece with item 1, since the fix needs "cold" and the shared piece needs a consumer to test against.
 
 ### Step 2: dollars (item 6)
 
@@ -540,7 +628,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 5: the cold guard (item 4)
 
-- **Delivers:** the `coldGuard` setting and session override, the `prompt.submit` hook, the arm, the warning, the tool fields, and the README rows and directory line.
+- **Delivers:** the `coldGuard`, `coldGuardWindow` and `coldGuardTokens` settings, the session override, the `prompt.submit` hook, the arm and its window, the warning, the tool fields, and the README rows and directory line.
 - **Depends on:** step 1 (state), step 2 (the `≈$` in the message), step 4 (a resumed session's first message is the case that matters most), and P5–P7.
 
 ### Step 6: the Status page (item 5, provisional)
@@ -563,8 +651,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **What it is:** bump `version`, do a full README pass (Features list, Commands table, Privacy), validate the release branch in the portal (the cold guard and computed store keys are new to the scan), PR, and release notes.
 - **Release notes** call out:
   - the reversed `/cachebeat <minutes>` (with "use `/cachebeat global 30` or the menu for the interval")
-  - an expired cache now waits for your next message instead of switching cachebeat off (**Cache expired**)
-  - the cold guard's default
+  - the cold guard, on by default, and how to turn it off
   - that resumed sessions now keep on/off
 - **Process:** notes/README.md, "Releasing, step by step".
 
@@ -572,62 +659,43 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 - **Sleep: detect a wake by comparing `performance.now()` (monotonic) with `$.clock.now()`,** and name it ("the computer slept"). It's more precise in wording, but `performance` isn't a `$` call, so the test kit can't fake it. Step timers fix the behavior without knowing why the time jumped.
 - **Sleep: re-check from `refreshLine`.** It runs only while an animation ticks, and calling `schedule()` from it recurses through `refreshLine`.
+- **A moving "cold for 2h 14m" in the turn line.** Nothing redraws the line while beats wait, so it would need a timer of its own for a cosmetic age. Status shows it live instead.
 - **Dollars: `cost.usd` deltas only.** They can't price "re-cache avoided" or a cold send ahead of time, and a mid-turn beat's delta includes the turn. They're kept as the idle-beat source if P4 holds.
-- **Keep-alive counted from the last message** (a per-session Stop after idle) instead of a fixed deadline. It's more useful for someone who comes back and keeps working, but "1h 52m left" would reset on every message, and "keep alive for 2h, then go" reads as a deadline. It's Q2's alternative.
+- **Keep-alive counted from the last message** (a per-session Stop after idle) instead of a fixed deadline. "1h 52m left" would reset on every message, and "keep alive for 2h, then go" reads as a deadline. The user chose the deadline.
+- **A cold guard second send allowed at any time until the cache is warm again** (the first proposal). The user chose a window: a send long after the warning is as unconsidered as the first.
 - **The cold guard as a confirm dialog (`$.ui.ask`).** It's kinder if dropped text is lost (P5), but it's not what the user asked for. It's the fallback.
 - **One shared `sessions` or `stats` store key.** Open sessions writing it lose each other's updates, even reading fresh first. It's the fallback only if the portal flags computed keys.
 - **Separate panes for Status and CacheTax.** They would duplicate the pane's focus, desktop and Esc handling, which took 0.7.x to get right.
+- **"Expired" for the cold state.** "Cold" is shorter, pairs with "warm", and names the guard. The user chose "cold" for all visible text.
 
-## Open questions for the user
+## Decisions
 
-Each has a recommended answer.
+The user's answers to the questions this plan first asked, 2026-11-09:
 
-- **Q1. Decided by the user:** an expired cache waits by default, and **Cache expired** (`onExpired`) can be set to stop. One thing left to confirm: the setting also covers `/cachebeat now` on an expired cache and retries that run past the hour, not only sleep. **Recommended: yes**, one rule for one condition.
-- **Q2. What does `/cachebeat 2h` mean, and what happens to the interval commands?**
-  - **Recommended:**
-    - It's a fixed deadline: warm until 2h from now, then off. Stop after idle doesn't apply meanwhile.
-    - A unit is required (`30m`, `2h`, `1h30m`), from 5m to 48h.
-    - A bare `/cachebeat 30` changes nothing and explains the change.
-    - The per-session interval goes away entirely (the command, the tool, the menu marker).
-    - `global` / `local <minutes>` keep setting **Beat after idle**.
-  - **Alternative:** "2h of idle", counted from your last message, like a per-session Stop after idle.
-- **Q3. Cold guard defaults.**
-  - **On by default:**
-    - **Recommended: on** for all folders. It's the case cachebeat exists for, and the held message says how to turn it off.
-    - Off is the conservative choice for the directory review and for existing users.
-  - **"Cold":**
-    - **Recommended:** time since the last cache read is past the cache's lifetime (1h or 5m, as cachebeat reads it).
-    - Only for chats of 20k tokens or more.
-  - **The second send:**
-    - **Recommended:** any message, any time, until the cache is warm again. No timer.
-  - **Remote Control (phone) messages:**
-    - **Recommended: not held** until checked, since we don't know how the reason shows there.
-  - **If a held message's text is lost** from the prompt (to be checked):
-    - **Recommended:** ask instead, in a Send / Don't send dialog.
-- **Q4. Warm status from `/usage`.**
-  - **The answer:** there's nothing live to read. Claude Code infers it from time since the last response, as cachebeat does. The only proof comes after a request, which cachebeat already records.
-  - **Recommended:** say "likely warm" and show the time left. No change is needed beyond the wording.
-- **Q5. Dollars on a subscription.**
-  - **Recommended:** show them as `≈$` at API prices everywhere, with one dim line on the Status and CacheTax pages saying your plan doesn't bill per token.
-  - The alternative is hiding dollars on a subscription and showing tokens only.
-- **Q6. Dollars in the turn line?**
-  - **Recommended: no.** It's long already. Dollars go in the beat log line, Status, CacheTax and Claude's `state`.
-- **Q7. CacheTax: where, and how long kept?**
-  - **Recommended:** a tab beside Status in the `/cachebeat` page (`/cachebeat stats` opens it), kept 30 days.
-  - The alternative is a text answer from `/cachebeat stats` with no page.
-- **Q8. Ship the sleep fix early as 0.9.2?**
-  - **Recommended: yes.** It's a bug users hit now, and it's independent of the rest.
-- **Q9. The screenshots** for the Status and CacheTax pages. Both designs here are provisional until they come.
-- **Q10. One word for one condition: "expired" or "cold"?** This plan shows users one state (time since the last cache read is past its lifetime) under two words:
-  - "cache expired 2h ago" on the turn line, with **Cache expired** as the setting
-  - "cold for 2h 14m" in the guard's message and on Status, with **Cold guard** as the setting
-
-  Both words came from the user. 0.8.0 set out to fix "five names for two scopes", so this should be settled before step 1.
-  - **Recommended: "cold" in all visible text.** It's shorter, pairs with "warm", and the guard is already named for it. The setting becomes **Cache gone cold** (`onCold`), and the turn line reads `♡ cache cold for 2h 14m · beats start again on your next message`.
-  - "Expired" stays only in the README's explanation of why ("the cache's lifetime ran out").
+- **A cache gone cold waits by default.** **Cache gone cold** (`onCold`: start on your next message, or stop) chooses. One rule covers sleep, retries past the cache's lifetime, and `/cachebeat now` on a cold cache. It ships in 0.9.2.
+- **"Cold" in all visible text,** never "expired".
+- **`/cachebeat 2h` is a fixed deadline:**
+  - it beats until 2h after the command, then turns this session off
+  - Stop after idle doesn't apply meanwhile
+  - a unit is required, 5m–48h; a bare `/cachebeat 30` changes nothing and explains why
+  - the per-session interval is removed everywhere
+  - `global` / `local <minutes>` keep setting **Beat after idle**
+- **The cold guard:**
+  - It's on by default.
+  - Cold means the time since the last cache read is past the cache's lifetime (1h or 5m, as cachebeat reads it).
+  - A second send goes through only within **send again within** (default 3m, a setting). After it, the next send is held again.
+  - **chats from** (default 20k tokens, the same as Skip small chats) is the smallest chat it holds for.
+  - Remote Control messages aren't held.
+  - If P5 shows a held message's text is lost, it asks in a Send / Don't send dialog instead.
+- **Warm status:** nothing live exists to read. The plan says "likely warm" and shows the time left.
+- **Dollars:**
+  - `≈$` at API prices everywhere, with one dim line on Status and CacheTax on a subscription
+  - none in the turn line
+- **CacheTax:** a tab beside Status in the `/cachebeat` page, opened by `/cachebeat stats`, kept 30 days.
+- **Step 1 ships early as 0.9.2.**
 
 ## Still open
 
-- **The look of Status and CacheTax,** pending the screenshots.
+- **The screenshots** for the Status and CacheTax pages. Both designs here are provisional until they come.
 - **P1–P8,** pending step 0.
 - **Whether computed `$.store` keys pass the directory scan,** pending a branch validation in step 4.
