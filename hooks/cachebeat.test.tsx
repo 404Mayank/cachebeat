@@ -2119,3 +2119,16 @@ test('a retry while a step is being checked leaves one chain of steps, not two',
   await t.clock.advance(STEP)
   expect(t.forks.length).toBe(2) // the retry's beat, one minute on
 })
+
+test('usage crossing into credits before an on-time beat stops it for the limit, not as a cold cache', async ($: Engine, on: On) => {
+  const world: World = { percentUsed: 10, settings: { stopAtUsage: 100 } }
+  const { clock, forks, logs } = await setup($, on, world)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(49 * M)
+  world.percentUsed = 100 // usage credits from here: a five-minute cache for new requests, the one-hour cache written is still warm
+  await clock.advance(2 * M)
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['stopped: five-hour usage limit reached'])
+  expect((await stateNow($)).session.enabled).toBe(false)
+})

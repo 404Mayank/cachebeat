@@ -500,7 +500,9 @@ async function beat($: EngineInterface): Promise<string> {
   // A cache past its lifetime is cold when this beat is late (a sleeping or stalled process, or retries), or when the
   // interval is shorter than the lifetime, so an on-time beat came before it lapsed. Only an on-time beat on an interval
   // as long as the lifetime or longer finds it gone by design: that is "not served" below.
-  ttl = await cacheTtl($) // schedule() reads it under auto alone; a custom interval would judge by a stale one
+  // schedule() reads it under auto, near when the cache was written, and that lifetime is the one that counts: usage crossing into
+  // credits since would read a warm one-hour cache as five minutes. A custom interval never reads it there
+  if (cfg.interval !== 'auto' || s.idle !== null) ttl = await cacheTtl($)
   const isLate = since > idle() + 2 * STEP
   const mayBeCold = isLate || idle() < TTL_MS[s.isCacheShort ? '5m' : ttl]
   if (since >= MAX_TTL || (mayBeCold && viewOf(cacheFacts(null), now).state === 'cold')) {
