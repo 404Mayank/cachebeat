@@ -1,6 +1,6 @@
 # 0.10.0: cache state, keep-alive time, resume, cold guard, dollars, CacheTax
 
-Status: planned 2026-11-09, nothing built. The user answered the plan's questions the same day ("Decisions" at the end). Step 1 ships alone as 0.9.2. Items 5 and 7 (the summary and CacheTax pages) are **provisional** until the user re-sends the reference screenshots: their content is settled here, their look isn't.
+Status (2026-11-09, end of day): steps 0, 1, 2, 2b and 3 are built, reviewed and merged into `dev`; step 3b is next. Step 1 ships alone as **0.9.3** ([PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green, waiting on the portal check and the live sleep check). It was planned as 0.9.2, but a cloud session had already released 0.9.2 on 2026-10-13 (the `h` rename), so read "0.9.2" below as 0.9.3. Where to start: notes/handoff.md. The user answered the plan's questions the same day ("Decisions" at the end). Items 5 and 7 (the summary and CacheTax pages) are **provisional** until the user re-sends the reference screenshots: their content is settled here, their look isn't.
 
 **Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 and P8 are still pending.
 
@@ -784,7 +784,7 @@ The user's answers to the questions this plan first asked, 2026-11-09:
   - `≈$` at API prices everywhere, with one dim line on Status and CacheTax on a subscription
   - none in the turn line
 - **CacheTax:** a tab beside Status in the `/cachebeat` page, opened by `/cachebeat stats`, kept 30 days.
-- **Step 1 ships early as 0.9.2.**
+- **Step 1 ships early,** as 0.9.3 (0.9.2 was taken).
 
 ## Still open
 

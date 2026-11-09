@@ -22,6 +22,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 - **Plugin files reach `main` only through a release branch and a PR** (see "Releasing, step by step"). The release branch takes just the plugin's files from `dev`, never the merge.
 - **The plugin's files** are what `main` holds: `.claude-plugin/`, `hooks/`, `types/`, `README.md`, `LICENSE`, `.github/`, and the shipped images (`assets/demo.gif`, `assets/logo/*.svg`/`.png`). Everything else on `dev` stays there.
 - **After `main` moves,** bring `dev` up to date: `git switch dev && git merge main`. The release commit holds the same files `dev` already has, so the merge is clean. The scripts were added on `dev` after `main` dropped them, so the merge leaves them alone.
+- **A release cut from an older commit doesn't merge back cleanly.** When `dev` already holds later work, the release branch takes its files from the commit that ends the released step (0.9.3 took step 1's), and later steps have rewritten those lines on `dev`. Merging `main` back then conflicts. `dev` already has everything the release has, so keep `dev`'s side of each plugin file and keep the released `version`. Check `git log dev..origin/main` first, so nothing else on `main` is dropped.
 - **Keep a file on one branch or the same on both, never in two versions.** A file that differs between the branches (as `assets/logo/README.md` once did) conflicts on every merge that touches it.
 - **A dev-only file that `main` deleted** is now only on `dev`. Merges leave it alone, because `main`'s deletion is already merged in.
 - **Never merge `dev` into `main`.** That would ship the scripts and these notes.
@@ -107,6 +108,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 | [directory.md](directory.md) | Submitting to Anthropic's plugin directory: what its validation flagged, and what was done |
 | [directory-report-0.7.0.md](directory-report-0.7.0.md) | The full reading of the directory's 0.7.0 validation: each finding, the lines behind it, and how to fix it |
 | [plan-0.8.0.md](plan-0.8.0.md) | 0.8.0: where settings apply (this session, this folder, all folders), as built, and the design it replaced |
+| [handoff.md](handoff.md) | Where the 0.9.3 release and 0.10.0 work stand, what's waiting, and how the multi-session work was run: start here |
 | [plan-0.10.0.md](plan-0.10.0.md) | 0.10.0, planned: cache state and the sleep fix, dollars, `/cachebeat <time>` as a keep-alive, resume, the cold guard, the Status and CacheTax pages; what the API says for certain, the live checks still owed, and the steps in order |
 
 Add to them whenever something takes a while to work out.
