@@ -3,7 +3,7 @@ export type Pulse = 'hidden' | 'waiting' | 'armed'
 /** What survives a reload of the module (a file save). */
 export type Saved = {
   enabled: boolean
-  idle: number | null // this session's interval in ms; null follows the settings
+  keepUntil: number | null // wall ms until which beats keep the cache warm, then this session turns off; null: no time limit
   lastReal: number | null
   lastWarm: number | null
   lastRead: number | null // tokens the last beat read from the cache
@@ -80,7 +80,7 @@ declare module 'claude-code' {
   interface McpToolInputs {
     mcp__cachebeat__state: Record<string, never>
     mcp__cachebeat__set: {
-      session?: { enabled?: boolean; intervalMinutes?: number | null }
+      session?: { enabled?: boolean; keepAliveMinutes?: number | null }
       settings?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } // null resets to the default
       folder?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } | null // null follows all folders; the whole null drops every one
     }
