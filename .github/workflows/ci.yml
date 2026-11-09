@@ -10,14 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  floor:
+    name: Oldest supported version
+    runs-on: ubuntu-latest
+    outputs:
+      claude: ${{ steps.read.outputs.claude }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: read
+        # The README's badge names the oldest Claude Code the plugin supports: the one place to change it.
+        run: |
+          floor=$(sed -n 's/.*Claude_Code-\([0-9][0-9.]*\)%2B.*/\1/p' README.md | head -n 1)
+          test -n "$floor"
+          echo "claude=[\"$floor\",\"latest\"]" >> "$GITHUB_OUTPUT"
+
   check:
     name: Check (Claude Code ${{ matrix.claude }})
+    needs: floor
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # 2.1.287 is the oldest version the README supports; latest catches API changes early.
-        claude: ['2.1.287', 'latest']
+        # The README's floor and latest: latest catches API changes early, the floor catches an API newer than it.
+        claude: ${{ fromJSON(needs.floor.outputs.claude) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -32,13 +47,12 @@ jobs:
       - name: Test
         run: claude plugin test .
       - name: Type-check
-        if: matrix.claude == 'latest'
         run: |
           # The plugin-authoring skill writes this version's declarations as it loads, before any request:
           # no key is needed, and the request after it fails, which is expected.
           ANTHROPIC_API_KEY=unused claude -p /plugin-authoring || true
           types=$(find "${TMPDIR:-/tmp}" -path '*/bundled-skills/*/plugin-authoring/types/claude-code.d.ts' | head -n 1)
-          test -n "$types"
+          test -n "$types" || { echo "Claude Code ${{ matrix.claude }} wrote no plugin-authoring declarations"; exit 1; }
           cat > "$RUNNER_TEMP/tsconfig.json" <<EOF
           {
             "compilerOptions": {
