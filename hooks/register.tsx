@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 import type { Alert, BeatSettings, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
-import { viewOf } from './cache'
+import { TTL_MS, viewOf } from './cache'
 import type { CacheFacts, CacheView } from './cache'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
@@ -497,11 +497,16 @@ async function beat($: EngineInterface): Promise<string> {
   // from the user's last message: a turn's start, or its end for one begun before cachebeat saw it
   const lastWord = Math.max(s.lastReal ?? now, s.asked ?? -Infinity)
   if (now - lastWord >= cfg.stopAfterHours * 60 * MIN) return stop($, `${cfg.stopAfterHours}h since your last message`)
-  // a late beat (a sleeping or stalled process, or retries) finds a short cache lapsed; an on-time one never counts
+  // A cache past its lifetime is cold when this beat is late (a sleeping or stalled process, or retries), or when the
+  // interval is shorter than the lifetime, so an on-time beat came before it lapsed. Only an on-time beat on an interval
+  // as long as the lifetime or longer finds it gone by design: that is "not served" below.
+  ttl = await cacheTtl($) // schedule() reads it under auto alone; a custom interval would judge by a stale one
   const isLate = since > idle() + 2 * STEP
-  if (isLate) ttl = await cacheTtl($) // custom intervals never read it in schedule()
-  if (since >= MAX_TTL || (isLate && viewOf(cacheFacts(null), now).state === 'cold')) {
+  const mayBeCold = isLate || idle() < TTL_MS[s.isCacheShort ? '5m' : ttl]
+  if (since >= MAX_TTL || (mayBeCold && viewOf(cacheFacts(null), now).state === 'cold')) {
     const said = `the cache went cold (${fmt(since)} since it was last read)`
+    // asked for by hand with beating off (/cachebeat now): nothing to pause or stop
+    if (!s.enabled) return `${said}; no beat sent`
     if (cfg.onCold === 'stop') return stop($, said)
     await pause($, COLD, said)
     return `beats wait for your next turn: ${said}`
@@ -548,9 +553,11 @@ async function beat($: EngineInterface): Promise<string> {
       const call = scheduling
       const at = await $.clock.now()
       if (call === scheduling) {
+        // its own call number, so a step check parked in an await on an older chain ends instead of running on beside it
+        const mine = ++scheduling
         timer?.cancel()
         s.nextAt = at + RETRY
-        armStep($, call, at)
+        armStep($, mine, at)
       }
     }
     const then = !s.enabled ? 'not retried while off' : isWarmedSince ? 'a request since keeps it warm' : 'retrying in a minute'

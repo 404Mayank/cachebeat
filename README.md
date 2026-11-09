@@ -263,6 +263,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
 - A resumed conversation (`claude --resume`, `--continue`, or `/resume`) waits for your next message too, and says so. Nothing of it is cached in this session yet, so no beat re-reads it before you decide to carry on.
 - After a conversation's first turn, Claude Code can cache the conversation anew where a beat can't reach it. A beat that finds this says so once, and beats wait for your next message rather than paying to write the cache again each time.
+- If the cache goes cold before a beat reaches it, as when your computer sleeps, beats wait for your next message too, and say so (unless **Cache gone cold** is set to stop).
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
 - `/cachebeat now` needs at least one turn in the session, since before that there's nothing cached to keep warm.
 - Settings you change in one session reach your other open sessions at their next turn. A session moved to another folder takes that folder's settings at its next turn, and stays on or off as it was.

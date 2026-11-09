@@ -1965,13 +1965,13 @@ test('after the cache went cold, the next turn starts beating again at the usual
   const { clock, forks } = await sleepThrough($, on, {}, 10, 120)
   const at = clock.now()
   await $.turn.start({ text: 'back', turnId: 't2' })
-  await $.turn.complete(turn)
+  await $.turn.complete({ ...turn, turnId: 't2' })
   expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: null })
   await clock.advance(IDLE)
   expect(forks).toEqual([at + IDLE])
 })
 
-test('/cachebeat now on a cache that went cold waits for the next turn, or stops, by the setting', async ($: Engine, on: On) => {
+test('/cachebeat now on a cache that went cold waits for the next turn and stays on', async ($: Engine, on: On) => {
   const waits = await setup($, on)
   await cmd($, 'on')
   await $.turn.complete(turn)
@@ -2055,4 +2055,67 @@ test('a new schedule while a step is being checked leaves one chain of steps, no
   expect(afters() - before).toBe(3) // a second chain would ask two a minute, and beat twice at once on a real clock
   await clock.advance(5 * M)
   expect(forks.length).toBe(1)
+})
+
+test('a five-minute cache that a retry carried past its lifetime is cold, not written afresh and stopped', async ($: Engine, on: On) => {
+  const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
+  const { clock, forks, logs } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, fork: [err, { ...ok, usage: usage(0, 90_000) }] })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(10 * M)
+  expect(forks).toEqual([4 * M]) // the retry at 5m finds the cache gone: no second fork
+  expect(logs).toEqual(['beats wait for your next turn: the cache went cold (5m since it was last read)'])
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: 'the cache went cold' })
+})
+
+test('a five-minute cache a short sleep let lapse, short of the late mark, is cold too', async ($: Engine, on: On) => {
+  const { forks, logs } = await sleepThrough($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } }, 3, 1.5) // 5m30s since the turn; late only from 6m
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['beats wait for your next turn: the cache went cold (6m since it was last read)'])
+})
+
+test('a custom interval on a five-minute cache: a sleep leaves it cold, with the age said', async ($: Engine, on: On) => {
+  const t = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
+  await cmd($, '10')
+  await $.turn.complete(turn)
+  await t.clock.advance(9 * M)
+  t.sleep(10 * M)
+  await t.clock.advance(STEP)
+  expect(t.forks).toEqual([])
+  expect(t.logs).toEqual(['beats wait for your next turn: the cache went cold (20m since it was last read)'])
+})
+
+test('/cachebeat now with beating off on a cache that went cold says so, and pauses nothing', async ($: Engine, on: On) => {
+  const { forks, logs, sleep } = await setup($, on)
+  await $.turn.complete(turn)
+  sleep(2 * 60 * M)
+  expect(await cmd($, 'now')).toBe('the cache went cold (2h since it was last read); no beat sent')
+  expect(forks).toEqual([])
+  expect(logs).toEqual([])
+  expect((await stateNow($)).session).toMatchObject({ enabled: false, paused: null })
+})
+
+test('a retry while a step is being checked leaves one chain of steps, not two', async ($: Engine, on: On) => {
+  const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
+  let t!: Awaited<ReturnType<typeof setup>>
+  let release!: () => void
+  const world: World = {
+    fork: [err, ok],
+    during: async n => { // beat 1 is on its way: a new interval arms a chain, whose first check waits on the time
+      if (n !== 1) return
+      await cmd($, '3')
+      t.holdNow(new Promise<void>(r => (release = r)))
+      await t.clock.settle()
+    },
+  }
+  t = await setup($, on, world)
+  await cmd($, '5')
+  await $.turn.complete(turn)
+  await t.clock.advance(5 * M) // beat 1 fails; its retry arms the chain the parked check must not run beside
+  const before = t.afters()
+  release()
+  await t.clock.settle()
+  expect(t.afters() - before).toBe(0) // the parked check ends; running on, it would arm a second chain beside the retry's
+  await t.clock.advance(STEP)
+  expect(t.forks.length).toBe(2) // the retry's beat, one minute on
 })
