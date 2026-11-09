@@ -596,6 +596,29 @@ Rerecord `assets/demo.tape` with `demo.py` once steps 1–7 have merged and the 
 - A heart in its own "on, starts after this turn" state while a turn runs, instead of hidden.
 - Whether `immediate` is honoured at all. If not, decide whether to keep it.
 
+**Decided (the user, 2026-11-09): the prompt heart is never hidden while a turn runs.** Whenever cachebeat is on for the session, the heart marks it, mid-turn included. Off, it stays hidden as now.
+- In `schedule()` (`hooks/register.tsx`), `'hidden'` stops being a visibility rule for a turn. That covers `if (busy) p = 'hidden'` after the timer is armed, and the `stepping`, `resent` and first-turn (`busy && s.turns === 0`) cases. `!s.enabled` keeps `'hidden'`.
+- **A second hiding, independent of the pulse:** the `PromptHint` render returns the engine's row untouched when `e.props.isWorking`. That check goes too, or the heart stays hidden mid-turn whatever the pulse says.
+- **Check in the probe:** whether the engine draws the `PromptHint` row at all while working, and with which props. If it doesn't, the decision needs another place to draw the heart (ask before choosing one).
+
+**Decided (the user, 2026-11-09): during a turn the heart follows the beat state,** as it does between turns: "it beats while a beat is scheduled, and holds still while it waits."
+- **Holds still** (`'waiting'`, drawn dim) while a request of the turn is on its way (`stepping`), and while beats wait for the turn's end (`resent`, the conversation's first turn).
+- **Beats** (`'armed'`) while a mid-turn countdown runs: a turn gone quiet on a long tool run or a permission prompt.
+- Not chosen: holding the heart still for the whole turn. It's simpler, but a mid-turn beat would then land from a heart that isn't beating.
+
+**The turn line and the desktop band have hidings of their own.** The decision names only the prompt heart, so whether it extends to these is the user's call:
+- **The turn line (terminal):** `turn.start` sets `s.row = null`, so no row carries the line until the turn ends and its closing row is drawn. Mid-turn, a beat shows as a log line instead (README, "The turn line").
+- **The band (desktop):** the `AbovePrompt` render skips the line when `e.props.isWorking`. The desktop draws no prompt heart at all (README), so there the band is the only marker, and it's hidden mid-turn.
+
+**Tests change:**
+- New: on, mid-turn (`turn.start`, then `draw($, { ...HINT, props: { ...HINT.props, isWorking: true } })`), the tail carries the heart. With a request on its way it's still (`BEAT[0]`). A turn gone quiet, with its countdown armed, beats (a `BEAT` frame).
+- New: off, mid-turn, no heart (the tail is undefined).
+- Existing: no current test pins the heart hidden while busy. `HINT` has `isWorking: false`, and the hint tests draw between turns. They should pass unchanged. Re-run them to check.
+
+**README changes:**
+- What you'll see, the paragraph starting "**The prompt heart** sits at the end of the hint line": "It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next message." It gains "or while a request of your turn is on its way", and says the heart shows during a turn too.
+- The setup line "The prompt heart appears under the prompt, and starts beating once the session has had a turn" still holds.
+
 **Tests:** the command run mid-turn changes the state at once and gives the chosen acknowledgement. An idle run is unchanged.
 
 ## Steps, in order
@@ -659,7 +682,8 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 3b: a command typed mid-turn answers at once (item 9)
 
-- **Delivers:** the probe's answers in `notes/mods-gotchas.md`, then the chosen acknowledgement, with tests.
+- **Delivers:** the probe's answers in `notes/mods-gotchas.md`, the heart shown mid-turn whenever cachebeat is on, following the beat state (decided), then the chosen acknowledgement, with tests and the README line.
+- **Waits on the user:** whether the turn line and the desktop band follow the heart.
 - **Depends on:** step 3, which settles the command's words.
 - **Bundles:** item 9 alone. It's small, and it doesn't wait on later steps.
 
