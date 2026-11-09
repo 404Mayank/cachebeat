@@ -643,7 +643,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Tool text is fixed for the session.** To see a changed description, start a new session.
 - **Store writes read the store fresh first** (`changeSettings`, `saveOwn`).
 - **Plugin files and notes go in separate commits.** Record what took time in `notes/mods-gotchas.md` as you go.
-- **Each step keeps CI's 2.1.287 leg green.** A new API that fails there either moves the floor (README badge :12 and Requirements :31, CI matrix `.github/workflows/ci.yml:20`) or gets dropped. Ask the user before moving the floor.
+- **Each step keeps CI's 2.1.287 leg green.** A new API that fails there either moves the floor (README badge :12, which CI's matrix reads, and Requirements :31) or gets dropped. Ask the user before moving the floor.
 
 ### Step 0: the live checks (P1–P8)
 
@@ -688,7 +688,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
   ```
 
 - **Then:** run the step checks.
-- **CI type-checks on the latest release only (the user, 2026-11-09: only the latest Claude Code is supported for the type-check).** The `Type-check` step in `.github/workflows/ci.yml` runs on the `latest` leg. How it gets the types without a key is in mods-gotchas.md, "Types". It ships to `main` with the next release branch.
+- **CI type-checks on both legs, the floor and latest (the user, 2026-11-09, reversing the earlier latest-only decision).** The `Type-check` step in `.github/workflows/ci.yml` runs on every leg, and the floor comes from the README badge, so code using an API newer than the floor fails CI. It was clean against 2.1.287's declarations locally. How it gets the types without a key is in mods-gotchas.md, "Types". It ships to `main` with the next release branch.
 - **Bundles:** this fix, plus its mods-gotchas line ("Types").
 
 ### Step 3: the keep-alive time (item 3, with Stop after idle's text)
