@@ -53,8 +53,8 @@ const PER = 1_000_000
 
 /**
  * What a request cost, in dollars; null for a model not in the table. `ttl` prices the tokens it wrote to the
- * cache: a beat's fork writes at the five-minute rate (inferred from `cost.usd`, which fit to the last digit),
- * whatever the main conversation's lifetime.
+ * cache. A beat's fork is priced at the five-minute rate, the one `cost.usd` charged for a fork's write in the probe
+ * (it fit to the last digit); that is how the ledger priced it, which may or may not be the fork's own lifetime.
  */
 export function priceOf(u: ModelUsage, model: string, ttl: Ttl): number | null {
   const prompt = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
@@ -98,14 +98,14 @@ export type Estimate = {
  * is the list price again (and one rounded to four decimals); 'default' is a guess. Returns whether it learned.
  */
 export function learnRate(learned: Learned, e: Estimate): boolean {
-  if (e.tokens < MIN_LEARN_TOKENS || !(e.usd > 0) || e.pricing === 'default') return false
-  if (e.pricing === 'catalog' && isPriced(e.model)) return false
+  const isNew = e.pricing === 'configured' || (e.pricing === 'catalog' && !isPriced(e.model))
+  if (!isNew || e.tokens < MIN_LEARN_TOKENS || !(e.usd > 0)) return false
   learned.set(rateKey(e.model, e.ttl, e.tokens), e.usd / e.tokens)
   return true
 }
 
-/** A dollar figure for the log: `≈$0.02`, `≈$0.0005` below a cent, `<$0.0001` below that. */
+/** A dollar figure for the log: `≈$0.02`, `≈$0.0005` below a cent, `<$0.0001` below that. The seam sits where four decimals would round up to a cent. */
 export function money(usd: number) {
   if (usd < 0.0001) return '<$0.0001'
-  return `≈$${usd < 0.01 ? usd.toFixed(4) : usd.toFixed(2)}`
+  return `≈$${usd < 0.00995 ? usd.toFixed(4) : usd.toFixed(2)}`
 }

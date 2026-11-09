@@ -17,6 +17,7 @@ export const IDLE = AUTO['1h'] * MIN // the default silence before a beat on a s
 export const DEADLINE = DEFAULTS.stopAfterHours * 60 * MIN // default stop this long after the last real turn
 export const RETRY = MIN // after a transient API error
 export const STEP = MIN // the longest one timer waits: the deadline is the wall clock's, checked at each step (a sleep costs one)
+export const RISE_BOUND = 2.5 // the most an idle beat's cost may rise past its usage at list: fast mode doubles Opus, regional pricing adds 10%
 export const MAX_TTL = 60 * MIN // past this since the last cache read, the cache is gone whatever the TTL
 
 const pulse = atom({ plugin: 'cachebeat', key: 'pulse' } as const, 'hidden' as Pulse)
@@ -340,9 +341,8 @@ async function cacheNow($: EngineInterface): Promise<CacheView> {
   const size = await chatSize($)
   const model = await $.session.model()
   // the next message writes the conversation at the main conversation's lifetime: 1.25× input for 5 minutes, 2× for an hour
-  const facts = cacheFacts(size ?? null, null)
-  const rate = size === undefined ? null : writeRate(model, facts.ttl, size, learned)
-  return viewOf({ ...facts, writeUsdPerToken: rate }, now)
+  const lifetime = s.isCacheShort ? '5m' : ttl
+  return viewOf(cacheFacts(size ?? null, size === undefined ? null : writeRate(model, lifetime, size, learned)), now)
 }
 
 /** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
@@ -578,10 +578,14 @@ async function beat($: EngineInterface): Promise<string> {
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
   // Idle, the cost rose by this fork alone and so is its price, whatever the engine charged (a managed price, fast mode).
   // A turn that began meanwhile, or a request of the main conversation, lands in the same difference: the usage priced at
-  // list then, its writes at the five-minute rate a fork's are billed at
+  // list then, its writes at the five-minute rate a fork's are billed at. Requests nothing here can see (a background
+  // subagent, a compaction, another mod's fork) land in it too: a rise past what this usage could cost at list, even
+  // fast mode's double, isn't the fork's. A managed price above that bound falls back to list
   const isAlone = wasIdle && !busy && s.lastWarm === warmedAt
   const rise = costBefore.cost !== undefined && costAfter.cost !== undefined ? costAfter.cost.usd - costBefore.cost.usd : null
-  const usd = isAlone && rise !== null && rise > 0 ? rise : priceOf(r.usage, model, '5m')
+  const ceiling = priceOf(r.usage, model, '1h')
+  const isPlausible = rise !== null && rise > 0 && (ceiling === null || rise <= RISE_BOUND * ceiling)
+  const usd = isAlone && isPlausible ? rise : priceOf(r.usage, model, '5m')
   s.lastUsd = usd
   const price = usd === null ? '' : ` · ${money(usd)}`
   // after a conversation's first turn, a beat reading well short of what that turn cached, and writing the rest:

@@ -2196,6 +2196,8 @@ test('learnRate: the engine\'s figure counts where the table cannot know it, and
   expect(learn({ ...est, model: 'claude-future-9', pricing: 'catalog' })).toEqual({ learned: true, rate: 4e-6 }) // a model the table lacks
   expect(learn({ ...est, model: 'claude-future-9', pricing: 'default' })).toEqual({ learned: false, rate: null }) // the engine's guess
   expect(learn({ ...est, tokens: 19_999 })).toMatchObject({ learned: false }) // four decimals of rounding is too coarse
+  expect(learn({ ...est, pricing: undefined } as never)).toMatchObject({ learned: false }) // a kind it doesn't know fails closed
+  expect(learn({ ...est, model: 'claude-future-9', pricing: 'estimated' } as never)).toMatchObject({ learned: false })
   expect(learn({ ...est, usd: 0 })).toMatchObject({ learned: false })
   const l: Learned = new Map()
   learnRate(l, est)
@@ -2213,6 +2215,8 @@ test('money: cents above a cent, four decimals below it, and a floor', () => {
   expect(money(0.000536)).toBe('≈$0.0005')
   expect(money(0.0042)).toBe('≈$0.0042')
   expect(money(0.00004)).toBe('<$0.0001')
+  expect(money(0.00994)).toBe('≈$0.0099') // the seam: four decimals would have rounded this up to a cent
+  expect(money(0.00996)).toBe('≈$0.01')
 })
 
 test('an idle beat costs what the session\'s cost rose by, as the log and the state say', async ($: Engine, on: On) => {
@@ -2243,6 +2247,30 @@ test('a priced beat\'s own writes are at the five-minute rate, though the conver
   await step($, 't2', 0)
   await clock.advance(3 * M)
   near((await stateNow($)).session.lastBeatUsd, 0.02284, 6) // 1,000 written at $5/MTok, not the hour's $8
+})
+
+test('a rise no usage could cost is other requests\' and not the beat\'s: the usage is priced', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { forkUsd: 5 }) // a background request landed in the same difference
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(logs.at(-1)).toBe('♥ cache renewed (90,000 read, 0 written · ≈$0.02)')
+})
+
+test('a rise just under the bound is taken: fast mode doubles the list price', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { forkUsd: 0.045 }) // the usage's list price is $0.01804: 2.49 times
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect((await stateNow($)).session.lastBeatUsd).toBe(0.045)
+})
+
+test('a rise just over the bound is not', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { forkUsd: 0.046 }) // 2.55 times
+  await cmd($, '3')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect((await stateNow($)).session.lastBeatUsd).toBe(0.01804)
 })
 
 test('a turn that begins while an idle beat is on its way leaves the difference to the turn, so the usage is priced', async ($: Engine, on: On) => {
