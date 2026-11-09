@@ -31,6 +31,27 @@ jobs:
           claude plugin validate --strict .claude-plugin/marketplace.json
       - name: Test
         run: claude plugin test .
+      - name: Type-check
+        if: matrix.claude == 'latest'
+        run: |
+          # The plugin-authoring skill writes this version's declarations as it loads, before any request:
+          # no key is needed, and the request after it fails, which is expected.
+          ANTHROPIC_API_KEY=unused claude -p /plugin-authoring || true
+          types=$(find "${TMPDIR:-/tmp}" -path '*/bundled-skills/*/plugin-authoring/types/claude-code.d.ts' | head -n 1)
+          test -n "$types"
+          cat > "$RUNNER_TEMP/tsconfig.json" <<EOF
+          {
+            "compilerOptions": {
+              "target": "es2023", "lib": ["es2023"], "types": [],
+              "module": "esnext", "moduleResolution": "bundler",
+              "strict": true, "noUncheckedIndexedAccess": true,
+              "noEmit": true, "skipLibCheck": true,
+              "jsx": "react", "jsxFactory": "h", "jsxFragmentFactory": "Fragment"
+            },
+            "include": ["$types", "$GITHUB_WORKSPACE/hooks", "$GITHUB_WORKSPACE/types"]
+          }
+          EOF
+          npx -y -p typescript tsc -p "$RUNNER_TEMP"
 
   release:
     name: Release
