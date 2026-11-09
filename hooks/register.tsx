@@ -1191,7 +1191,8 @@ export const register: Register = on => {
     else if (!paneTicker) paneTicker = $.clock.every(frameMs(lookOf(c, part)), () => void update($, tickAtom, () => ++paneTick))
     const els = $.ui.resolve(e)
     paneSurface = e.surface
-    if (!('Input' in els)) return <els.Text>Open cachebeat's settings in the terminal.</els.Text>
+    const { Text } = els // every surface has it: taken before the check, which may narrow `els` to never
+    if (!('Input' in els)) return <Text>Open cachebeat's settings in the terminal.</Text>
     // the menu shows the settings it saves to: this folder's own over all folders', or all folders'
     const shownSettings = editsFolder ? c : global
     const to: Target = editsFolder ? 'folder' : 'global'
