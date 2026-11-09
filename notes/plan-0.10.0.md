@@ -573,6 +573,31 @@ Held by guard      1        4        11
 
 Rerecord `assets/demo.tape` with `demo.py` once steps 1–7 have merged and the look is settled. It shows `/cachebeat 2h`, the Status tab, a beat landing, and the cold guard's held send. The recording steps are in the scripts. Only `assets/demo.gif` ships.
 
+### Item 9: a command typed mid-turn says nothing until the turn ends (step 3b)
+
+**What the user sees:** `/cachebeat on` (or any other `/cachebeat` command) typed while a turn runs gives no sign it was taken.
+- It doesn't show as a queued message, and the heart doesn't appear.
+- Once the turn ends, the typed command and cachebeat's reply appear in the transcript.
+- So it reads as taking effect only on the next turn.
+
+**What the code says:**
+- The command is registered with `immediate: true` (`hooks/register.tsx`, `$.command.register` in `session.start`). The types say it then runs at once mid-turn, and "its `{ text }` prints as an idle run's does" (`.claude-plugin/types/claude-code/index.d.ts`, `immediate`).
+- `schedule()` hides the heart while a turn runs (`if (busy) p = 'hidden'`), by design.
+- **Inferred, not checked:** the state changes at once, and both visible signals wait. The reply is drawn after the turn, and the heart is hidden while it runs.
+
+**The probe (live, first):** type `/cachebeat on` mid-turn, then check:
+- Does `command.run` fire before the turn ends? Check the debug log.
+- When is its reply text drawn?
+- Does a `$.ui.toast`, or a `$.ui.log`, made from `command.run` mid-turn show at once? (P5 found a `$.ui.log` in a pass-through `prompt.submit` didn't show reliably.)
+- Does the turn line or the band redraw?
+
+**Options, to weigh once the probe answers:**
+- An acknowledgement mid-turn, as a toast or a log line, whichever the probe shows drawn at once.
+- A heart in its own "on, starts after this turn" state while a turn runs, instead of hidden.
+- Whether `immediate` is honoured at all. If not, decide whether to keep it.
+
+**Tests:** the command run mid-turn changes the state at once and gives the chosen acknowledgement. An idle run is unchanged.
+
 ## Steps, in order
 
 Each step is finished, tested and merged into `dev` before the next starts.
@@ -632,6 +657,12 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Bundles:** item 3 with the **Stop after idle** wording, since they define each other.
 - **Riskiest step for regressions:** it removes the session interval across four files.
 
+### Step 3b: a command typed mid-turn answers at once (item 9)
+
+- **Delivers:** the probe's answers in `notes/mods-gotchas.md`, then the chosen acknowledgement, with tests.
+- **Depends on:** step 3, which settles the command's words.
+- **Bundles:** item 9 alone. It's small, and it doesn't wait on later steps.
+
 ### Step 4: resume (item 2)
 
 - **Delivers:** per-session store records, restore, seeding from the resume hint, the new resume line, README and Privacy.
@@ -659,6 +690,11 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 9: release 0.10.0
 
+- **First, a sweep of the whole release.** Each step updated its own pieces; this cross-checks them together. Everything 0.10.0 adds must reach:
+  - the agent's tools (`hooks/tools.ts`, `mcp__cachebeat__state` and `set`): every new setting settable through `set`, every new `state` field in the output and described, the schema and descriptions agreeing with the code
+  - the README: Commands, the Settings tables, What it sends, Privacy, Good to know
+  - the notes
+  - and no stale wording anywhere: "expired" (it's "cold"), the per-session interval, `/cachebeat <minutes>`
 - **What it is:** bump `version`, do a full README pass (Features list, Commands table, Privacy), validate the release branch in the portal (the cold guard and computed store keys are new to the scan), PR, and release notes.
 - **Release notes** call out:
   - the reversed `/cachebeat <minutes>` (with "use `/cachebeat global 30` or the menu for the interval")
