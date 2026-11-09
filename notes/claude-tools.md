@@ -11,19 +11,19 @@
 ## The shape
 
 - **Two tools.** `state` is read-only, so subagents can use it. `set` takes `{ session, settings }`, and the key the model writes is the scope decision.
-- **`session`** is `{ enabled, intervalMinutes }` for this session alone. **`settings`** is any saved setting, used by every session.
+- **`session`** is `{ enabled, keepAliveMinutes }` for this session alone (`intervalMinutes` until 0.10.0). **`settings`** is any saved setting, used by every session.
 - **The schema is derived from the settings menu's rows** (`TABS`) and the number readers (`parseMinutes` and the rest). Each reader carries its unit, min and max, so a range is written once, and the model gets the same limits as the menu. `accept(key, value)` in `settings.ts` is the one validator, used by the tools and matching the pane.
 - **A bad value refuses the whole call.** `parseSet` collects every bad value into one `deny` that starts "nothing changed:", says what each field takes, and repeats what was sent.
-- **`null` resets a setting** to its default, the same way `intervalMinutes: null` makes a session follow the default.
+- **`null` resets a setting** to its default, the same way `keepAliveMinutes: null` drops a session's time limit.
 - **The `set` answer is `{ changed, session, settings }`:**
-  - `changed` lists what the call itself changed: this session's switch and interval, and the settings in its own patch. Effects don't count: a session following the default isn't listed when the default moves.
+  - `changed` lists what the call itself changed: this session's switch and keep-alive time, and the settings in its own patch. Effects don't count: a session following the default isn't listed when the default moves.
   - It's computed from the patch, not by diffing the store before and after, so another session saving at the same moment isn't credited to this call.
 - **`state` reports `session.cacheTtl`**, the lifetime `auto` read (0.7.0), and `intervalMinutes` comes to what `auto` resolves to.
 - **`state` has `defaults`**, the default of each setting that differs from it, so an agent can check a reset on its own.
 
 ## Decisions, and why
 
-- **A session interval turns beating on,** unless `enabled: false` comes with it, the way `/cachebeat 30` does. Two agents testing the tools weren't sure whether to send `enabled: true` with an interval, and the user chose this.
+- **~~A session interval turns beating on~~ (reversed in 0.10.0; see "0.10.0" below).** Until then `session.intervalMinutes` turned beating on, unless `enabled: false` came with it, the way `/cachebeat 30` did. Two agents testing the tools weren't sure whether to send `enabled: true` with an interval, and the user chose this. In 0.10.0 the user found a per-session interval unintuitive: the interval is a setting (`settings.interval`, `folder.interval`), and `/cachebeat <time>` and `session.keepAliveMinutes` now mean how long to keep the cache warm. The same rule carries over to the new field: a keep-alive time turns beating on.
 - **`skipSmallTokens` doesn't turn `skipSmall` on, and `customColor` doesn't set `color` to custom.** The descriptions say so instead. The user chose a description note for `skipSmallTokens`, and `customColor` follows it.
 - **No permission gating.** The hook answers without `next`, so the permission path beneath it never runs, which a test pins. The user was fine with that: the `set` description has Claude mention once per conversation that beats count toward usage. The README says the tools skip permission prompts.
 - **Subagents can read, not write.** `set` refuses calls carrying `agentId`, because a subagent isn't the user asking. This was borrowed from [pinboard](https://github.com/sirkitree/pinboard), the one other mod we found that gives Claude a tool.
@@ -63,11 +63,11 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
   "Project" stays among the phrases because users say it, even though the menu says "folder".
 - **Claude names the folder by its path** when it changes `folder`, and the transcript line shows the path (`cachebeat · this folder (…/api): …`). In headless tests Claude named the path once in seven tries when it was only in `state`, so `set`'s answer carries it too (`folder: { path, … }`), and the description says to name it. A subfolder or another worktree has settings of its own, so "this repo" may not be the folder Claude is in.
 - **It tells Claude that a `settings` change doesn't reach a setting the folder has its own of,** and to say so.
-- **Saving an interval in `settings` or `folder` drops this session's own,** as the menu and the commands do. The exception is when the same call sets `intervalMinutes`. Before, the tool kept the session's interval while the menu dropped it, and the code review flagged the mismatch.
+- **Saving an interval in `settings` or `folder` drops this session's own,** as the menu and the commands do. The exception is when the same call sets `intervalMinutes`. Before, the tool kept the session's interval while the menu dropped it, and the code review flagged the mismatch. (Gone in 0.10.0, with the session interval.)
 - **`state.settings` is what applies here.**
   - `folder` is `{ path, own }`.
   - `allFolders` appears only while the folder has settings of its own. Otherwise it would repeat `settings`.
-- **`intervalFrom` is `session`, `folder`, `all folders` or `auto`.** `default` became `all folders`, and `auto` means all folders' auto. A folder set to auto says `folder`, since where the value comes from matters more there.
+- **`intervalFrom` is `session`, `folder`, `all folders` or `auto`** (no `session` from 0.10.0). `default` became `all folders`, and `auto` means all folders' auto. A folder set to auto says `folder`, since where the value comes from matters more there.
 - **`changed` lists `folder.<key>` for each one set or dropped.** The answer's `folder` holds those, with `null` for a drop.
 - **The transcript line** prefixes every saved change with its scope: `cachebeat · this session on, every 20m · all folders: Beat after idle 30m · this folder (…/api): New sessions start on`.
 
@@ -97,3 +97,8 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
 ## 0.10.0
 
 - **`recacheUsd` has a value now** (null for a model with no price), and `session.lastBeatUsd` is the last beat's cost. Both are `≈` estimates at API prices, and the description says so, plus that a subscription isn't billed per token. How they're worked out is in mods-gotchas.md, "Dollars".
+- **`session.keepAliveMinutes` replaces `session.intervalMinutes`** (5–2880 minutes, or null to drop it). `state.session` gains `keepAliveUntil` (ISO) and `keepAliveMinutesLeft` (whole minutes, floored), and `nextBeat` can be `none needed`: a keep-alive time is set and the cache outlives it, so no beat is armed. `intervalFrom` has no `session` any more; `intervalMinutes` stays as the interval in effect.
+- **`keepAliveMinutes` with `enabled: false` is refused.** The plan let the pair through, but a keep-alive time is a deadline counted from the call, for a session that beats. Kept while off it would either run out unseen or need a second state to remember. So `schedule()` clears the time whenever the session is off (the one place every off route passes through: `off`, `stop`, the tool, the pane), and the contradictory call is a refusal naming both fields, as `parseSet` does for other bad values.
+- **The old key gets a pointed refusal, not "session has no intervalMinutes".** Tool text is fixed for the session, so a session started before the update still holds the old schema and will send `intervalMinutes`. The refusal says the interval is `settings.interval` or `folder.interval`, and what `keepAliveMinutes` is.
+- **The scope paragraph no longer routes "beat every 20 minutes" to `session`.** It has no session scope now: `settings.interval`, or `folder.interval` for "in this repo", else ask. "Keep it warm for 2 hours" is the session's example.
+- **Stop after idle, in the tool text:** `ABOUT.stopAfterHours` and the `set` description say a keep-alive time overrides it; a usage limit or an API error still stops it.
