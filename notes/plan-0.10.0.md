@@ -133,7 +133,7 @@ The wall-clock deadline is the authority, never a timer having fired. That's cor
   4. otherwise `await refreshLine($)` and `armStep($, call, now)`
 
   Between steps 1 and 4 there's an `await`. If a `schedule()` call ran meanwhile, it armed its own chain, and this one must end there, or two chains run. That's the 0.7.0 two-timer bug (mods-gotchas.md, "Timing and events"). So `wallCheck` returns without acting when `call !== scheduling` after its `await`.
-- **The RETRY path** (:497–500) keeps setting `s.nextAt = now + RETRY` and calls `armStep($, scheduling, now)` in place of its own `$.clock.after`. There's then one way to wait.
+- **The RETRY path** (:497–500) arms first and sets `s.nextAt` after, today. Reverse that: read `now` once, set `s.nextAt = now + RETRY`, then call `armStep($, scheduling, now)` in place of its own `$.clock.after`. `armStep` reads `s.nextAt`, so the other order would arm against the stale deadline. There's then one way to wait.
 - **A sleep costs at most one step** past waking: the step's timer has at most 60s of awake time left.
 - **Keep the `scheduling` call counter** (:332, :350, :357): only the newest `schedule()` call may arm. `armStep` sets the same `timer` variable that `schedule()` (:333) and the RETRY path cancel. 
 - **No recursion:** `wallCheck` calls `refreshLine` and `armStep`, and `schedule()` only through `beat()`. `refreshLine` calls neither.
@@ -222,7 +222,11 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - The menu's Limits tab shows **Cache gone cold**, and Enter flips it.
 - **Unchanged:**
   - The existing "commands and turns arriving together" race test still passes with step timers.
-  - All the existing tests pass, apart from :326 (`beating now` becomes `next beat due now`) and :530–537 (retries past the hour now pause), which change as said above.
+  - All the existing tests pass, apart from :326 (`beating now` becomes `next beat due now`) and :530–537 (retries past the hour now pause), which change as said above. Expect both; neither is a regression.
+  - The new key needs no other test changes (checked by grep):
+    - The tests that list settings compare against `DEFAULTS` (:209, :721, :743), so they take `onCold` by themselves.
+    - The Limits-tab tests press rows by key (:197, :627, :712, :1233), not by position.
+    - If another test fails on the new row or key, read it before changing the design.
 - **Gotcha:** with steps, `clock.advance(IDLE)` resolves about 50 step timers along the way. Tests that count logs or forks are unaffected. Check with `grep -n "clock.after" hooks/cachebeat.test.tsx` that no test counts `clock.after` dispatches.
 
 #### README (on `main` through the release; users only)
@@ -683,9 +687,9 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 - **The cold guard:**
   - It's on by default.
   - Cold means the time since the last cache read is past the cache's lifetime (1h or 5m, as cachebeat reads it).
-  - A second send goes through only within **send again within** (default 3m, a setting). After it, the next send is held again.
+  - A second send goes through only within **send again within** (default 3m, a setting; the user put it at 2–5 minutes). After it, the next send is held again. **Recommended, not confirmed:** the custom value's range of 1–15 minutes.
   - **chats from** (default 20k tokens, the same as Skip small chats) is the smallest chat it holds for.
-  - Remote Control messages aren't held.
+  - Remote Control messages aren't held. **Recommended, not confirmed:** the user's answer didn't cover it.
   - If P5 shows a held message's text is lost, it asks in a Send / Don't send dialog instead.
 - **Warm status:** nothing live exists to read. The plan says "likely warm" and shows the time left.
 - **Dollars:**
