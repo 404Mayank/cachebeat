@@ -107,5 +107,6 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 | [directory.md](directory.md) | Submitting to Anthropic's plugin directory: what its validation flagged, and what was done |
 | [directory-report-0.7.0.md](directory-report-0.7.0.md) | The full reading of the directory's 0.7.0 validation: each finding, the lines behind it, and how to fix it |
 | [plan-0.8.0.md](plan-0.8.0.md) | 0.8.0: where settings apply (this session, this folder, all folders), as built, and the design it replaced |
+| [plan-0.10.0.md](plan-0.10.0.md) | 0.10.0, planned: cache state and the sleep fix, dollars, `/cachebeat <time>` as a keep-alive, resume, the cold guard, the Status and CacheTax pages; what the API says for certain, the live checks still owed, and the steps in order |
 
 Add to them whenever something takes a while to work out.
