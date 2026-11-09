@@ -6,6 +6,7 @@ export const DEFAULTS: BeatSettings = {
   interval: 'auto',
   stopAfterHours: 8,
   stopAtUsage: 90,
+  onCold: 'wait',
   skipSmall: false,
   skipSmallTokens: 20_000,
   heartPlacement: 'tail',
@@ -77,6 +78,7 @@ export function normalize(stored: unknown): BeatSettings {
   }
   if (out.interval !== 'auto' && (typeof out.interval !== 'number' || parseMinutes(`${out.interval}`) === undefined)) out.interval = DEFAULTS.interval
   if (!['wait', 'warm'].includes(out.onModelSwitch)) out.onModelSwitch = DEFAULTS.onModelSwitch
+  if (!['wait', 'stop'].includes(out.onCold)) out.onCold = DEFAULTS.onCold
   return out
 }
 
@@ -287,6 +289,11 @@ export const TABS: readonly Tab[] = [
         key: 'stopAfterHours', label: 'Stop after idle', values: [1, 4, 8, 24], fmt: v => `${v}h`,
         help: 'Beating stops after this long without a message from you.',
         custom: { placeholder: 'e.g. 10h or 90m', parse: parseHours },
+      },
+      {
+        key: 'onCold', label: 'Cache gone cold', values: ['wait', 'stop'],
+        fmt: v => (v === 'wait' ? 'start on your next message' : 'stop'),
+        help: 'If the cache goes cold before a beat reaches it, as when your computer sleeps: start beating again on your next message, or stop.',
       },
       {
         key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,

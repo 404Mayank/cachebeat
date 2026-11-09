@@ -3,7 +3,8 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { VARIANTS, cells, loopIndex, previewFrame, slotText, slotWidths, variant } from './animations'
 import { PANE, cut } from './pane'
-import { DEADLINE, IDLE, RETRY, fmt } from './register'
+import { TTL_MS, viewOf } from './cache'
+import { DEADLINE, IDLE, RETRY, STEP, fmt } from './register'
 import { DEFAULTS, EPISODE, accept, glyphs, lookOf, mixedMode, normalize, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
 import { SET, STATE } from './tools'
 
@@ -32,6 +33,21 @@ type World = {
 }
 
 const setup = async ($: Engine, on: On, world: World = {}) => {
+  // wall time the machine slept through: the time the plugin reads jumps, and no timer fires, as when the computer suspends.
+  // Registered before mock.clock's hooks, which sit beneath it, and as `clock.*`: a second `clock.now` would be a repeat
+  let skew = 0
+  let held: Promise<void> | null = null // the next `clock.now` answers once this resolves: a step's check left waiting
+  let afters = 0 // the waits asked for since the start: one chain of steps asks one a minute
+  on('clock.*', async (_$, e, next) => {
+    if (next.event === 'clock.after') afters++
+    const r = await next(e)
+    if (next.event === 'clock.now' && held) {
+      const until = held
+      held = null
+      await until
+    }
+    return (next.event === 'clock.now' ? { value: (r as { value: number }).value + skew } : r) as never
+  })
   const clock = mock.clock(on)
   const store = new Map<string, unknown>(world.settings ? [['settings', { ...DEFAULTS, ...world.settings }]] : [])
   if (world.folders) store.set('folders', world.folders)
@@ -99,7 +115,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return {
-    clock, forks, prompts, logs, toasts, tails, store, specs, reads, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    clock, forks, prompts, logs, toasts, tails, store, specs, reads, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
     add: (role: 'user' | 'assistant', text: string) => (chat = [...chat, said(role, text)]),
   }
@@ -323,7 +339,7 @@ test('turned on within the hour after a turn but past the interval, it beats at 
   const { clock, forks } = await setup($, on)
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect(await cmd($, '3')).toBe('this session: on, every 3m idle · beating now')
+  expect(await cmd($, '3')).toBe('this session: on, every 3m idle · next beat due now')
   await clock.settle()
   expect(forks).toEqual([10 * M])
 })
@@ -534,7 +550,19 @@ test('gives up retrying once the cache must have expired', async ($: Engine, on:
   await $.turn.complete(turn)
   await clock.advance(2 * IDLE)
   expect(forks.length).toBe(10) // minutes 50..59; at 60 the cache is gone, so no fork
-  expect(logs.at(-1)).toContain('so it has expired')
+  expect(logs.at(-1)).toBe('beats wait for your next turn: the cache went cold (1h since it was last read)')
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: 'the cache went cold' })
+})
+
+test('with Cache gone cold set to stop, retrying past the hour switches it off', async ($: Engine, on: On) => {
+  const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
+  const { clock, forks, logs } = await setup($, on, { fork: [err], settings: { onCold: 'stop' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(2 * IDLE)
+  expect(forks.length).toBe(10)
+  expect(logs.at(-1)).toBe('stopped: the cache went cold (1h since it was last read)')
+  expect((await stateNow($)).session.enabled).toBe(false)
 })
 
 test('the heart rides the hint row as its dim tail: still while waiting, beating once armed', async ($: Engine, on: On) => {
@@ -727,6 +755,7 @@ const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
 const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, nextBeat: null, skipping: null, paused: null }
+const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheUsd: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
   plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
@@ -747,7 +776,7 @@ test('both tools register, every setting in the schema with the pane\'s ranges',
 
 test('state on a fresh session: off, at the default interval, the settings as they are', async ($: Engine, on: On) => {
   await setup($, on)
-  expect(await stateNow($)).toEqual({ session: FRESH, settings: DEFAULTS, folder: { path: HOME, own: {} }, defaults: {} })
+  expect(await stateNow($)).toEqual({ session: FRESH, cache: FRESH_CACHE, settings: DEFAULTS, folder: { path: HOME, own: {} }, defaults: {} })
   await call($, 'set', { settings: { interval: 30, showTokens: false } })
   expect((await stateNow($)).defaults).toEqual({ interval: 'auto', showTokens: true })
 })
@@ -1850,3 +1879,256 @@ test('state says what the last beat read and wrote', async ($: Engine, on: On) =
   expect((await stateNow($)).session).toMatchObject({ lastBeatReadTokens: 44_783, lastBeatWrittenTokens: 12 })
 })
 
+
+// ---- the cache as one view, and the wall clock as the authority on when a beat is due ----
+
+test('viewOf: unknown before anything is cached, warm to the last millisecond, then cold for as long as it has been', () => {
+  const f = { lastWarm: 1000, ttl: '1h', contextTokens: 90_000, writeUsdPerToken: 0.5 } as const
+  expect(viewOf({ ...f, lastWarm: null }, 5)).toMatchObject({ state: 'unknown', lastWarm: null, expiresAt: null, coldFor: null })
+  expect(viewOf(f, 1000 + TTL_MS['1h'] - 1)).toMatchObject({ state: 'warm', expiresAt: 1000 + TTL_MS['1h'], coldFor: null })
+  expect(viewOf(f, 1000 + TTL_MS['1h'])).toMatchObject({ state: 'cold', coldFor: 0 })
+  expect(viewOf(f, 1000 + TTL_MS['1h'] + 7)).toMatchObject({ state: 'cold', coldFor: 7 })
+  expect(viewOf({ ...f, ttl: '5m' }, 1000 + 5 * M - 1).state).toBe('warm')
+  expect(viewOf({ ...f, ttl: '5m' }, 1000 + 5 * M)).toMatchObject({ state: 'cold', ttl: '5m', coldFor: 0 })
+  expect(viewOf(f, 1000).recacheUsd).toBe(45_000)
+  expect(viewOf({ ...f, contextTokens: null }, 1000).recacheUsd).toBeNull()
+  expect(viewOf({ ...f, writeUsdPerToken: null }, 1000).recacheUsd).toBeNull()
+})
+
+test('state says whether the cache is warm, with beating off too: unknown, warm, then cold', async ($: Engine, on: On) => {
+  const { clock, sleep } = await setup($, on, { contextTokens: 120_000 })
+  expect((await stateNow($)).cache).toEqual({ ...FRESH_CACHE, contextTokens: 120_000 })
+  await $.turn.complete(turn)
+  await clock.advance(10 * M)
+  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, contextTokens: 120_000, recacheUsd: null })
+  sleep(80 * M) // 90m since the last read
+  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, contextTokens: 120_000, recacheUsd: null })
+})
+
+test('state judges a cache found short by its five minutes', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
+  await $.turn.complete(turn)
+  await clock.advance(6 * M)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', ttl: '5m', lastReadMinutesAgo: 6, coldForMinutes: 1 })
+})
+
+/** On, one turn done, `after` minutes awake, then the computer sleeps for `slept` and a step passes. */
+const sleepThrough = async ($: Engine, on: On, world: World, after: number, slept: number) => {
+  const t = await setup($, on, { ...world, settings: { statusHeart: 'off', showTokens: false, ...world.settings } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await t.clock.advance(after * M)
+  t.sleep(slept * M)
+  await t.clock.advance(STEP)
+  return t
+}
+
+test('after a sleep past the hour, the cache has gone cold: no beat, the line and the log say so, it stays on', async ($: Engine, on: On) => {
+  const { forks, logs } = await sleepThrough($, on, {}, 10, 120)
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['beats wait for your next turn: the cache went cold (2h 11m since it was last read)'])
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ cache went cold · beats start again on your next message'])
+  const state = await stateNow($)
+  expect(state.session).toMatchObject({ enabled: true, paused: 'the cache went cold' })
+  expect(state.cache).toMatchObject({ state: 'cold', lastReadMinutesAgo: 131, coldForMinutes: 71 })
+})
+
+test('with Cache gone cold set to stop, a sleep past the hour switches it off', async ($: Engine, on: On) => {
+  const { forks, logs } = await sleepThrough($, on, { settings: { onCold: 'stop' } }, 10, 120)
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['stopped: the cache went cold (2h 11m since it was last read)'])
+  expect((await stateNow($)).session).toMatchObject({ enabled: false, paused: null })
+})
+
+test('a five-minute cache that a sleep let lapse is cold, not written afresh by a beat', async ($: Engine, on: On) => {
+  const { forks, logs } = await sleepThrough($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } }, 1, 10)
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['beats wait for your next turn: the cache went cold (12m since it was last read)'])
+})
+
+test('a beat on time for an interval past the cache\'s lifetime still finds the cache not served', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, fork: [{ ...ok, usage: usage(0, 90_000) }] })
+  await cmd($, '10')
+  await $.turn.complete(turn)
+  await clock.advance(10 * M)
+  expect(forks).toEqual([10 * M])
+  expect(logs.at(-1)).toBe('stopped: the cache was not served (0 read, 90,000 written)')
+})
+
+test('a sleep that leaves the cache warm still beats, within a step of waking', async ($: Engine, on: On) => {
+  const { forks, logs } = await sleepThrough($, on, {}, 45, 10) // the beat was due at 50m; it is 56m since the turn
+  expect(forks.length).toBe(1)
+  expect(logs.some(l => l.includes('cold'))).toBe(false)
+})
+
+test('after the cache went cold, the next turn starts beating again at the usual interval', async ($: Engine, on: On) => {
+  const { clock, forks } = await sleepThrough($, on, {}, 10, 120)
+  const at = clock.now()
+  await $.turn.start({ text: 'back', turnId: 't2' })
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: null })
+  await clock.advance(IDLE)
+  expect(forks).toEqual([at + IDLE])
+})
+
+test('/cachebeat now on a cache that went cold waits for the next turn and stays on', async ($: Engine, on: On) => {
+  const waits = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  waits.sleep(2 * 60 * M)
+  expect(await cmd($, 'now')).toBe('beats wait for your next turn: the cache went cold (2h since it was last read)')
+  expect(waits.forks).toEqual([])
+  expect((await stateNow($)).session.enabled).toBe(true)
+})
+
+test('/cachebeat now on a cache that went cold, with the setting on stop, switches it off', async ($: Engine, on: On) => {
+  const { forks, sleep } = await setup($, on, { settings: { onCold: 'stop' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  sleep(2 * 60 * M)
+  expect(await cmd($, 'now')).toBe('stopped: the cache went cold (2h since it was last read)')
+  expect(forks).toEqual([])
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+for (const onCold of ['wait', 'stop'] as const) {
+  test(`a sleep past the idle deadline stops it with Cache gone cold on ${onCold}`, async ($: Engine, on: On) => {
+    const { forks, logs } = await sleepThrough($, on, { settings: { stopAfterHours: 1, onCold } }, 10, 120)
+    expect(forks).toEqual([])
+    expect(logs).toEqual(['stopped: 1h since your last message'])
+  })
+}
+
+test('a deadline that has passed reads "due now" on the line, in state and in /cachebeat', async ($: Engine, on: On) => {
+  const { clock, sleep } = await setup($, on, { settings: { statusHeart: 'off', showTokens: false } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(49 * M)
+  sleep(90_000) // 30s past the beat's time, with the step that would beat it still a minute off
+  await draw($, HINT) // the heart starts its clock, which redraws the line each second
+  await clock.advance(2000)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat due now'])
+  expect((await stateNow($)).session.nextBeat).toBe('due now')
+  expect(await cmd($, '')).toBe('on, every 50m idle · 0 beats · next beat due now')
+})
+
+test('with both animations off, the countdown still moves, a step at a time', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false, statusHeart: 'off', showTokens: false } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 50m'])
+  await clock.advance(STEP)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 49m'])
+  await clock.advance(10 * STEP)
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ next beat in 39m'])
+})
+
+test('Cache gone cold: a bad stored value falls back, the tool takes both, and the menu flips it', async ($: Engine, on: On) => {
+  expect([normalize({ onCold: 'never' }).onCold, normalize({ onCold: 'stop' }).onCold, normalize({}).onCold]).toEqual(['wait', 'stop', 'wait'])
+  const { store } = await setup($, on)
+  expect(await set($, { settings: { onCold: 'stop' } })).toMatchObject({ changed: ['settings.onCold'] })
+  expect(stored(store).onCold).toBe('stop')
+  expect((await call($, 'set', { settings: { onCold: 'never' } })).deny).toBe('nothing changed: settings.onCold takes wait, stop, or null, not "never"')
+  await set($, { settings: { onCold: null } })
+  await cmd($, 'settings')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  await ui.press({ key: 'tab:limits' })
+  expect((await ui.find({ key: 'row:onCold' }))?.text).toMatch(/^Cache gone cold +start on your next message$/)
+  await ui.press({ key: 'row:onCold' })
+  expect(stored(store).onCold).toBe('stop')
+  expect((await ui.find({ key: 'row:onCold' }))?.text).toContain('stop')
+  await ui.unmount()
+})
+
+test('a new schedule while a step is being checked leaves one chain of steps, not two', async ($: Engine, on: On) => {
+  const { clock, forks, holdNow, afters } = await setup($, on)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  let release!: () => void
+  holdNow(new Promise<void>(r => (release = r)))
+  await clock.advance(STEP) // the step's check starts, and waits on the time
+  await cmd($, '5') // a new interval arms its own chain meanwhile
+  release()
+  await clock.settle()
+  const before = afters()
+  await clock.advance(3 * STEP)
+  expect(afters() - before).toBe(3) // a second chain would ask two a minute, and beat twice at once on a real clock
+  await clock.advance(5 * M)
+  expect(forks.length).toBe(1)
+})
+
+test('a five-minute cache that a retry carried past its lifetime is cold, not written afresh and stopped', async ($: Engine, on: On) => {
+  const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
+  const { clock, forks, logs } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, fork: [err, { ...ok, usage: usage(0, 90_000) }] })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(10 * M)
+  expect(forks).toEqual([4 * M]) // the retry at 5m finds the cache gone: no second fork
+  expect(logs).toEqual(['beats wait for your next turn: the cache went cold (5m since it was last read)'])
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: 'the cache went cold' })
+})
+
+test('a five-minute cache a short sleep let lapse, short of the late mark, is cold too', async ($: Engine, on: On) => {
+  const { forks, logs } = await sleepThrough($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } }, 3, 1.5) // 5m30s since the turn; late only from 6m
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['beats wait for your next turn: the cache went cold (6m since it was last read)'])
+})
+
+test('a custom interval on a five-minute cache: a sleep leaves it cold, with the age said', async ($: Engine, on: On) => {
+  const t = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
+  await cmd($, '10')
+  await $.turn.complete(turn)
+  await t.clock.advance(9 * M)
+  t.sleep(10 * M)
+  await t.clock.advance(STEP)
+  expect(t.forks).toEqual([])
+  expect(t.logs).toEqual(['beats wait for your next turn: the cache went cold (20m since it was last read)'])
+})
+
+test('/cachebeat now with beating off on a cache that went cold says so, and pauses nothing', async ($: Engine, on: On) => {
+  const { forks, logs, sleep } = await setup($, on)
+  await $.turn.complete(turn)
+  sleep(2 * 60 * M)
+  expect(await cmd($, 'now')).toBe('the cache went cold (2h since it was last read); no beat sent')
+  expect(forks).toEqual([])
+  expect(logs).toEqual([])
+  expect((await stateNow($)).session).toMatchObject({ enabled: false, paused: null })
+})
+
+test('a retry while a step is being checked leaves one chain of steps, not two', async ($: Engine, on: On) => {
+  const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
+  let t!: Awaited<ReturnType<typeof setup>>
+  let release!: () => void
+  const world: World = {
+    fork: [err, ok],
+    during: async n => { // beat 1 is on its way: a new interval arms a chain, whose first check waits on the time
+      if (n !== 1) return
+      await cmd($, '3')
+      t.holdNow(new Promise<void>(r => (release = r)))
+      await t.clock.settle()
+    },
+  }
+  t = await setup($, on, world)
+  await cmd($, '5')
+  await $.turn.complete(turn)
+  await t.clock.advance(5 * M) // beat 1 fails; its retry arms the chain the parked check must not run beside
+  const before = t.afters()
+  release()
+  await t.clock.settle()
+  expect(t.afters() - before).toBe(0) // the parked check ends; running on, it would arm a second chain beside the retry's
+  await t.clock.advance(STEP)
+  expect(t.forks.length).toBe(2) // the retry's beat, one minute on
+})
+
+test('usage crossing into credits before an on-time beat stops it for the limit, not as a cold cache', async ($: Engine, on: On) => {
+  const world: World = { percentUsed: 10, settings: { stopAtUsage: 100 } }
+  const { clock, forks, logs } = await setup($, on, world)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(49 * M)
+  world.percentUsed = 100 // usage credits from here: a five-minute cache for new requests, the one-hour cache written is still warm
+  await clock.advance(2 * M)
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['stopped: five-hour usage limit reached'])
+  expect((await stateNow($)).session.enabled).toBe(false)
+})

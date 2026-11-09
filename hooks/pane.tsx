@@ -65,14 +65,14 @@ export function paint(Text: Els['Text'], list: Span[]) {
 
 /**
  * The status line from the session's figures: its beats, what the last one read, the time to the
- * next; before the first beat, the time to it alone. '' when there is nothing to say.
+ * next (`next` is its words, `in 42m` or `due now`); before the first beat, the time to it alone. '' when there is nothing to say.
  */
 export function statusText(s: BeatSettings, beats: number, read: number | null, next: string | null) {
   const countdown = s.showCountdown && next
-  if (beats === 0) return countdown ? `♡ next beat in ${next}` : ''
+  if (beats === 0) return countdown ? `♡ next beat ${next}` : ''
   let text = `♥ cache kept warm ×${beats}`
   if (s.showTokens && read) text += ` · ${tokens(read)} cached`
-  if (countdown) text += ` · next in ${next}`
+  if (countdown) text += ` · next ${next}`
   return text
 }
 
@@ -87,7 +87,7 @@ function preview(els: Els, s: BeatSettings, kind: Preview, tick: number) {
   const frame = heartLook.animate ? previewFrame(x, tick, heartLook.timing) : x.loop[0]!
   // the hint line takes text alone, drawn dim
   const heart = s.heartPlacement === 'tail' ? [{ text: frame, dim: true }] : spans(frame, heartLook, tick, isLit(frame))
-  const sample = statusText(s, 3, 184_000, '42m')
+  const sample = statusText(s, 3, 184_000, 'in 42m')
   const lead = lineLook.animate && s.statusHeart !== 'off' ? statusFrame(s.statusHeart, tick, lineLook.timing) : ''
   const lineLit = isLit(lead || statusFrame('beat', tick, lineLook.timing))
   const line = paint(Text, spans(lead ? sample.replace(/^[♥♡]/, lead) : sample, lineLook, tick, lineLit))
