@@ -93,3 +93,7 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
 - **`recacheUsd` is null until step 2 adds prices.** It's in the shape now so the description doesn't change twice.
 - **`nextBeat` can be `due now`,** when the deadline has passed and the next step hasn't run. `session.paused` can read `the cache went cold`.
 - **`CacheView` carries `at`,** the time it was taken, so `lastReadMinutesAgo` and `minutesLeft` agree with `state` instead of being worked out from a second clock read.
+
+## 0.10.0
+
+- **`recacheUsd` has a value now** (null for a model with no price), and `session.lastBeatUsd` is the last beat's cost. Both are `≈` estimates at API prices, and the description says so, plus that a subscription isn't billed per token. How they're worked out is in mods-gotchas.md, "Dollars".
