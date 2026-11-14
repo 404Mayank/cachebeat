@@ -804,6 +804,17 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 
 What cachebeat already has that it lacks: on by default with no arming, settings by folder and a pane, the heart, beats during long turns, the 5-minute cache, usage-limit stops, tools for Claude, and (planned) stats that last past the session: its cold-write tally is in memory.
 
+### Decided from it (the user, 2026-11-14)
+
+These replace what item 4 says where they differ. Fold them into item 4 when step 5 is planned.
+
+- **The guard asks** (`Send` / `Don't send`) instead of dropping and waiting for a resend. So `coldGuardWindow` ("send again within") and the arm go.
+- **The guard talks in tokens,** not dollars, and so does the rest of 0.10.0: tokens are cachebeat's currency. No dollar floor: `coldGuardTokens` stays the only floor. What happens to step 2's dollars, already built, is open below.
+- **A new setting says what an unanswered question does:** drop the message, or send it after a timeout. `$.ui.ask` takes no timeout and only "rejects when dismissed, and in a `-p` run". Racing it against `$.clock.after` would send the message, but nothing in the declarations closes the dialog left open. Probe that first; if it can't be closed, the question has to be our own pane (`$.ui.open`), which we can close.
+- **No detection of other cache warmers.** A README line instead: don't run another keep-warm plugin beside cachebeat; two sets of beats and two guards behave unpredictably.
+- **Claude Code's own resume estimate** is the classic `SessionStart` input on `resume`/`fork`: `seconds_since_last_response`, `context_tokens`, `prompt_cache_likely_expired`, `estimated_cache_write_usd` (declarations :11642–11664). That's the data, in tokens and dollars; no percent-of-limit figure exists, and no event for the "resume or start new" dialog itself was found. Item 2 (step 4) already reads these. That the dialog is drawn from the same fields is inferred.
+- **The user's screenshots arrived** (`/usage` and `/stats`). `/usage` has a line `Prompt cache (main): 22 requests · 94% of input tokens from cache · no misses · warm (1h TTL, last activity 32s ago)`: Claude Code's own wording for what the Status tab shows. `/stats` is a heatmap by day over a row of totals, with `All time · Last 7 days · Last 30 days` as a range switch. No API for either's figures was found in the declarations.
+
 ## Still open
 
 - **The plugin directory is dropped** (2026-11-14: verified organizations only). Every "validate in the portal" and "the directory will flag" line above is void: computed `$.store` keys, the cold guard's README line "for the directory", and step 9's portal check need no validation. Keep the README line about the guard anyway: it tells users what the guard does.
