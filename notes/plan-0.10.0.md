@@ -272,7 +272,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - An unknown model gives `null`: everything shows tokens only, never a guessed price.
   - `export function priceOf(u: ModelUsage, model: string, ttl: Ttl): number | null`, and `export function writeRate(model: string, ttl: Ttl, promptTokens: number, learned?: Learned): number | null` in $/token. (`promptTokens` was added for Haiku 5.5's tier.)
 - **The engine's own figure wins where it knows more than the table** (as built: a managed `modelPricing`, or a model the table lacks; not its list price for a model the table has, and not its guess. See the P4 bullet below for the write-rate difference and the rounding).
-  - When `classic.PostModelSwitch` gives `estimated_cache_write_usd` and `context_tokens` of 20,000 or more, keep `rate = usd / context_tokens` for that model, lifetime and tier in a module variable. (Resume's `classic.SessionStart` has no lifetime field, so it waits for step 4.)
+  - When `classic.PostModelSwitch` gives `estimated_cache_write_usd` and `context_tokens` of 20,000 or more, keep `rate = usd / context_tokens` for that model, lifetime and tier in a module variable. (Resume's `classic.SessionStart` has no lifetime field and no `pricing`, so no rate is learned from it: item 2, Seeding.)
   - It reflects a managed `modelPricing` when one is set (`pricing: 'configured'`), which the table can't know.
   - Don't persist it: it's cheap to relearn, and a store write per switch isn't worth it.
 - **P4 held: forks enter `cost.usd`,** and the rise was readable straight after the fork's `await` (one Haiku fork: +0.000536535, the fork's exact price). An idle beat's actual cost is the `cost.usd` delta around the fork. Use it for idle beats only: mid-turn, the turn's own requests land in the same delta. Otherwise use `priceOf` on the fork's usage. Either way, `s.lastUsd` is the last beat's cost.
@@ -329,12 +329,12 @@ Every "next" text goes through it, and no caller writes "in" itself:
 - **What it shows:**
   - The turn line: `♥ cache kept warm ×3 · 184k cached · next in 42m · 1h 52m left`. That's `statusText` in pane.tsx:70, which gets a `left` argument shown when set.
   - Bare `/cachebeat`: `on, every 50m idle · 1h 52m left · 3 beats · next beat in 42m`.
-  - The pane's **This session** row: `on · 1h 52m left`, and `r` drops the limit.
+  - The pane's **This session** row: `on · until 4:30 PM`, and `r` drops the limit. **As built:** the time of day, not the time left, since the pane redraws on events and a left time would go stale.
   - Answers: `this session: on until 4:30 PM (2h), every 50m idle · next beat in 49m`. Time of day through `toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })`. **Check** that the sandbox has `Intl`; if not, use the relative `2h` alone.
 - **`global` / `local <minutes>`** keep setting **Beat after idle**, unchanged (register.tsx:628–655).
 - **The tool:**
   - `session.intervalMinutes` becomes `session.keepAliveMinutes` (5–2880, or null to clear). Setting it turns beating on. **As built,** `enabled: false` with it is refused, naming both fields: `schedule()` clears the time whenever the session is off, so the pair would drop the time at once (claude-tools.md, "0.10.0").
-  - `state.session` gains `keepAliveUntil` (ISO string or null) and `keepAliveMinutesLeft`. `intervalFrom` loses `session`.
+  - `state.session` gains `keepAliveUntil` (ISO string or null) and `keepAliveMinutesLeft`. `intervalFrom` loses `session`. **As built,** `keepAliveUntilLocal` too: the same time on the user's clock, which the tool text tells Claude to say.
   - `summary()` (tools.ts:193) says `this session on for 2h`.
   - Update `McpToolInputs` (types/index.d.ts:81).
   - Rewrite the description's interval sentences (tools.ts:102, :110).
@@ -393,7 +393,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
 - **`/resume`:** the same, from the `classic.SessionStart` hook, which runs after `anotherConversation`. **Use `e.session_id`:** P2 found that `$.session.id()` inside that hook is still the id of the conversation *left behind* (it is the resumed id by the next prompt). Don't use `$.session.id()` for the record key there.
 - **Seeding** sets two things, and nothing else:
   - **`s.lastWarm = now − secondsSince × 1000`.** Take `now` when the hook's event arrived, not when the apply runs, if the two can differ. `seconds_since_last_response` counts from the last main-thread response, not from a fork (P3, inferred from one case), which matches what `lastWarm` should be after a restart. Leave `prompt_cache_likely_expired` to the TTL comparison cachebeat already makes (the `true` case wasn't seen).
-  - **The conversation's size, until the first response:** a new `Saved` field (`s.resumeTokens`, from `context_tokens`), which `cacheNow` uses while `chatSize` has no figure, and the first turn clears. Without it the cold guard's size check (item 4) has nothing to compare on a resumed session's first message, the case the guard matters most for. **Check in this step (R1):** whether `$.session.usage().context.tokens` already has a figure after `--resume`, before any response. If it does, the field isn't needed.
+  - **The conversation's size, until the first response** (a choice made in the 2026-11-14 pass, not in the first plan): a new `Saved` field (`s.resumeTokens`, from `context_tokens`), which `cacheNow` uses while `chatSize` has no figure, and the first turn clears. Without it the cold guard's size check (item 4) has nothing to compare on a resumed session's first message, the case the guard matters most for. **Check in this step (R1):** whether `$.session.usage().context.tokens` already has a figure after `--resume`, before any response. If it does, the field isn't needed.
   - **There is no `source` on the cache state.** An earlier draft of this line had seeding set `source: 'resume'`; `CacheFacts` and `CacheView` have no such field (item 1a, `hooks/cache.ts`), and nothing reads one. Don't add it.
   - **No write rate is learned from the resume hint.** An earlier draft took `estimated_cache_write_usd / context_tokens` as the session's rate. `learnRate` can't take it: resume's `classic.SessionStart` has no `pricing` field (so a managed price can't be told from list price) and no lifetime field, in the 2.1.287 and 2.1.319 declarations alike (mods-gotchas.md, "Dollars"). **[$?]** If dollars stay, a probe of what the engine prices there comes first; if they go, the figure is unused.
 - **The `RESUMED` constant's comment** (:383) and the README stay true: no beat re-reads the conversation before the user's next message. The uncached hint is untouched.
@@ -408,7 +408,9 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - Resumed with an expired keep-alive: off.
   - `/resume` to a conversation that was off, from one that was on: off, with no line.
   - The resume hint seeds `state.cache`: `cold` when `secondsSince` is past the TTL, `warm` with minutes left otherwise.
-  - Store pruning drops a 31-day-old record and keeps a fresh one.
+  - With no figure from `$.session.usage()` after a resume, `state.cache.contextTokens` is the hint's `context_tokens`; after the first turn it's the session's own (unless R1 makes the field unnecessary).
+- No rate is learned from a resume hint carrying `estimated_cache_write_usd`.
+- Store pruning drops a 31-day-old record and keeps a fresh one.
   - Two sessions' records don't overwrite each other.
 - **Test both orders** (hint first, restore first) on `--resume`: the kit runs hooks one at a time, so make one `await` something the test holds open, as `holdNow` does for the clock.
 - **Raising the resume hook in a test:** `$.classic.SessionStart({ source: 'resume', session_id: 's1', seconds_since_last_response: 7200, … } as never)`. The cast is in the test, not in a `$` call of the plugin, so it's fine.
@@ -464,8 +466,10 @@ Rewritten 2026-11-14 around "Decided from it": the guard **asks** (`Send` / `Don
   - **`Send`** (compared exactly: free text typed under "Other" is not a yes) calls `next(e)`, and logs `sent on a cold cache: cold for 2h 14m, 184k tokens cached again`.
   - **Anything else, and a dismissal** (the call rejects), returns `{ drop: 'cachebeat: not sent. The cache has been cold for 2h 14m, and sending caches 184k tokens again.' }`. P5: the text stays in the composer, and the reason draws as `Prompt dropped by a hook: <reason>`.
   - **Where the log lands** (P5): a `$.ui.log` before a drop draws as a `● cachebeat: …` row just above the drop row. After `next(e)` on a mid-turn prompt, a log wasn't found on screen. This one isn't mid-turn; try the log first in this step, and a toast if it doesn't show.
-  - **One question at a time.** A module variable holds the open question's promise. A prompt that arrives while it's open waits on the same answer instead of opening a second dialog.
-- **It fails open, except at the question.** No `.catch` on the hook: a failure anywhere in it lets the prompt through (`index.d.ts:4093`). The `$.ui.ask` call alone sits in a `try`, because its rejection is the user dismissing it.
+  - **One question at a time** (a choice made in this rewrite). A module variable holds the open question's promise. A prompt that arrives while it's open waits on the same answer instead of opening a second dialog.
+- **It fails open, except at the question** (a choice made in this rewrite; it narrows the earlier rule "no `.catch` that drops"). No `.catch` on the hook: a failure anywhere in it lets the prompt through (`index.d.ts:4093`). The `$.ui.ask` call alone sits in a `try`, because its rejection is how a dismissal arrives.
+  - **The cost:** the declarations give one rejection for "dismissed" and for "no one to ask", and no way to tell them apart. Where the dialog can't draw at all, every cold send would be dropped, and only turning the guard off would get a message through. `-p` is covered (its origin, `sdk`, isn't asked). The desktop app isn't checked: G5.
+  - **If G5 finds a surface that rejects by itself,** the guard doesn't ask there: it sends, logged and counted, as for an origin that isn't asked.
 - **The timeout** (a numeric `coldGuardUnanswered`): race the ask against a promise that a `$.clock.after` callback resolves. Not `$.clock.sleep`: "the hook's budget runs on through it" (2.1.319 declarations), and the hook has 10s.
   - When the timer wins, the hook calls `next(e)` and logs `sent on a cold cache after 5m unanswered: 184k tokens cached again`.
   - **Probe first (G1–G3 below).** `$.ui.ask` takes no timeout, and nothing in the declarations closes its dialog. If the dialog can't be closed once the message has gone, the question becomes our own pane (`$.ui.open` with two buttons, closed with the pane's own close), for both values of the setting.
@@ -493,6 +497,7 @@ An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and cou
 | G2 | Does a wait on a `$.clock.after` promise count against the hook's 10s while a `$.ui.ask` is in flight? The `$` time a hook spends doesn't count (`index.d.ts:5099`); whether this wait is `$` time is **inferred**. | The same probe, with the wait at 30s. |
 | G3 | Can the test kit answer `ui.ask`, and make it reject? | A test hooks `on('ui.ask', …)` with a value, and with a throw. If it can't, the question goes behind a function the tests can replace. |
 | G4 | `bridge`: does the question reach a Remote Control client, and can it be answered there? | "Still open", the Remote Control check. |
+| G5 | Does `$.ui.ask` draw and wait in the desktop app, or reject at once? Does a rejection say why? | The probe mod in the desktop app; log the rejection's message. |
 
 **Risks:**
 - **2.1.287:** P8. Its declarations carry `prompt.submit`, `$.ui.ask` and the origin kinds (generated 2026-11-14), but nothing has run there.
@@ -550,7 +555,7 @@ Last message 12m ago
 
 - **Pane mechanics** (pane.tsx `settingsPane`, and the pane's hooks in register.tsx):
   - **`TABS` stays settings-only,** so `rowOf`, `accept` and the tool schema never see the read-only tabs.
-  - **A second list, `PAGES`, is what the pane walks:** `export const PAGES = [{ id: 'summary', title: 'Status' }, { id: 'cachetax', title: 'CacheTax' }, ...TABS]` in settings.ts, beside `TABS`. Everything that moves between tabs reads it in place of `TABS`:
+  - **A second list, `PAGES`, is what the pane walks** (chosen 2026-11-14): `export const PAGES = [{ id: 'summary', title: 'Status' }, { id: 'cachetax', title: 'CacheTax' }, ...TABS]` in settings.ts, beside `TABS`. Everything that moves between tabs reads it in place of `TABS`:
     - the tab bar's buttons and the hotkey hint in pane.tsx (`TABS.map`, `` `1-${TABS.length}` ``), so the hotkeys become 1–7
     - the `ui.focus` hook's wrap off either end of the tab bar (`TABS.findIndex`, `TABS[0]`, `TABS.at(-1)`)
     - the `ui.scroll` hook's step along the tab bar (the modulo over `TABS.length`)
@@ -591,7 +596,7 @@ stats: {
     beats: number; read: number; wrote: number; usd: number // what beats cost
     kept: number; keptUsd: number   // turns that came back to a cache a beat kept warm, and the re-cache they avoided
     cold: number; coldTokens: number; coldUsd: number // turns sent on a cold cache, and what re-caching cost
-    held: number                    // sends the cold guard asked about (item 4), whatever the answer
+    held: number                    // sends the cold guard asked about (item 4), whatever the answer: the counter's meaning under a guard that asks, chosen 2026-11-14
   } }
 }
 ```
@@ -884,9 +889,10 @@ Each step is finished, tested and merged into `dev` before the next starts.
   - a matcher that isn't a literal (`{ tool: SOME.constant }`, hooks registered in a loop)
   - a `$` call that isn't a plain statement (parentheses, `??`, `!` or a cast around it)
 
-  **The check:** a scratch plugin doing all three (`(await $.session.model()) ?? …`, `$.store.set('k', X)` with `X` cast, `((await $.store.get('k')) as …)?.a`, `(await $.clock.now())!`, `{ command: NAME }`, `{ tool: TOOL.a }`, `on` in a `for` loop) passes `claude plugin validate` and its test under `claude plugin test`, on 2.1.287 and on 2.1.322. Validate lists every `$` call and hook. It prints a matcher it can't resolve as `?` (an object's member, an imported constant; a top-level `const` string and a loop's values do resolve), and that fails nothing: `validate --strict` passes the release branch with `ui.focus{requestId=?}`. **Not checked:** a live session. The kit and validate load the module as a session does; that a session treats these the same is inferred.
-  - The same goes for `h` and `Fragment` as names in a `.tsx` file, and for 2.1.322's `gating hook without .catch` lines, which are information: `--strict` passes with nine of them.
-  - **Existing code keeps the old shape;** nothing needs rewriting. New code may use whichever reads best. Literal matchers are still worth it where they're free: `validate`'s listing then names the tool.
+  **The check:** a scratch plugin doing all three (`(await $.session.model()) ?? …`, `$.store.set('k', X)` with `X` cast, `((await $.store.get('k')) as …)?.a`, `(await $.clock.now())!`, `{ command: NAME }`, `{ tool: TOOL.a }`, `on` in a `for` loop) passes `claude plugin validate`, and its test under `claude plugin test` runs the command hook and dispatches through the member-matcher and loop hooks, on 2.1.287 and on 2.1.322. Validate lists every `$` call and hook. It prints a matcher it can't resolve as `?` (an object's member, an imported constant; a top-level `const` string and a loop's values do resolve), and that fails nothing: `validate --strict` passes the release branch with `ui.focus{requestId=?}`. **Not checked:** a live session. The kit and validate load the module as a session does; that a session treats these the same is inferred.
+  - `h` and `Fragment` as names in a `.tsx` file weren't in this probe. That rule is the directory's alone on older evidence: 0.9.0 shipped `let h` and `tsc`, `plugin validate` and `plugin test` all passed it (mods-gotchas.md, "Reviews and validation").
+  - 2.1.322's validate prints `gating hook without .catch` for a hook that can answer without `next`. It's information: `--strict` passes the release branch with eight of them.
+  - **Existing code keeps the old shape;** nothing needs rewriting. New code may use whichever reads best (a choice made in this pass, not the user's: say if the old shape should stay the house style). Literal matchers are still worth it where they're free: `validate`'s listing then names the tool.
 - **Run the checks, and fail on the summary:**
 
   ```sh
@@ -977,13 +983,13 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 4: resume (item 2)
 
-- **Delivers:** per-session store records, restore, seeding from the resume hint, the new resume line, README and Privacy.
+- **Delivers:** per-session store records, restore, seeding from the resume hint (the last read's time, and the size until the first response), the new resume line, README and Privacy.
 - **Depends on:** step 3 (`keepUntil`), step 1 (cache state), and P8 (P2 and P3 are answered). No portal check: the directory is dropped.
 - **Checks in the step:** R1 (item 2, Seeding).
 
 ### Step 5: the cold guard (item 4)
 
-- **Delivers:** the probes G1–G4 first; then the `coldGuard`, `coldGuardTokens` and `coldGuardUnanswered` settings, the session override, the `prompt.submit` hook and its question, the origin allowlist, the timeout, the logs, the tool fields, and the README rows and line.
+- **Delivers:** the probes G1–G5 first; then the `coldGuard`, `coldGuardTokens` and `coldGuardUnanswered` settings, the session override, the `prompt.submit` hook and its question, the origin allowlist, the timeout, the logs, the tool fields, and the README rows and line.
 - **Depends on:** step 1 (state), step 4 (a resumed session's first message is the case that matters most), P8 (P5–P7 are answered), and the user's word on what's marked provisional in item 4. Not on step 2: the question speaks in tokens.
 
 ### Step 6: the Status page (item 5, provisional)

@@ -8,7 +8,7 @@ Where the work stands, and what to do next. The design and every decision are in
 | --- | --- |
 | `main` / `origin/main` | 0.9.2 (`c84ac68`, released 2026-10-13 from a cloud session: the `h` → `hash` rename in `hashOf`). |
 | `v0.9.3` | The 0.9.3 release branch (`efa2be6`, pushed), [PR #13](https://github.com/404Mayank/cachebeat/pull/13). CI is green on 2.1.287 and latest. It's checked out in the worktree `/home/zyrus/Desktop/Projects/cachebeat-rel`. |
-| `dev` | Steps 0, 1, 2, 2b, 3 and 3b of 0.10.0 merged, `main` and `origin/dev` merged in. 216 tests pass (run 2026-11-14). The orchestrator pushes `dev` as notes land; check `git status -sb` for what's ahead of `origin/dev`. |
+| `dev` | Steps 0, 1, 2, 2b, 3 and 3b of 0.10.0 merged, `main` and `origin/dev` merged in. 216 tests pass (run 2026-11-14). `dev` was pushed on 2026-11-14 and is a few note commits ahead of `origin/dev` again; pushing it is harmless (nothing reads it), but ask the user first. |
 | CI on `dev` | `ci.yml` now type-checks on both legs. A `floor` job reads the minimum version from the README badge and feeds the matrix through `fromJSON`. **None of it has run on GitHub yet.** PR #13 ran `main`'s old `ci.yml`, so the 0.10.0 release PR is the first run. `main`'s ruleset blocks only force-pushes and deletion and requires no named checks, so renamed jobs can't block a merge. |
 | `tmp-093` | A local scratch branch: step 1 (`f6b5971`) with `origin/main` merged in, which the release branch took its files from. Delete it after 0.9.3 is out. |
 | `long-turn`, `v0.8.2`, `worktree-agent-…` | Older branches, not from this work. Leave them. |
@@ -46,7 +46,7 @@ Where the work stands, and what to do next. The design and every decision are in
 4. **Then 0.10.0, step 3c onwards,** one step at a time, as plan-0.10.0.md "Steps, in order" sets out. Step 3b is built and merged.
    - 3c: Claude reads what it needs (item 10; designed, waits on the user's answers)
    - 4: resume (nothing blocks it)
-   - 5: the cold guard, which now asks `Send` / `Don't send`; its probes G1–G4 come first
+   - 5: the cold guard, which now asks `Send` / `Don't send`; its probes G1–G5 come first
    - 6: Status (waits on the dollar answer and a look pass)
    - 7: CacheTax (the same)
    - 8: the GIF
