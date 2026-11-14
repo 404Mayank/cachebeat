@@ -16,6 +16,9 @@ When a Claude Code session sits idle, its prompt cache goes cold, and your next 
 
 You come back from lunch, type your next message, and it picks up right where you left off.
 
+> [!IMPORTANT]
+> **Changed in 0.10.0:** `/cachebeat <time>` now sets how long to keep the cache warm, and needs a unit: `/cachebeat 2h` keeps it warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global <minutes>`.
+
 ## Features
 
 - **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation
