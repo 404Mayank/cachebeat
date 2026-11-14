@@ -622,6 +622,196 @@ Rerecord `assets/demo.tape` with `demo.py` once steps 1–7 have merged and the 
 
 **Tests:** the command run mid-turn changes the state at once and gives the chosen acknowledgement. An idle run is unchanged.
 
+### Item 10: Claude reads what it needs (step 3c)
+
+Design only, 2026-11-14. Nothing here is built.
+
+**What the user asked:** Claude should be able to check its own context through cachebeat, ask for only the fields it needs instead of the whole state, and have firm rules for when the whole state is required (their examples: the first read, and before a settings change).
+
+**Current behavior:**
+- `state` takes no input and answers everything (`stateOf`, `hooks/register.tsx`): `session`, `cache`, all the settings, `folder`, `defaults`.
+- Nothing in it says how full the context window is or when it compacts. `cache.contextTokens` is the nearest thing.
+- `set` answers `{ changed, session, settings, folder }` and its description sends Claude to `state`'s `folder.own` to learn what a folder overrides.
+
+**What it costs today** (measured 2026-11-14 with a script over `hooks/tools.ts`; tokens are characters ÷ 4, an estimate):
+
+| Piece | Characters | ≈ Tokens | Paid |
+| --- | --- | --- | --- |
+| `state` description | 3,174 | 790 | once, when ToolSearch loads it |
+| `set` description | 2,401 | 600 | once, when loaded |
+| `set` schema | 12,496 | 3,100 | once, when loaded |
+| of which `folder` repeating every setting's description | 3,290 | 820 | |
+| a full `state` answer, pretty-printed (0.10.0's shape, extrapolated from a 0.9.x answer of 1,480) | ≈2,000 | 500 | each call |
+| the same, printed compact | ≈1,450 | 360 | each call |
+
+So a narrow read saves about 300 tokens a call, and the `folder` duplication alone costs more than two of those. Both are fixed below. The larger gain of narrow reads is that Claude gets an answer about its context without 30 settings around it.
+
+#### What "its current context" can honestly include
+
+Checked against the declarations Claude Code writes on 2.1.287 (generated in a scratch folder today, 20,006 lines), 2.1.295 (this checkout) and 2.1.319 (`cachebeat-rel`). The types are the same in all three. 2.1.322, the installed version, has written none here.
+
+| What | Source | Reported or inferred |
+| --- | --- | --- |
+| Tokens in the window | `$.session.usage().context.tokens`: the input side of the last response, "uncached, cache-written and cache-read together" | **Reported.** Absent "until the first response of the live window: a fresh session, or one just compacted". |
+| Window size | `context.window` | **Reported.** |
+| Fill | `context.percent` (whole, against the model's window) | **Reported.** |
+| Where auto-compaction runs | `context.breakdown.autoCompactThreshold`, `isAutoCompactEnabled`, `rawMaxTokens`, with `breakdown: 'summary'` ("estimates locally and sends none"; `chatSize` already makes this call) | **Reported.** That the engine compares the threshold with the same figure as `context.tokens` is **inferred** (C4). |
+| What the next request re-sends | `chatSize`: the last response's prompt plus its reply, from `breakdown.apiUsage` | **Reported figures, summed by cachebeat.** |
+| Warm or cold, minutes left, minutes cold | `viewOf`: time since the last read against the lifetime | **Inferred**, as the engine's own `/usage` line is (see "Facts from the types"). |
+| What a re-cache writes | `cache.contextTokens`, the whole conversation written again | **Inferred**: it assumes a cold cache misses everything. |
+| Time since the user's last message | `s.lastReal`, set by cachebeat at each real turn | **Observed by cachebeat.** No engine field outside resume's `seconds_since_last_response`. |
+| Compactions | the `session.compact` hook cachebeat already has; its result carries `tokensBefore?` and `tokensAfter?` | **Observed by cachebeat**, since the process started. A resumed session starts from 0. |
+| Usage limits | `$.session.usage().rateLimits` | **Reported.** Not in `state` today; the Status page (step 6) shows it. |
+
+Two limits on "its own":
+- **Mid-turn, the figures lag.** Claude only ever calls a tool mid-turn. `context.tokens` is the last *finished* response's input, so it misses that response's own output and everything the turn added since. Which response that is when the call runs is **inferred** (C1).
+- **A subagent gets the main conversation's figures.** `$.session.usage()` is "the live context window" of the session; nothing in the declarations gives a subagent's loop its own. **Inferred** (C2). The answer says so (`of`, below) rather than leave a subagent to take them for its own.
+
+#### The read API
+
+One tool, as now, with one optional input.
+
+```ts
+inputSchema: object({
+  only: {
+    type: 'array', items: { enum: ['context', 'cache', 'session', 'settings'] },
+    description: 'The sections to read. Leave out for all of them.',
+  },
+}),
+```
+
+- **Sections, not fields.** Four names, checked by the schema.
+  - `context` (≈50 tokens), `cache` (≈35) and `session` (≈85) are small enough that a field filter inside them saves nothing.
+  - `settings` is the big one (≈250): the answer's `settings`, `folder`, `allFolders` and `defaults` keys together, since each is read in the light of the others.
+  - The sections follow the Status page's rows (item 5): Cache and Size are `cache` and `context`, Beating and This session are `session`.
+- **The answer's shape doesn't change:** the same top-level keys as today, less the ones not asked for, plus `context`.
+- **Nothing named answers everything.** A session that started before the update holds the old schema and sends `{}`: it gets what it always got. A lazy caller costs tokens, never correctness.
+- **A bad `only`** (not a list, or a name that isn't a section) is refused in the hook, in `parseSet`'s style: `nothing read: only takes context, cache, session or settings, not "beats"`. The schema should stop it first; whether the engine checks a plugin tool's input against its schema isn't in the declarations.
+- **The answer is printed compact** (`JSON.stringify(x)`; `json` in register.tsx indents by 2 today). About 30% fewer tokens on every answer, `set`'s too. Claude is the only reader: the transcript row is drawn by us.
+- **The transcript line names what was read:** `cachebeat · read context, cache`, and `cachebeat · read the state` for everything.
+
+**The new section:**
+
+```ts
+context: {
+  tokens: number | null,   // engine: context.tokens
+  window: number,          // engine: context.window
+  percent: number | null,  // engine: context.percent
+  autoCompactAt: number | null, // engine: breakdown.autoCompactThreshold; null while auto-compact is off
+  compactions: number,     // cachebeat: main-conversation compactions seen since Claude Code started
+  lastCompactionMinutesAgo: number | null,
+  lastMessageMinutesAgo: number | null, // cachebeat: since the user's latest message (s.lastReal)
+  of?: 'main conversation' // only on a subagent's call
+}
+```
+
+- `compactions` and its time are two new fields of `Saved`, set in the `session.compact` hook where `isDone` is true, and cleared by `anotherConversation`.
+- **`session.cacheTtl` goes;** `cache.ttl` is the same value. `ABOUT.interval` says "state's `cache.ttl`" in its place.
+- **Without dollars** `cache.recacheUsd` and `session.lastBeatUsd` go too, and `cache.contextTokens` is the re-cache figure. **If dollars stay,** both fields stay where they are and the `cache` paragraph keeps its dollar sentence; nothing else here changes.
+
+#### The boundaries, enforced by the tools
+
+- **A loop's first read is answered whole, whatever it names.** The hook keeps a set of the loops that have had everything (`e.agentId ?? 'main'`). A narrow read from a loop not in it is widened, and the answer says why: `whole: 'your first read in this conversation'`.
+  - The set is cleared where Claude's copy is gone: `anotherConversation` (`/clear`, `/resume`), a main-conversation compaction, and where a rewind is noticed. A restart clears it by itself (module memory).
+  - Claude can't get this wrong: asking narrow too early costs it nothing and us one whole answer.
+- **`set` needs no read first, and never refuses for want of one.** What a read-before-write protects is answered in `set`'s own answer:
+  - what changed, and this session after it (as now)
+  - where each change applies (as now: `folder.path`)
+  - **new, `shadowed`:** the keys the call saved for all folders that this folder has its own of, so they didn't change here. Today the description sends Claude to `state`'s `folder.own` to work that out.
+- **Narrow is enough for everything else.** One sentence of prose remains, because no code can know what Claude is about to say: settings can change outside the conversation, so read `settings` again before quoting one.
+- **Not built: refusing a write that follows no read.** It adds a round trip to the thing the user asked for, and the read it forces tells Claude nothing `set`'s answer doesn't.
+
+#### The text
+
+**`state`'s description,** whole. Names only, no values: tool text is fixed for the session.
+
+> Reads cachebeat in this session, and this conversation's context: how full the context window is and when it compacts, whether the prompt cache is likely still warm and for how long, what the next message would write to the cache again, this session's beating, and cachebeat's settings.
+>
+> `only` names the sections to read: `context`, `cache`, `session`, `settings`. Name the ones you need; leave it out for all of them. Your first read in a conversation, and the first after a compaction, is answered whole whatever you name, and `whole` says why. `set` needs no read first: its answer says what changed and where. Settings can change outside this conversation (the menu, another session), so read `settings` again before you quote one.
+>
+> `context` is the main conversation's, also when a subagent asks (`of` says so then). `tokens`, `window` and `percent` are Claude Code's own figures, the status line's: the input of the last finished response against the model's window. Mid-turn they miss what the turn has added since, and they are null before a conversation's first response and right after a compaction. `autoCompactAt` is the token count at which Claude Code compacts on its own, null when that is off. `compactions` counts the compactions since Claude Code started, with `lastCompactionMinutesAgo`. `lastMessageMinutesAgo` is the time since the user's latest message.
+>
+> `cache` is whether this session's prompt cache is likely still warm, judged by the time since it was last read against its lifetime, as Claude Code judges it; only the next request confirms it. `state` is warm, cold, or unknown before anything is cached; `ttl` is the lifetime, `1h` or `5m`, worked out on each call; then `lastReadMinutesAgo`, `minutesLeft` or `coldForMinutes`, and `contextTokens`: what the next message writes to the cache again if it is cold, the last request and its reply.
+>
+> `session`: `nextBeat` is `in 42m` (mid-turn too: counted from the end of the turn's last request), `due now`, `50m after the request on its way`, `after this turn`, `after the next turn` (nothing cached yet), `none needed` (a keep-alive time is set and the cache outlasts it), or null when off or skipping. `intervalMinutes` is the beat interval in effect, read-only: `set` changes it through `settings.interval` or `folder.interval`, and `intervalFrom` says which it follows (`folder`, `all folders`, or `auto`). `keepAliveUntil` (UTC), `keepAliveUntilLocal` (the user's clock: tell the user this one) and `keepAliveMinutesLeft` are set while the session has a keep-alive time. `skipping` says why beats skip this chat. `paused` says why beats wait for the user's next turn; only that turn ends it. A beat re-sends the conversation as last sent, with one line tagged `[cachebeat]`; it reads the cached conversation (`lastBeatReadTokens`) and writes only what wasn't cached (`lastBeatWrittenTokens`), both null before the first beat.
+>
+> `settings`: the values in effect here, this folder's own over those for all folders. `folder` is this session's folder (`path`) and the settings it has of its own (`own`); `allFolders`, present while it has any, has the settings for all folders; `defaults` has the default of each setting that differs from it.
+
+3,215 characters (counted) against 3,174 today: the same size, with the context section and the read rules added and the dollar sentences gone. The first sentence carries the words a ToolSearch keyword query for context or cache would use.
+
+**`set`,** two changes:
+
+- In the scope paragraph, "A change to `settings` doesn't reach a setting this folder has its own of (`state`'s `folder.own`): tell the user." becomes:
+
+  > A change to `settings` doesn't reach a setting this folder has its own of: the answer lists those under `shadowed`, and you tell the user.
+
+- The last paragraph becomes:
+
+  > Nothing changes if any value is invalid, and the refusal names each one. No `state` read is needed first. Subagents can read `state` but not call this. Returns what changed, this session's state, the changed settings (for all folders, and for this folder with its `path`, which you name to the user), and `shadowed`.
+
+- **`folder`'s fields lose their descriptions.** `settings` and `folder` are built from the same `field(k)`, so each setting is described twice. `folder`'s own description already says "as `settings` takes them". Build its fields from `kinds(k)` plus null, without the text: 3,290 characters less (measured), and the limits stay in the schema.
+
+#### Is a skill warranted now?
+
+No. What claude-tools.md says still holds, and this design gives it one more reason:
+- The rules a skill would carry are needed at the moment the tool is loaded, which is when its description arrives. Most of them are now code.
+- A skill's listing line would sit in every session of every user, and a second text would have to keep step with the tools.
+
+What a skill *would* add is the one thing this design doesn't: a line always in view. The tools wait behind ToolSearch, so until Claude loads `state` it sees only the name `mcp__cachebeat__state`, and nothing tells it that its context can be read there. Claude will check when asked, not on its own. Cheaper answers than a skill:
+- **A README tip** (below): a line for the user's own `CLAUDE.md`. It costs only the users who want it.
+- **A static line in the system prompt** (`prompt.compose`) would reach everyone, and being fixed text it wouldn't break the cache as state there would. It's still tokens on every request of every user, for a behavior most didn't ask for. Not proposed.
+
+#### Tests (`hooks/cachebeat.test.tsx`)
+
+- `only: ['context']` after a whole read answers `context` alone; `['cache', 'session']` those two; `['settings']` gives `settings`, `folder`, `defaults`, and `allFolders` only while the folder has its own.
+- `{}` answers every section, with the keys it has today plus `context`.
+- A first read with `only` is answered whole, with `whole` set; the next narrow read isn't widened.
+- After `/clear`, after a main-conversation compaction and after a noticed rewind, a narrow read is whole again. A subagent's compaction (`agentId` set) changes nothing.
+- A subagent's first narrow read is whole even after the main loop's; its `context` carries `of: 'main conversation'`, and the main loop's doesn't.
+- `context`: the stubbed `tokens`, `window`, `percent` and threshold come through; `tokens` and `percent` are null when the stub has none; `autoCompactAt` is null with auto-compact off; `compactions` goes 0 to 1 on a compaction and back to 0 on `/clear`.
+- `only: 'cache'` and `only: ['beats']` are refused, naming the four sections.
+- `set` with `settings: { interval: 30 }` while the folder has its own interval: `shadowed` is `['interval']`. Without one: `[]`.
+- `set` as a loop's first call goes through, with no read before it.
+- The schema: `folder`'s fields carry no `description`, and still refuse a value out of range.
+- The transcript row reads `cachebeat · read context, cache`, and `read the state` for everything.
+- The answer has no newline.
+
+**Live checks, before building on the inferred points:**
+
+| # | Check | How |
+| --- | --- | --- |
+| C1 | Which response `context.tokens` reflects when read from a `tool.call` mid-turn | Call `state` mid-turn in a long turn, then compare with `/context` at the turn's end. |
+| C2 | A subagent's call gets the main conversation's figures | Have a subagent call `state` and compare with the main loop's. |
+| C3 | ToolSearch finds `state` from a query about context | In a fresh session, ask Claude how full its context is, without naming cachebeat. |
+| C4 | Auto-compaction runs when `context.tokens` passes `autoCompactAt` | Set a small `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and watch a session cross it. |
+
+#### README (on `main` through the release; users only)
+
+- Features, the "Ask Claude" bullet, gains: "or ask it how full its context is and whether the cache is still warm".
+- "What it sends", the "Ask Claude, and it can tell you…" line, gains "how full the context window is and when it will compact".
+- A tip under Quick start: `To have Claude watch its own context, add a line to your CLAUDE.md, such as: "Before a long task, read your context with cachebeat's state tool (only: context)."`
+- The line on the two tools stays as it is: they still read and change only cachebeat's own state. The context figures are Claude Code's own, read on the machine.
+
+#### Alternatives rejected
+
+- **A `fields` list of leaf names.** Naming about 60 leaves in the schema costs more tokens, once loaded, than narrow reads would save; free-text paths can be mistyped; and the three small sections are already cheaper than one extra call.
+- **A separate `context` tool.** A second read tool with its own description, and the first-read rule would need to span both.
+- **Nothing named answering a brief state.** It changes what `{}` means for sessions that hold the old schema.
+- **Refusing a narrow first read.** A round trip to teach a rule the tool can apply itself.
+- **Refusing a write that follows no read,** or `set` answering the whole state. See "The boundaries".
+- **Widening a narrow read when the settings changed since the loop last saw them.** It only helps when Claude happens to read something else; it doesn't stop Claude quoting a setting from memory. One sentence of prose covers that case as well.
+- **Putting the context in the system prompt or the turn's context.** It changes the cached prefix whenever it moves (claude-tools.md).
+- **`isDeferred: false`,** so the descriptions are always in view. It needs 2.1.293, above the floor, and puts ≈4,500 tokens in every session.
+
+#### Open, for the user
+
+1. **"The whole state before a settings change"** is met here by making the read unnecessary (`set`'s answer, with `shadowed`), not by forcing it. If you want it literal, the cheap form is `set` answering the whole state on a loop's first call (≈360 tokens, once); the strict form is a refusal, which I'd not build.
+2. **The first read whole even for a pure context check?** It's your rule, and it's one rule. It costs ≈360 tokens once per conversation and per compaction, mostly settings Claude may never need. The alternative is no first-read rule at all, since `set` no longer depends on one.
+3. **Should Claude check its context unasked?** Not with the tools deferred. The README tip leaves it to each user's `CLAUDE.md`; a fixed system-prompt line or a skill would reach everyone and cost everyone.
+4. **A weighted re-cache figure in `state`?** `cache.contextTokens` is raw tokens. CacheTax's net is in input-token equivalents; `cache.recacheInputTokens` (tokens × the model's write ratio) would match it. Left out until you say the tool should speak that unit.
+5. **Usage limits in `state`?** The Status page shows them and `state` doesn't. If wanted, `session.usageLimits` joins in step 6.
+6. **Printing answers compact** changes nothing Claude reads but the whitespace. Say if you'd rather keep them indented.
+
 ## Steps, in order
 
 Each step is finished, tested and merged into `dev` before the next starts.
@@ -705,6 +895,17 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Also delivers:** the desktop band's line kept through a turn (decided). The terminal turn line is unchanged.
 - **Depends on:** step 3, which settles the command's words.
 - **Bundles:** item 9 alone. It's small, and it doesn't wait on later steps.
+
+### Step 3c: Claude reads what it needs (item 10)
+
+- **Delivers:** `state`'s `only` and `context`, the first-read rule, `shadowed` in `set`'s answer, `folder`'s schema without the repeated descriptions, compact answers, the rewritten `state` description, tests, the README lines, and claude-tools.md.
+- **Depends on:**
+  - step 1 (`cacheNow`), and nothing later
+  - the user's answer on dollars, since the rewritten description either drops the dollar sentences or keeps them
+  - open questions 1 and 2 of item 10
+- **Not on the floor:** every call it makes (`$.session.usage({ breakdown: 'summary' })`, the `session.compact` hook, `e.agentId` on `tool.call`) is already used on 2.1.287, and the fields it reads are in 2.1.287's declarations. No floor move.
+- **Why here and not with Status (step 6):** it needs nothing from steps 4–6. Those steps add their fields to its sections as they go (`session.coldGuard`, the resume seed in `cache`), and step 9's sweep checks them.
+- **Bundles:** item 10 alone. Tool text is fixed for the session, so check the new description in a fresh one.
 
 ### Step 4: resume (item 2)
 
