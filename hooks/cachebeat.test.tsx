@@ -909,7 +909,7 @@ test('turned on mid-turn, it says so, and beats an interval after the turn ends'
   const { clock, forks } = await setup($, on)
   await $.turn.start({ text: 'hi', turnId: 't2' })
   const r = JSON.parse((await call($, 'set', { session: { enabled: true } })).result as string)
-  expect(r.session.nextBeat).toBe('50m after the request on its way') // the turn's first request
+  expect(r.session.nextBeat).toBe('50m after the request on its way was sent') // the turn's first request
   await $.turn.complete(turn)
   expect((await stateNow($)).session.nextBeat).toBe('in 50m')
   await clock.advance(IDLE)
@@ -2629,4 +2629,44 @@ test('a turn whose requests cachebeat didn\'t see counts from the turn\'s start'
   await $.turn.complete({ ...turn, durationMs: 2 * M }) // begun at 8m, before cachebeat saw it
   await clock.advance(3 * M)
   expect(forks).toEqual([11 * M]) // not 13m
+})
+
+test('a turn ending while the beat its long last answer brought is on its way sends no second beat', async ($: Engine, on: On) => {
+  let release!: () => void
+  const t = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, during: async n => { if (n === 1) await new Promise<void>(r => (release = r)) } })
+  await secondTurn($)
+  t.lengths.push(4.5 * M) // sent at 0, answered at 4m 30s: a beat is due at once
+  await step($, 't2', 0)
+  await t.clock.settle() // it forks mid-turn, and is held on its way
+  await $.turn.complete({ ...turn, turnId: 't2' }) // the stamp stays at 0: a beat is due at once again
+  await t.clock.settle()
+  expect(t.forks).toEqual([4.5 * M])
+  release()
+  await t.clock.settle()
+  expect(t.forks).toEqual([4.5 * M])
+  expect(t.logs.filter(l => l.startsWith('♥ cache renewed'))).toHaveLength(1)
+  expect((await stateNow($)).session.beats).toBe(1)
+})
+
+test('/cachebeat now while a beat is on its way sends no second one', async ($: Engine, on: On) => {
+  let said = ''
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, during: async n => { if (n === 1) said = (await cmd($, 'now'))! } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect(forks).toEqual([3 * M])
+  expect(said).toBe('a beat is on its way; the next counts from it')
+})
+
+test('a turn whose end was skipped leaves the next turn its own start, if none of its requests are seen', async ($: Engine, on: On) => {
+  // an end that isn't the running turn's, arriving while a beat is on its way, is passed by (as after a reload)
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 }, during: async n => { if (n === 1) await $.turn.complete({ ...turn, turnId: 'x' }) } })
+  await secondTurn($)
+  await step($, 't2', 0) // sent and answered at 0; t2's own end never comes
+  await clock.advance(10 * M) // its quiet stretch beats at 3m, 6m and 9m
+  await $.turn.start({ text: 'next', turnId: 't3' })
+  await clock.advance(2 * M)
+  await $.turn.complete({ ...turn, turnId: 't3', durationMs: 2 * M }) // begun at 10m, none of its requests seen
+  await clock.advance(1 * M)
+  expect(forks).toEqual([3 * M, 6 * M, 9 * M, 13 * M]) // not at 12m: t3 counts from its start
 })

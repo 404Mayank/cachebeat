@@ -543,6 +543,8 @@ const ASK_MID_TURN = '[cachebeat] Automated prompt cache keep-alive, not a messa
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
   if (stepping) return 'a request is on its way; the beat waits for it'
+  // one on its way sets the next when it's answered: a turn ending meanwhile, or /cachebeat now, would send a second
+  if (beating) return 'a beat is on its way; the next counts from it'
   const now = await $.clock.now()
   const since = now - (s.lastWarm ?? now)
   const warmedAt = s.lastWarm
@@ -789,7 +791,7 @@ async function stateOf($: EngineInterface) {
   const now = await $.clock.now()
   const nextBeat = !s.enabled || s.small ? null
     : s.nextAt !== null ? untilNext(s.nextAt - now)
-    : stepping ? `${fmt(idle())} after the request on its way`
+    : stepping ? `${fmt(idle())} after the request on its way was sent`
     : busy ? 'after this turn'
     : isCovered ? 'none needed'
     : 'after the next turn'
@@ -1058,7 +1060,7 @@ export const register: Register = on => {
   })
 
   // a compaction replaces the conversation, so the prefix a beat would warm is gone; the next turn
-  // caches the new one. One within a turn needs nothing: the turn's end starts the count from there
+  // caches the new one. One within a turn needs nothing: the turn's next request starts the count from when it's sent
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
@@ -1074,6 +1076,7 @@ export const register: Register = on => {
       busy = true
       turnId = e.turnId
       stepping = true // its first request goes out next
+      isTurnWarmed = false // a turn.complete skipped (one ending while a beat runs, after a reload) left it set
       s.asked = await $.clock.now()
       s.row = null // the line moves to this turn's row once it ends
       await schedule($)
