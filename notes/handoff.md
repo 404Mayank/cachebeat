@@ -47,7 +47,7 @@ Where the work stands, and what to do next. The design and every decision are in
    - 3c: Claude reads what it needs (item 10; designed, waits on the user's answers)
    - 4: resume (nothing blocks it)
    - 5: the cold guard, which now asks `Send` / `Don't send`; its probes G1–G5 come first
-   - 6: Status (waits on the dollar answer and a look pass)
+   - 6: Status (waits on a look pass)
    - 7: CacheTax (the same)
    - 8: the GIF
    - 9: the sweep and the release
@@ -56,8 +56,8 @@ Where the work stands, and what to do next. The design and every decision are in
 
 - **CacheTax is [karanb192/cache-tax](https://github.com/karanb192/cache-tax)** (MIT), another mod that warms the cache and guards cold sends. What's worth borrowing from it is in plan-0.10.0.md, "From cache-tax". Credit it in the README only if what's taken is substantial (the user, 2026-11-14).
 - **The idle cost rise** (+$0.002 with nothing running, step 2's live check) is left alone unless testing shows it again.
-- **The screenshots arrived** (`/usage` and `/stats`; plan-0.10.0.md, "Decided from it", says what's in them). Steps 6 and 7 no longer wait on them. They wait on the dollar answer and on a look pass against the screenshots that the user approves (plan-0.10.0.md, item 5, "What steps 6 and 7 wait on").
-- **Dollars:** remove `≈$` from everything users and Claude see, keeping `prices.ts` for the token-equivalent ratios, or keep and extend them? Asked on 2026-11-14, not answered. The plan marks every place it touches with `[$?]` (plan-0.10.0.md, "Still open").
+- **The screenshots arrived** (`/usage` and `/stats`; plan-0.10.0.md, "Decided from it", says what's in them). Steps 6 and 7 no longer wait on them. They wait on a look pass against the screenshots that the user approves (plan-0.10.0.md, item 5, "What steps 6 and 7 wait on").
+- **Dollars are gone** (2026-11-14): no dollar figure in anything users or Claude read. The orchestrator recommended it and went ahead when the user, who had said tokens are cachebeat's currency and dollars go everywhere or nowhere, said to continue. `ratiosOf` in `hooks/prices.ts` is kept for CacheTax's input-token equivalents. It's one revert of the "tokens only" merge if the user says otherwise.
 - **Item 10's six questions** (plan-0.10.0.md, item 10, "Open, for the user").
 - **The cold guard** (plan-0.10.0.md, item 4, rewritten 2026-11-14: it asks `Send` / `Don't send`, and the **send again within** window is gone, so its 1–15 minute range is no longer a question):
   - **Remote Control messages are held too** (the user, 2026-11-14), if a live check shows the question reaches a Remote Control client and can be answered there (G4). If it can't, the guard skips `bridge` and the README suggests running `/cachebeat` before sending from a remote session.

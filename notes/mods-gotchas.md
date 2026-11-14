@@ -238,6 +238,20 @@ Item 9's probe. Claude Code 2.1.322, `--model haiku`, a terminal in tmux, the pl
   - **Haiku writes 2,500 words in under 15s,** too fast to type over. A turn that stays working long enough: six sequential `sleep 8` Bash calls (a single `sleep 45` is refused by the harness, which tells the model to background it, and a backgrounded one ends the turn). Start the probe with `--allowedTools 'Bash(sleep:*)'`.
   - **Don't write `echo ===` in the shell tool's zsh:** `===` expands as a command and aborts the line.
 
+## The lifetime counts from a request's start (found live, 2026-11-14)
+
+Anthropic's docs say the cache's lifetime "is measured from the start of the request that writes or reads the cache entry, not from the end of its response". Observed, one trial and one control, Claude Code 2.1.322, Haiku, `claude -p --resume`, the five-minute cache forced with `FORCE_PROMPT_CACHING_5M=1` (the writes came back as `ephemeral_5m_input_tokens`), cachebeat disabled, a 52k-token unique filler as the first message:
+
+| | Second request ran for | Third request sent | Third request read | wrote |
+| --- | --- | --- | --- | --- |
+| Trial (a 16k-token story) | 104s | 352s after the second's start, 248s after its end | 0 | 78,148 |
+| Control (a one-word answer) | 5s | 260s after the second's start, 255s after its end | 62,161 | 41 |
+
+- The trial's third request came inside five minutes of the second's end and outside five minutes of its start, and read nothing. The control waited longer after the end and read everything. So the clock runs from the start.
+- Not checked: the one-hour cache (the docs state the rule for both), an interactive session, and where between "sent" and "first byte" the clock starts (the first content frame came about 2.5s after launch in each call).
+- How it was run: `claude -p --model haiku --tools "" --output-format json --settings '{"enabledPlugins":{"cachebeat@cachebeat":false}}'`, the env var on the command line, each later call with `--resume <session_id>`. The output is a JSON array; the `result` entry has `usage` with `cache_read_input_tokens`, `cache_creation_input_tokens` and the 5m/1h split. Pass `< /dev/null`, or `-p` waits 3s for stdin.
+- What it means for cachebeat is in plan-0.10.0.md, "Still open".
+
 ## Dollars (built in step 2 of 0.10.0)
 
 **Removed on 2026-11-14 (the tokens-only step):** no dollar figure reaches a user or Claude any more, because the user said tokens are cachebeat's currency and dollars are either everywhere or nowhere. This section stays as the record of how they were worked out. `hooks/prices.ts` keeps the table as `ratiosOf(model)` (read, 5-minute write and 1-hour write against input), for CacheTax's input-token equivalents; the cost-delta around a fork, `RISE_BOUND`, the learned rates, `money()`, `lastUsd`, `recacheUsd` and `lastBeatUsd` are gone.

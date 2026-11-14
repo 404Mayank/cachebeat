@@ -108,6 +108,6 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 | [directory-report-0.7.0.md](directory-report-0.7.0.md) | The full reading of the directory's 0.7.0 validation: each finding, the lines behind it, and how to fix it |
 | [plan-0.8.0.md](plan-0.8.0.md) | 0.8.0: where settings apply (this session, this folder, all folders), as built, and the design it replaced |
 | [handoff.md](handoff.md) | Where the 0.9.3 release and 0.10.0 work stand, what's waiting, and how the multi-session work was run: start here |
-| [plan-0.10.0.md](plan-0.10.0.md) | 0.10.0, planned: cache state and the sleep fix, dollars, `/cachebeat <time>` as a keep-alive, resume, the cold guard, the Status and CacheTax pages; what the API says for certain, the live checks still owed, and the steps in order |
+| [plan-0.10.0.md](plan-0.10.0.md) | 0.10.0, planned: cache state and the sleep fix, dollars (built, then removed), `/cachebeat <time>` as a keep-alive, resume, the cold guard, the Status and CacheTax pages; what the API says for certain, the live checks still owed, and the steps in order |
 
 Add to them whenever something takes a while to work out.
