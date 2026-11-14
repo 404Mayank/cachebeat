@@ -1,6 +1,6 @@
 # 0.10.0: cache state, keep-alive time, resume, cold guard, dollars, CacheTax
 
-Status (2026-11-14): steps 0, 1, 2, 2b, 3 and 3b are built, reviewed and merged into `dev`; step 3c (item 10) is designed and waits on the user's answers, and step 4 is the next to build. The plan was brought in line with the decisions of 2026-11-14 that day: items 2, 4 and 5 changed, and every place the open dollar question touches carries the mark **[$?]** ("Still open"). Step 1 ships alone as **0.9.3** ([PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green, waiting on the live sleep check alone: the plugin directory is dropped, so nothing waits on its portal). It was planned as 0.9.2, but a cloud session had already released 0.9.2 on 2026-10-13 (the `h` rename), so read "0.9.2" below as 0.9.3. Where to start: notes/handoff.md. The user answered the plan's questions the same day ("Decisions" at the end). Items 5 and 7 (the Status and CacheTax pages) are still **provisional**, but no longer for the screenshots, which arrived ("Decided from it"): they wait on the dollar answer and on a look pass against the screenshots (item 5, "What steps 6 and 7 wait on").
+Status (2026-11-14): steps 0, 1, 2, 2b, 3 and 3b are built, reviewed and merged into `dev`; step 3c (item 10) is designed and waits on the user's answers, and step 4 is the next to build. The plan was brought in line with the decisions of 2026-11-14 that day: items 2, 4 and 5 changed, and the open dollar question was settled the same day: dollars left everything users and Claude see (the tokens-only step, built on `step-tokens`). The mark **[$?]** stays only in items 5 and 7, for steps 6 and 7 to redo their mock-ups. Step 1 ships alone as **0.9.3** ([PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green, waiting on the live sleep check alone: the plugin directory is dropped, so nothing waits on its portal). It was planned as 0.9.2, but a cloud session had already released 0.9.2 on 2026-10-13 (the `h` rename), so read "0.9.2" below as 0.9.3. Where to start: notes/handoff.md. The user answered the plan's questions the same day ("Decisions" at the end). Items 5 and 7 (the Status and CacheTax pages) are still **provisional**, but no longer for the screenshots, which arrived ("Decided from it"): they wait on a look pass against the screenshots (item 5, "What steps 6 and 7 wait on").
 
 **Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 and P8 are still pending.
 
@@ -80,9 +80,9 @@ This section is the whole brief for step 1. Read it with "What's definitive and 
 
 #### 1a. The shared cache state
 
-**[$?]** `writeUsdPerToken` and `recacheUsd` below are built; they change with the dollar answer.
+Built without dollars. Step 2 added `writeUsdPerToken` and `recacheUsd` to the contract below, and the tokens-only step (2026-11-14) took them out again: `contextTokens` is the re-cache figure.
 
-One pure module, `hooks/cache.ts`, plus one reader in `register.tsx`. Everything that says "warm", "cold", "cold for 2h" or "$ to re-cache" reads it, in this step and every later one. Nothing else works this out.
+One pure module, `hooks/cache.ts`, plus one reader in `register.tsx`. Everything that says "warm", "cold", "cold for 2h" or "tokens to re-cache" reads it, in this step and every later one. Nothing else works this out.
 
 ```ts
 // hooks/cache.ts: no `$`, no imports but types
@@ -94,7 +94,6 @@ export type CacheFacts = {
   lastWarm: number | null        // wall ms: the main conversation's last request or beat that read or wrote the cache (s.lastWarm)
   ttl: Ttl                       // effective: '5m' when s.isCacheShort, else the ttl cacheTtl() read
   contextTokens: number | null   // what the next request re-sends (chatSize)
-  writeUsdPerToken: number | null // the re-cache rate; null until step 2 adds prices
 }
 export type CacheView = {
   state: 'warm' | 'cold' | 'unknown' // unknown: nothing cached yet in this conversation (lastWarm null)
@@ -103,7 +102,6 @@ export type CacheView = {
   coldFor: number | null         // ms since expiresAt, once now is past it; else null
   ttl: Ttl
   contextTokens: number | null
-  recacheUsd: number | null      // contextTokens × writeUsdPerToken, when both are known
 }
 
 export function viewOf(f: CacheFacts, now: number): CacheView
@@ -113,17 +111,16 @@ export function viewOf(f: CacheFacts, now: number): CacheView
 - **The reader** is `async function cacheNow($: EngineInterface): Promise<CacheView>` in register.tsx. The name must be used nowhere else in the file (2.1.287's loader). It reads:
   - `const now = await $.clock.now()` and `const size = await chatSize($)` (:315), each as a plain statement
   - `s.lastWarm`, and `s.isCacheShort ? '5m' : ttl` for the TTL
-  - `writeUsdPerToken: null` in this step
 - **It works with beating off.** `markWarm` (:575) runs on every turn request and at `turn.complete`, whether beating is on or not. Keep it that way: don't gate `markWarm` on `s.enabled`. The cold guard (step 5) relies on it.
 - **`state` (the tool) gains `cache`,** built in `stateOf` (:658) from `cacheNow($)`:
 
   ```ts
-  cache: { state, ttl, lastReadMinutesAgo, minutesLeft, coldForMinutes, contextTokens, recacheUsd }
+  cache: { state, ttl, lastReadMinutesAgo, minutesLeft, coldForMinutes, contextTokens }
   ```
 
   - Minutes are whole numbers (`Math.floor`).
   - `lastReadMinutesAgo` and `minutesLeft` are null with no `lastWarm`. `minutesLeft` is null once cold, and `coldForMinutes` is null while warm.
-  - Add one sentence to `STATE`'s description (tools.ts:80–90). The text is static, so it lists names, never values: "`cache` is whether this session's prompt cache is likely still warm, judged by the time since it was last read against its lifetime, as Claude Code judges it: `state` (warm, cold, or unknown before anything is cached), minutes since the last read, minutes left or minutes cold, the conversation's size in tokens, and `recacheUsd`, an estimate of what the next message pays to cache it again (null when unknown)."
+  - Add one sentence to `STATE`'s description (tools.ts:80–90). The text is static, so it lists names, never values: "`cache` is whether this session's prompt cache is likely still warm, judged by the time since it was last read against its lifetime, as Claude Code judges it: `state` (warm, cold, or unknown before anything is cached), minutes since the last read, minutes left or minutes cold, and the conversation's size in tokens (what the next message sends, and caches again if the cache has gone cold)."
 
 #### 1b. Waiting by the wall clock
 
@@ -209,7 +206,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
 - **Simulating suspend.** Add `skew` to `World`, with a setter returned from `setup()` (`sleep: (ms) => (skew += ms)`), and a `clock.now` hook that adds it, so wall time jumps and no timer fires:
   - **Check the hook order first.** A hook registered after `mock.clock(on)` may sit above or below it. If the mock answers `clock.now` without calling `next` above the test's hook, register the skew hook before `mock.clock(on)`.
   - **Check the result shape:** whether `next(e)` beneath gives `{ value }` or a bare number. Pass it on in the same shape.
-- **`hooks/cache.ts` directly:** `viewOf` gives `unknown` with no `lastWarm`; `warm` with `expiresAt` 1ms ahead; `cold` with `coldFor` at the boundary; the 5-minute TTL; `recacheUsd` null when either input is null.
+- **`hooks/cache.ts` directly:** `viewOf` gives `unknown` with no `lastWarm`; `warm` with `expiresAt` 1ms ahead; `cold` with `coldFor` at the boundary; the 5-minute TTL.
 - **Sleep, in the engine:**
   - On, 10m after a turn, sleep 2h, `advance(STEP)`. No fork. The line reads `♡ cache went cold · beats start again on your next message`, and the log `beats wait for your next turn: the cache went cold (2h 10m since it was last read)`. `state.session.paused` is `the cache went cold`. `enabled` is still true. `state.cache.state` is `cold`.
   - The same with `settings: { onCold: 'stop' }`: off, with `stopped: the cache went cold (…)`.
@@ -257,44 +254,18 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 **Risk:** a 60s `$.clock.after` is one host dispatch a minute while armed. That's negligible next to the 80ms animation tickers.
 
-### Item 6: dollars (step 2)
+### Item 6: dollars (step 2), taken out again (the tokens-only step)
 
-**[$?]** Built as written here. The whole item changes with the dollar answer: either the `≈$` figures leave everything users and Claude see and `prices.ts` stays for its ratios, or they stay and later steps extend them.
+Built in step 2 (2026-11-09), and removed on 2026-11-14: the user said tokens are cachebeat's currency and that dollars are either everywhere or nowhere, and the orchestrator chose nowhere. What step 2 built, and what the tokens-only step kept and removed:
 
-**What the API offers:** see "Facts". There's no per-request dollar figure. The engine prices a re-cache at a switch or resume, and keeps a session total.
-
-**The design** (P4 held; see mods-gotchas.md "0.10.0 probes").
-
-- **A price table, `hooks/prices.ts` (pure).**
-  - Base input $/MTok and output $/MTok per model family, matched on the model id from `TurnUsage.model` or `$.session.model()`.
-  - Cache writes are 1.25× input for 5 minutes and 2× for an hour. **Reads are not 0.1× everywhere** (0.025× Fable 5.1 and Mythos 5.1, 0.05× Opus 5.5 and Sonnet 5.5), and Haiku 5.5 costs five times as much past a 100K-token prompt. So the table holds each model's five figures.
-  - Fill and check every number from the pricing page (`platform.claude.com/docs/en/about-claude/pricing.md`) at build time, and write the date checked in a comment. The `claude-api` skill's table lacks the cache columns and was wrong on one read rate.
-  - An unknown model gives `null`: everything shows tokens only, never a guessed price.
-  - `export function priceOf(u: ModelUsage, model: string, ttl: Ttl): number | null`, and `export function writeRate(model: string, ttl: Ttl, promptTokens: number, learned?: Learned): number | null` in $/token. (`promptTokens` was added for Haiku 5.5's tier.)
-- **The engine's own figure wins where it knows more than the table** (as built: a managed `modelPricing`, or a model the table lacks; not its list price for a model the table has, and not its guess. See the P4 bullet below for the write-rate difference and the rounding).
-  - When `classic.PostModelSwitch` gives `estimated_cache_write_usd` and `context_tokens` of 20,000 or more, keep `rate = usd / context_tokens` for that model, lifetime and tier in a module variable. (Resume's `classic.SessionStart` has no lifetime field and no `pricing`, so no rate is learned from it: item 2, Seeding.)
-  - It reflects a managed `modelPricing` when one is set (`pricing: 'configured'`), which the table can't know.
-  - Don't persist it: it's cheap to relearn, and a store write per switch isn't worth it.
-- **P4 held: forks enter `cost.usd`,** and the rise was readable straight after the fork's `await` (one Haiku fork: +0.000536535, the fork's exact price). An idle beat's actual cost is the `cost.usd` delta around the fork. Use it for idle beats only: mid-turn, the turn's own requests land in the same delta. Otherwise use `priceOf` on the fork's usage. Either way, `s.lastUsd` is the last beat's cost.
-  - **The two engine figures don't share a write rate.** On Haiku, `cost.usd` priced a write at 1.25× input and the resume estimate at 2×. So a beat's dollars (the `cost.usd` delta) and `recacheUsd` (from the estimate's rate) can differ on the written tokens. Decide in step 2 which `recacheUsd` follows, and say which on the page; cost-delta-only is not a fix, since it can't price a cold send ahead of time.
-  - **`estimated_cache_write_usd` is rounded to 4 decimals,** so `usd / context_tokens` is coarse below ~20k tokens. Learn the rate only from a context of 20k or more, or keep the table's.
-  - Checked on Haiku only, with the cache warm. Check Opus and an expired-cache fork once in step 2.
-- **What gets dollars:**
-  - `CacheView.recacheUsd`: `contextTokens × writeRate`, for the summary, the cold guard and `state`.
-  - The beat log line: `♥ cache renewed (184,212 read, 12 written · ≈$0.02)`.
-  - `state.session.lastBeatUsd`.
-  - The CacheTax totals (step 7).
-  - **Not the turn line:** it's already tight (decided).
-- **Wording:** every figure is `≈$0.69`, and the first use on a page says "at API prices".
-  - **On a subscription** (`rateLimits.length > 0`), the summary and CacheTax add one dim line: "Your plan doesn't bill per token: these are what the same requests cost on the API, to compare." (Decided.)
-
-**Tests:**
-- `priceOf` and `writeRate` for a known model at both TTLs, and `null` for an unknown one.
-- A `PostModelSwitch` with `estimated_cache_write_usd` overrides the table's rate for that model, when its `pricing` is `configured` or the table lacks the model (not `catalog` for a model it has, not `default`, not under 20,000 tokens).
-- The beat log line carries `≈$`.
-- `state.cache.recacheUsd` is null for an unknown model.
-
-**README:** a short paragraph under "What it sends, and what it costs" on how dollar figures are estimated: API list prices, or your organization's configured pricing when Claude Code reports it, and notional on a subscription.
+- **Removed:**
+  - every dollar figure users and Claude read: `≈$` in the beat log, `state.cache.recacheUsd` and `state.session.lastBeatUsd`, the dollar sentences of `STATE`'s description, and the README's dollar bullet
+  - the machinery that only priced things: the session-cost rise around a fork and its bound (`RISE_BOUND`), the rates learned from `classic.PostModelSwitch`'s estimate (`learnRate`, `Learned`), `priceOf`, `writeRate`, `money()`, `CacheFacts.writeUsdPerToken`, `CacheView.recacheUsd` and `Saved.lastUsd`
+  - their tests
+- **Kept: the price table, as ratios.** `hooks/prices.ts` holds the same per-model rows (the pricing page, checked 2026-11-09) and answers `ratiosOf(model)`: a cache read, a five-minute write and a one-hour write against input (`{ read, write5m, write1h, isListed }`). A model the table lacks gets the common ratios (0.1, 1.25, 2) and `isListed: false`, so CacheTax can say its figure uses them. Haiku 5.5's long-prompt tier multiplies every kind, so no ratio depends on the prompt's size. Nothing in the plugin calls `ratiosOf` yet: the CacheTax page (step 7) weights tokens by it, in input-token equivalents.
+- **A saved state from step 2** carries `lastUsd`. `restored()` keeps only the keys `fresh` has, so it loads and loses it; a test pins that.
+- **What replaced a dollar figure:** the token count that stood beside it. `♥ cache renewed (184,212 read, 12 written)`; the `cache` paragraph of `STATE` names the conversation's size in tokens.
+- **Not touched:** `estimated_cache_write_usd` and `pricing` on `classic.PostModelSwitch` are the engine's inputs, and the hook still receives them. `classic.SessionStart`'s resume estimate is still unread (item 2).
 
 ### Item 3: `/cachebeat <time>` keeps the cache warm for that long (step 3)
 
@@ -395,7 +366,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - **`s.lastWarm = now − secondsSince × 1000`.** Take `now` when the hook's event arrived, not when the apply runs, if the two can differ. `seconds_since_last_response` counts from the last main-thread response, not from a fork (P3, inferred from one case), which matches what `lastWarm` should be after a restart. Leave `prompt_cache_likely_expired` to the TTL comparison cachebeat already makes (the `true` case wasn't seen).
   - **The conversation's size, until the first response** (a choice made in the 2026-11-14 pass, not in the first plan): a new `Saved` field (`s.resumeTokens`, from `context_tokens`), which `cacheNow` uses while `chatSize` has no figure, and the first turn clears. Without it the cold guard's size check (item 4) has nothing to compare on a resumed session's first message, the case the guard matters most for. **Check in this step (R1):** whether `$.session.usage().context.tokens` already has a figure after `--resume`, before any response. If it does, the field isn't needed.
   - **There is no `source` on the cache state.** An earlier draft of this line had seeding set `source: 'resume'`; `CacheFacts` and `CacheView` have no such field (item 1a, `hooks/cache.ts`), and nothing reads one. Don't add it.
-  - **No write rate is learned from the resume hint.** An earlier draft took `estimated_cache_write_usd / context_tokens` as the session's rate. `learnRate` can't take it: resume's `classic.SessionStart` has no `pricing` field (so a managed price can't be told from list price) and no lifetime field, in the 2.1.287 and 2.1.319 declarations alike (mods-gotchas.md, "Dollars"). **[$?]** If dollars stay, a probe of what the engine prices there comes first; if they go, the figure is unused.
+  - **No write rate is learned from the resume hint.** An earlier draft took `estimated_cache_write_usd / context_tokens` as the session's rate. `learnRate` can't take it: resume's `classic.SessionStart` has no `pricing` field (so a managed price can't be told from list price) and no lifetime field, in the 2.1.287 and 2.1.319 declarations alike (mods-gotchas.md, "Dollars"). Dollars are gone (2026-11-14), so the figure is unused.
 - **The `RESUMED` constant's comment** (:383) and the README stay true: no beat re-reads the conversation before the user's next message. The uncached hint is untouched.
 
 **Function names** handed `$`, each new in the file: `restoreConversation($, id)`, `seedFromResume($, hint)`.
@@ -540,7 +511,7 @@ An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and cou
 - Bare `/cachebeat` opens it on **Status**, `/cachebeat stats` on **CacheTax**, and `/cachebeat settings` on **Beating**, as today.
 - The command still answers its one line as `text`, so the transcript keeps a record, and Claude sees it in `-p`, where nothing draws.
 
-**Status** draws from `cacheNow($)` and the session. **[$?]** The `≈$` figures on the Size and This session rows change with the dollar answer; the mock-up is left as it was until then.
+**Status** draws from `cacheNow($)` and the session. **[$?]** Tokens only: decided 2026-11-14. The `≈$` figures on the Size and This session rows go; the mock-up below still shows them until step 6 redoes it in tokens.
 
 ```
 Cache        warm · read 12m ago · about 48m left (1-hour cache)          | cold for 2h 14m
@@ -576,7 +547,7 @@ Last message 12m ago
 **README:** the Commands table: `/cachebeat` opens the status page, `/cachebeat stats` opens CacheTax. A short "Status" paragraph under "What you'll see".
 
 **What steps 6 and 7 wait on** (2026-11-14). The screenshots arrived (`/usage` and `/stats`; "Decided from it" says what's in them), so nothing waits on them any more. Both pages are still provisional, for two things:
-- **The dollar answer** ("Still open"). Both mock-ups carry `≈$`.
+- **Tokens only** (decided 2026-11-14, built). Both mock-ups still carry `≈$`: redo them in tokens, and CacheTax's Net in input-token equivalents.
 - **A look pass against the screenshots, for the user to approve,** before either page is built. What it has to settle:
   - Status's Cache row against `/usage`'s own line (`… · warm (1h TTL, last activity 32s ago)`)
   - CacheTax's three columns against `/stats`' range switch (`All time · Last 7 days · Last 30 days`)
@@ -586,7 +557,7 @@ Last message 12m ago
 
 ### Item 7: CacheTax (step 7, provisional)
 
-**[$?]** The `usd`, `keptUsd` and `coldUsd` counters, the page's dollar rows and its Net change with the dollar answer. The user agreed the Net is in input-token equivalents (tokens weighted by each model's read and write price ratios); the record and the mock-up below are left as they were until the answer comes.
+**[$?]** Tokens only: decided 2026-11-14. The `usd`, `keptUsd` and `coldUsd` counters and the page's dollar rows go; the Net is in input-token equivalents (tokens weighted by each model's read and write ratios, from `ratiosOf` in `hooks/prices.ts`). The record and the mock-up below still show dollars until step 7 redoes them.
 
 **What's counted.** These are per session, in the same `session:${id}` record as step 4, so concurrent sessions never collide:
 
@@ -631,7 +602,7 @@ Held by guard      1        4        11
 - A record older than 30 days is pruned, and isn't counted.
 - The page renders with no records (all zeros, no `NaN`).
 
-**README:** **[$?]** the Privacy section gains "and, for each session, counts of beats, tokens, estimated dollars and cold sends by day, kept on your machine for 30 days to show on the CacheTax page. Nothing of it is sent anywhere." A short CacheTax paragraph under "What you'll see".
+**README:** **[$?]** (tokens only: decided 2026-11-14, so no dollar figure in it) the Privacy section gains "and, for each session, counts of beats, tokens and cold sends by day, kept on your machine for 30 days to show on the CacheTax page. Nothing of it is sent anywhere." A short CacheTax paragraph under "What you'll see".
 
 ### Item 8: the demo GIF (step 8)
 
@@ -771,7 +742,7 @@ context: {
 
 - `compactions` and its time are two new fields of `Saved`, set in the `session.compact` hook where `isDone` is true, and cleared by `anotherConversation`.
 - **`session.cacheTtl` goes;** `cache.ttl` is the same value. `ABOUT.interval` says "state's `cache.ttl`" in its place.
-- **Without dollars** `cache.recacheUsd` and `session.lastBeatUsd` go too, and `cache.contextTokens` is the re-cache figure. **If dollars stay,** both fields stay where they are and the `cache` paragraph keeps its dollar sentence; nothing else here changes.
+- **Without dollars** (built in the tokens-only step) `cache.recacheUsd` and `session.lastBeatUsd` are gone, and `cache.contextTokens` is the re-cache figure.
 
 #### The boundaries, enforced by the tools
 
@@ -932,8 +903,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 2: dollars (item 6)
 
-- **[$?]** What it delivered changes with the dollar answer.
-- **Delivers:** `hooks/prices.ts`, the rate override from engine estimates, `recacheUsd`, the `≈$` beat log, `state.session.lastBeatUsd`, and the README cost paragraph.
+- **Delivered, then removed (2026-11-14, the tokens-only step):** `hooks/prices.ts`, the rate override from engine estimates, `recacheUsd`, the `≈$` beat log, `state.session.lastBeatUsd`, and the README cost paragraph. What stays is `ratiosOf` in `hooks/prices.ts` (item 6).
 - **Built 2026-11-09** on `step2-dollars`; what came out differently, and why, is in mods-gotchas.md, "Dollars (built in step 2 of 0.10.0)".
 - **Depends on:** step 1 (`CacheView`). P4 is answered (see item 6).
 - **Bundles:** item 6 alone.
@@ -975,7 +945,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Delivers:** `state`'s `only` and `context`, the first-read rule, `shadowed` in `set`'s answer, `folder`'s schema without the repeated descriptions, compact answers, the rewritten `state` description, tests, the README lines, and claude-tools.md.
 - **Depends on:**
   - step 1 (`cacheNow`), and nothing later
-  - the user's answer on dollars, since the rewritten description either drops the dollar sentences or keeps them
+  - nothing on dollars: the tokens-only step took the dollar sentences out of the description
   - open questions 1 and 2 of item 10
 - **Not on the floor:** every call it makes (`$.session.usage({ breakdown: 'summary' })`, the `session.compact` hook, `e.agentId` on `tool.call`) is already used on 2.1.287, and the fields it reads are in 2.1.287's declarations. No floor move.
 - **Why here and not with Status (step 6):** it needs nothing from steps 4–6. Those steps add their fields to its sections as they go (`session.coldGuard`, the resume seed in `cache`), and step 9's sweep checks them.
@@ -995,12 +965,12 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 6: the Status page (item 5, provisional)
 
 - **Delivers:** the pane's Status tab, and bare `/cachebeat` opening it.
-- **Depends on:** steps 1–5 (everything it shows), the dollar answer, and the look pass (item 5, "What steps 6 and 7 wait on"). The screenshots arrived.
+- **Depends on:** steps 1–5 (everything it shows), and the look pass (item 5, "What steps 6 and 7 wait on"). The screenshots arrived.
 
 ### Step 7: CacheTax (item 7, provisional)
 
 - **Delivers:** the counters in the session record, the CacheTax tab, `/cachebeat stats`, and README and Privacy.
-- **Depends on:** step 2 (the prices, for the ratios at least), step 4 (the record), step 5 (asked and cold sends), step 6 (the tabbed pane), the dollar answer, and the look pass. The screenshots arrived.
+- **Depends on:** step 2 (`ratiosOf`, for the Net), step 4 (the record), step 5 (asked and cold sends), step 6 (the tabbed pane), and the look pass. The screenshots arrived.
 - **Bundles:** collection with display, since neither is testable without the other.
 
 ### Step 8: the demo GIF (item 8)
@@ -1028,7 +998,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Sleep: detect a wake by comparing `performance.now()` (monotonic) with `$.clock.now()`,** and name it ("the computer slept"). It's more precise in wording, but `performance` isn't a `$` call, so the test kit can't fake it. Step timers fix the behavior without knowing why the time jumped.
 - **Sleep: re-check from `refreshLine`.** It runs only while an animation ticks, and calling `schedule()` from it recurses through `refreshLine`.
 - **A moving "cold for 2h 14m" in the turn line.** Nothing redraws the line while beats wait, so it would need a timer of its own for a cosmetic age. Status shows it live instead.
-- **Dollars: `cost.usd` deltas only.** They can't price "re-cache avoided" or a cold send ahead of time, and a mid-turn beat's delta includes the turn. They're kept as the idle-beat source if P4 holds.
+- **Dollars: `cost.usd` deltas only.** They can't price "re-cache avoided" or a cold send ahead of time, and a mid-turn beat's delta includes the turn. They were the idle-beat source in step 2, and went with the dollars (2026-11-14).
 - **Keep-alive counted from the last message** (a per-session Stop after idle) instead of a fixed deadline. "1h 52m left" would reset on every message, and "keep alive for 2h, then go" reads as a deadline. The user chose the deadline.
 - **A cold guard that drops the message and lets a second send through:** at any time until the cache is warm again (the first proposal), then within a window (**send again within**, the design until 2026-11-14). The user chose a question instead: one keypress, no resend, no window setting.
 - **The cold guard's question in our own pane (`$.ui.open`)** instead of the engine's dialog. More to build and to get right on each surface. It's the fallback if G1 finds the engine's dialog can't be closed (item 4).
@@ -1057,9 +1027,9 @@ The user's answers to the questions this plan first asked, 2026-11-09:
   - **If unanswered** (`coldGuardUnanswered`) says what an unanswered question does: don't send, or send after a timeout (the user, 2026-11-14). Its default, what "don't send" does over time, and its range are provisional (item 4).
   - It speaks in tokens, with no dollar floor.
 - **Warm status:** nothing live exists to read. The plan says "likely warm" and shows the time left.
-- **Dollars** (**[$?]**: reopened 2026-11-14, "Still open"):
-  - `≈$` at API prices everywhere, with one dim line on Status and CacheTax on a subscription
-  - none in the turn line
+- **Dollars: none** (the user, 2026-11-14: tokens are the currency, and dollars are everywhere or nowhere; built in the tokens-only step):
+  - no `≈$`, no `usd` field and no dollar wording in anything a user or Claude reads: the beat log, the turn line, the pane, the commands' answers, the tools, the README
+  - the price table stays in `hooks/prices.ts` as `ratiosOf(model)`, for CacheTax's Net in input-token equivalents
 - **CacheTax:** a tab beside Status in the `/cachebeat` page, opened by `/cachebeat stats`, kept 30 days.
 - **Step 1 ships early,** as 0.9.3 (0.9.2 was taken).
 
@@ -1086,7 +1056,7 @@ What cachebeat already has that it lacks: on by default with no arming, settings
 Folded into item 4, and the directory and screenshot lines through the plan, on 2026-11-14.
 
 - **The guard asks** (`Send` / `Don't send`) instead of dropping and waiting for a resend. So the window setting and the drop-then-resend bookkeeping go.
-- **The guard talks in tokens,** not dollars, and so does the rest of 0.10.0: tokens are cachebeat's currency. No dollar floor: `coldGuardTokens` stays the only floor. What happens to step 2's dollars, already built, is open below.
+- **The guard talks in tokens,** not dollars, and so does the rest of 0.10.0: tokens are cachebeat's currency. No dollar floor: `coldGuardTokens` stays the only floor. Step 2's dollars were removed the same day (Decisions).
 - **A new setting says what an unanswered question does:** drop the message, or send it after a timeout. `$.ui.ask` takes no timeout and only "rejects when dismissed, and in a `-p` run". Racing it against `$.clock.after` would send the message, but nothing in the declarations closes the dialog left open. Probe that first; if it can't be closed, the question has to be our own pane (`$.ui.open`), which we can close.
 - **The README carries an Important note** above Features that `/cachebeat <time>` changed in 0.10.0 (added 2026-11-14). Say the same on top of the 0.10.0 release notes. Take the note out a release or two later.
 - **No detection of other cache warmers.** A README line instead: don't run another keep-warm plugin beside cachebeat; two sets of beats and two guards behave unpredictably.
@@ -1097,10 +1067,6 @@ Folded into item 4, and the directory and screenshot lines through the plan, on 
 
 - **The cache's lifetime counts from the start of a request, and cachebeat stamps its end** (found 2026-11-14, not fixed). Anthropic's docs (platform.claude.com/docs/en/build-with-claude/prompt-caching, "How prompt caching works", read 2026-11-14): "The lifetime is measured from the start of the request that writes or reads the cache entry, not from the end of its response. Time spent generating a response counts against the lifetime: if a response takes 4 minutes to stream, a follow-up request that reuses the same cached prefix must start within about 1 minute of that response completing." Claude Code's own page only says "after Claude Code last sent a request in this conversation or Claude last responded". In `hooks/register.tsx`, `s.lastWarm` is set after `yield* next(e)` in `turn.step` (the request's end), again at `turn.complete`, and after a beat's fork returns. So the time left is overstated by the last request's length, and the next beat is that late. The margin is `AUTO`'s gap to the lifetime: a last response streaming longer than it lets the cache lapse before the beat, which then writes the conversation again. On the five-minute cache that gap is about a minute. The fix: take the time before `next(e)` in `turn.step` and before the fork in `beat()`, stamp `lastWarm` with it once the usage shows a read or write, and stop `turn.complete` from moving it later. It touches `cacheNow`, the countdown, the cold rule and the guard, and it's in 0.9.2 and the 0.9.3 branch too.
 
-- **Dollars: remove them, or keep and extend?** Asked of the user on 2026-11-14, not answered. Tokens are cachebeat's currency (the user, the same day), and step 2's dollars are already built.
-  - **Remove** (the orchestrator's recommendation): `≈$` leaves everything users and Claude see: the beat log, `state`'s `recacheUsd` and `lastBeatUsd`, the tool text, the README's cost paragraph, and the Status and CacheTax mock-ups. `hooks/prices.ts` stays for its read and write ratios, which CacheTax's Net needs (input-token equivalents, agreed).
-  - **Keep and extend:** the figures stay, the Status and CacheTax pages draw them as mocked up, and the resume estimate needs its probe (item 2, Seeding).
-  - **Every place that changes with the answer is marked `[$?]`:** `grep -n '\[\$?\]' notes/plan-0.10.0.md`. They are item 1a (the built fields), item 6 (whole), item 2 (the resume estimate), item 5 (the Status mock-up), item 7 (the counters, the page, the Privacy line), step 2, and Decisions. Item 10 already says what it does either way. One pass over those finishes it.
 - **The cold guard's provisional points** (item 4), for the user: the default of **if unanswered** (`drop`); whether `drop` should also close the question after a while; the 1–15 minute range; and `channel`, `slack-ping` and `unclassified` messages passing unasked.
 - **Item 10's six questions** ("Open, for the user" there).
 - **The look pass for Status and CacheTax** against the screenshots (item 5, "What steps 6 and 7 wait on"). The screenshots themselves arrived.

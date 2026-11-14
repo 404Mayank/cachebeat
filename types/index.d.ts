@@ -8,7 +8,6 @@ export type Saved = {
   lastWarm: number | null
   lastRead: number | null // tokens the last beat read from the cache
   lastWrote: number | null // tokens the last beat wrote to the cache: what wasn't cached
-  lastUsd: number | null // what the last beat cost in dollars at API prices; null where it could not be priced
   nextAt: number | null
   beats: number // in this session
   row: string | null // the latest turn's closing row, which carries the status line
