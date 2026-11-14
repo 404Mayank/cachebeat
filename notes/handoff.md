@@ -27,8 +27,8 @@ Where the work stands, and what to do next. The design and every decision are in
    - Suspend for about 10 minutes, then wake.
    - Expected: within about a minute, a beat lands (`×2`) and the line reads `next in 3m`, not a stuck `next in 1m`.
    - Read the timings in `~/.claude/debug/<session>.txt`, and record the result under "0.10.0 probes" (P1) in mods-gotchas.md.
-2. **The portal check, by the user:** validate `404Mayank/cachebeat@v0.9.3` at claude.ai/directory/manage.
-3. **Shipping 0.9.3,** once 1 and 2 pass. Follow notes/README.md, "Releasing, step by step", from step 6:
+2. ~~The portal check.~~ Dropped on 2026-11-14: the directory lists verified organizations only, so cachebeat isn't submitted and no release waits on the portal.
+3. **Shipping 0.9.3,** once 1 passes. Follow notes/README.md, "Releasing, step by step", from step 5:
    - Run `git push origin v0.9.3:main` (a fast-forward). CI then tags and releases.
    - Run `gh release edit v0.9.3` and put this on top: "Changed default: a cache gone cold now waits for your next message instead of switching cachebeat off; set Cache gone cold to stop for the old behavior."
    - Run `git merge main` into `dev`. **This conflicts.** Checked with `git merge-tree`, it conflicts in six files: `plugin.json`, `README.md`, `register.tsx`, `pane.tsx`, `tools.ts` and the tests. The release took its files from step 1 alone, and steps 2 and 3 then rewrote the same lines on `dev`. `dev` already holds everything 0.9.3 has: step 1 plus `origin/main`.
@@ -48,9 +48,12 @@ Where the work stands, and what to do next. The design and every decision are in
 
 ## Open with the user
 
+- **CacheTax is [karanb192/cache-tax](https://github.com/karanb192/cache-tax)** (MIT), another mod that warms the cache and guards cold sends. What's worth borrowing from it is in plan-0.10.0.md, "From cache-tax". Credit it in the README only if what's taken is substantial (the user, 2026-11-14).
+- **The idle cost rise** (+$0.002 with nothing running, step 2's live check) is left alone unless testing shows it again.
 - **The screenshots** the user sent for the Status and CacheTax pages (`/usage`, the TTL / last-active view, `/stats`) have never arrived. Every pasted image so far came through as the same unrelated picture: six files, byte-identical, under the session's `images/` folder. Steps 6 and 7 are provisional until the screenshots arrive. Ask for a file path, or for the screenshot to be copied again.
-- **The cold guard,** two points recommended but not confirmed:
-  - Remote Control messages aren't held.
+- **The cold guard:**
+  - **Remote Control messages are held too** (the user, 2026-11-14), if a live check shows the hold works there. The docs don't say how a dropped prompt shows on a Remote Control client: see plan-0.10.0.md, "Still open". If it doesn't work, the guard skips `bridge` and the README suggests running `/cachebeat` before sending from a remote session.
+  - Still recommended but not confirmed:
   - A custom **send again within** takes 1–15 minutes.
 - **P8,** checking that `prompt.submit`, `$.session.id` and the resume fields exist on 2.1.287. CI already runs the tests on 2.1.287. `dev`'s `ci.yml` adds tsc on that leg, but it hasn't run yet. Once it does, each step's tests answer P8 for whatever that step uses.
 - **The user's default model** is `haiku` in `~/.claude/settings.json`, because their `/model haiku` during the sleep test saves the default. Earlier it was `opus`, and before that a probe set it to `sonnet`. Mention it if it matters. Don't change it.
@@ -85,7 +88,7 @@ The user's preferences are in memory, and repeated here so the next orchestrator
 
 ## Traps from this session
 
-- **Never name anything `h` or `Fragment` in a `.tsx` file.** The directory blocks it. Run `grep -nwE 'h|Fragment' hooks/*.tsx` before a release. (mods-gotchas, "Reviews and validation")
+- **Naming something `h` or `Fragment` in a `.tsx` file** was blocked by the directory. With the directory dropped (2026-11-14) nothing checks it any more, so the grep before a release isn't needed. (mods-gotchas, "Reviews and validation")
 - **Loading the plugin from a folder regenerates its `.claude-plugin/types`** for the engine that loaded it. Newer types once broke tsc (step 2b). Don't run `--plugin-dir` on a step's worktree mid-step.
 - **A live check must not touch user settings.** `/model <name>` saves the default for new sessions. Use `--model` and `--settings` on the command line instead. To keep the installed cachebeat out of a dev session, pass `--settings '{"enabledPlugins":{"cachebeat@cachebeat":false}}'`.
 - **A beat right after a conversation's first turn pauses** ("out of a beat's reach"). Every live test needs two turns before it means anything.

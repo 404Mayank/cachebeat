@@ -1,5 +1,7 @@
 # Submitting to the plugin directory
 
+**Dropped on 2026-11-14.** The directory lists plugins from verified organizations only, not personal ones, so cachebeat isn't submitted and releases no longer wait on the portal. What follows is kept as a record of what its validation flagged. Nothing in it is a release step any more.
+
 The directory is the portal at claude.ai/directory/manage. Its rules are on claude.com: the [pre-submission checklist](https://claude.com/docs/plugins/pre-submission-checklist) and [submit a plugin](https://claude.com/docs/plugins/submit). `claude plugin validate --strict` doesn't run the directory's lints, so a clean local run doesn't mean a clean portal run. The mod-specific lint codes aren't in the public checklist either.
 
 ## Results

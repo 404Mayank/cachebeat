@@ -10,9 +10,9 @@ This is the `dev` branch: `main` plus what the plugin doesn't ship.
 | --- | --- | --- |
 | What it is | The plugin, exactly as users get it | `main` plus the tools and notes behind it |
 | Holds | `.claude-plugin/`, `hooks/`, `types/`, `README.md`, `LICENSE`, CI, and the images the README and manifest show (`assets/demo.gif`, `assets/logo/*.svg`/`.png`) | Everything on `main`, plus `CLAUDE.md`, `notes/`, `assets/demo.py` and `assets/demo.tape` (the demo recording), and `assets/logo/src/` with `assets/logo/README.md` (the logo build) |
-| Who reads it | Users and their agents, the marketplace, the plugin directory | Us |
+| Who reads it | Users and their agents, the marketplace | Us |
 
-The plugin folder is the repo root, so anything on `main` ships to every user and is read by the directory's validation. If a file isn't needed to run, show or describe the plugin, it goes on `dev`. That includes scripts that name images or fonts, which the directory holds for review.
+The plugin folder is the repo root, so anything on `main` ships to every user. If a file isn't needed to run, show or describe the plugin, it goes on `dev`.
 
 Every README on `main` is for users and their agents: what cachebeat does, how to use it, what it sends and costs. Justifications, design notes, contributor workflow, build steps and gotchas go here in `notes/`. So do comments in shipped files that name dev-only files.
 
@@ -34,7 +34,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 - **Bump `version` for every change users should get:**
   - patch (`0.6.1`) for fixes and small changes
   - minor (`0.7.0`) for a new feature
-- **Every push to `main` needs a bump, README-only ones included.** The plugin directory follows `main` and scans each new commit as a version, and its docs say to raise `version` with every one. Push README fixes together with the next release, or bump the patch for them.
+- **Every push to `main` needs a bump, README-only ones included.** Without a new `version`, `claude plugin update` says it's already at the latest version and users keep the old copy. Push README fixes together with the next release, or bump the patch for them.
 - **Push `main` only when the change is ready for users.** With auto-update on, they get it without asking. Push `dev` whenever you like: nothing reads it.
 
 ### Releasing, step by step
@@ -58,10 +58,9 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
    ```
 
 4. Commit with the version first in the message (`cachebeat 0.8.0: …`), push the branch, and open a PR into `main`. CI runs on it, on 2.1.287 and the latest version, without releasing.
-5. Validate the branch in the directory portal (`404Mayank/cachebeat@v<version>` in the Repository field) before it reaches `main`.
-6. Once CI and the portal pass, fast-forward `main` to the branch (`git switch main && git merge --ff-only v<version> && git push origin main`). GitHub marks the PR merged.
-7. CI tags `v<version>` and creates the GitHub release with generated notes. Put a short summary and any changed defaults or removed settings on top with `gh release edit`.
-8. Bring `dev` up to date (`git switch dev && git merge main`), push it, and delete the local release branch.
+5. Once CI passes, fast-forward `main` to the branch (`git switch main && git merge --ff-only v<version> && git push origin main`). GitHub marks the PR merged.
+6. CI tags `v<version>` and creates the GitHub release with generated notes. Put a short summary and any changed defaults or removed settings on top with `gh release edit`.
+7. Bring `dev` up to date (`git switch dev && git merge main`), push it, and delete the local release branch.
 
 ### Changing a default, or a setting's name
 
@@ -95,7 +94,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 - **GitHub:** the `v<version>` tag and release, created by CI.
 - **Our own marketplace** (`claude plugin marketplace add 404Mayank/cachebeat`): users get the new version with `claude plugin update cachebeat@cachebeat`, or by themselves with auto-update on. If `version` didn't change, the update says it's already at the latest version and they keep the old copy.
-- **Anthropic's plugin directory** (claude.ai/directory/manage): once the plugin is listed, the directory scans each new commit on the branch it follows (`main`) and holds a flagged version for a reviewer. Check the plugin's **Versions** tab in the portal after a release. Before it's listed, re-validate in the submission form after pushing. See [directory.md](directory.md).
+- **Not Anthropic's plugin directory.** It lists verified organizations only, so cachebeat isn't submitted (decided 2026-11-14). The portal checks in the release history above are from before that. See [directory.md](directory.md).
 - **Claude Code sessions** pick up a new version only after a restart. Tool text in particular stays as first registered until a new session (see [mods-gotchas.md](mods-gotchas.md)).
 
 ## The notes
@@ -105,7 +104,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 | [contributing.md](contributing.md) | Working on cachebeat: loading it, the checks, and where things are |
 | [claude-tools.md](claude-tools.md) | The two tools Claude calls: how they're built, and why each choice was made |
 | [mods-gotchas.md](mods-gotchas.md) | Things about mods, the engine and the test kit that took time to find out |
-| [directory.md](directory.md) | Submitting to Anthropic's plugin directory: what its validation flagged, and what was done |
+| [directory.md](directory.md) | The plugin directory, dropped on 2026-11-14 (verified organizations only): what its validation flagged, kept as a record |
 | [directory-report-0.7.0.md](directory-report-0.7.0.md) | The full reading of the directory's 0.7.0 validation: each finding, the lines behind it, and how to fix it |
 | [plan-0.8.0.md](plan-0.8.0.md) | 0.8.0: where settings apply (this session, this folder, all folders), as built, and the design it replaced |
 | [handoff.md](handoff.md) | Where the 0.9.3 release and 0.10.0 work stand, what's waiting, and how the multi-session work was run: start here |
