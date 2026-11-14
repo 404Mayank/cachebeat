@@ -250,7 +250,22 @@ Anthropic's docs say the cache's lifetime "is measured from the start of the req
 - The trial's third request came inside five minutes of the second's end and outside five minutes of its start, and read nothing. The control waited longer after the end and read everything. So the clock runs from the start.
 - Not checked: the one-hour cache (the docs state the rule for both), an interactive session, and where between "sent" and "first byte" the clock starts (the first content frame came about 2.5s after launch in each call).
 - How it was run: `claude -p --model haiku --tools "" --output-format json --settings '{"enabledPlugins":{"cachebeat@cachebeat":false}}'`, the env var on the command line, each later call with `--resume <session_id>`. The output is a JSON array; the `result` entry has `usage` with `cache_read_input_tokens`, `cache_creation_input_tokens` and the 5m/1h split. Pass `< /dev/null`, or `-p` waits 3s for stdin.
-- What it means for cachebeat is in plan-0.10.0.md, "Still open".
+- **What cachebeat does with it (built 2026-11-14, branch `step-request-start`):** `s.lastWarm` is the time the last request that read or wrote the cache was *sent*.
+  - **The writes:**
+    - `turn.step` reads the clock just before `next(e)` and stamps that time once the usage shows the request touched the cache.
+    - A beat reads the clock just before its fork and stamps it in all three answered branches (renewed, the new model warmed, the short cache found).
+    - `turn.complete` no longer stamps a turn whose steps did (`isTurnWarmed`, a module flag, so nothing new is saved and the 0.9.3 port stays small). A turn with usage but no stamped step (cachebeat loaded mid-turn, a hot reload) counts from its start, `now - e.durationMs`: the earliest its last request can have been sent, so the reading is never late.
+    - Every write goes through `warmFrom`, which keeps the later time: a beat can be answered after a turn's request sent later than it.
+  - **Why the flag, and not just the max:** with the max alone, `turn.complete` would still stamp `now - durationMs` over a stepped turn, and the test kit's `turn` fixture said `durationMs: 1`, which drags the stamp to the turn's end and hides the fix in every test with steps. More to the point, `markWarm` at the turn's end also clears `paused`: an answer that outlived the cache, found cold by the beat at the step's end, would read warm again at `turn.complete`, and a second beat would say "went cold" a second time.
+  - **The readers needed no change,** since each already reads `lastWarm` as "when the cache was last read": `viewOf` (state, expiry, time left), `schedule()` and the countdown, the cold rule, `MAX_TTL`, `isCovered`, and `lastReadMinutesAgo`. The out-of-reach check's `since < 5 * MIN` ("the cache can't have lapsed") was wrong before: measured from the end, a long answer made it claim a cache that could have lapsed. Measured from the start it holds.
+  - **`isWarmedSince` (a failed beat, not retried when something warmed the cache meanwhile) still works,** since anything confirmed during the fork was sent after the beat began. One behaviour changed on purpose: a `turn.complete` landing during a failed fork, for a turn whose last request came before the beat, no longer counts as "a request since". That turn sent nothing new, so the beat retries.
+  - **Neighbouring cases** (all tested):
+    - An answer longer than the interval but within the lifetime: the beat is due the moment the request ends, often mid-turn while its tool starts, and lands before the cache lapses.
+    - An answer longer than the lifetime: the cache is already cold when the request ends, and the beat says so once (`the cache went cold (6m since it was last read)`), then waits, or stops under **Cache gone cold** set to stop.
+    - Several requests in a turn: the last one sent counts.
+    - A quiet turn's mid-turn beat comes an interval after its last request was sent.
+  - **The test kit:** `setup()` has `lengths`, how long each `turn.step` request takes. The stub calls `clock.advance` inside the step, which works when the step is raised from the test. A fork can't do that from `during`: it runs inside a timer's callback, and an `advance` there lost the outer advance's later timers and left a `$` call running after the test ended ("no hooks module of that name is loaded"). So a fork's answer takes time through `sleep` (the wall clock jumps, the kit's timers don't), and `forks`, which records the kit's clock, reads a minute short of the wall.
+  - **`turn`'s `durationMs` is 0 now:** a turn with no stamped step counts from its start, and these test turns have no steps.
 
 ## Dollars (built in step 2 of 0.10.0)
 

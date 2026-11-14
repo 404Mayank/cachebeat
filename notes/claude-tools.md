@@ -74,7 +74,7 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
 ## 0.9.0
 
 - **`nextBeat` has more states,** because beats can come mid-turn:
-  - `in 42m`, counted from the end of the turn's last request too
+  - `in 42m`, counted from the turn's last request too (from its end until 0.10.0; from when it was sent since, the cache's lifetime running from a request's start: mods-gotchas.md, "The lifetime counts from a request's start")
   - `50m after the request on its way`, while a request of the turn is answered
   - `after this turn`, while beats wait for the turn's end: a conversation's first turn, or a request that re-sent the conversation
   - `after the next turn` and `null`, as before
@@ -102,3 +102,4 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
 - **The old key gets a pointed refusal, not "session has no intervalMinutes".** Tool text is fixed for the session, so a session started before the update still holds the old schema and will send `intervalMinutes`. The refusal says the interval is `settings.interval` or `folder.interval`, and what `keepAliveMinutes` is.
 - **The scope paragraph no longer routes "beat every 20 minutes" to `session`.** It has no session scope now: `settings.interval`, or `folder.interval` for "in this repo", else ask. "Keep it warm for 2 hours" is the session's example.
 - **Stop after idle, in the tool text:** `ABOUT.stopAfterHours` and the `set` description say a keep-alive time overrides it; a usage limit or an API error still stops it.
+- **`nextBeat`'s `in 42m` counts from when the turn's last request was sent** (the request-start fix), and the description says so. `cache.lastReadMinutesAgo` is from the same stamp, so it's the time since the last request that read the cache was sent: the read happens there, so the field's name fits better than before.
