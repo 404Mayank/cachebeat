@@ -421,10 +421,11 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
     s.small = null
     s.keepUntil = null // a keep-alive time is for a session that beats: off ends it
   }
-  if (!s.enabled || stepping) p = 'hidden' // a request on its way keeps the cache warm; its end counts again
-  else if (resent) p = 'hidden' // a beat would write the conversation again: the turn's next request or its end counts
+  if (!s.enabled) p = 'hidden'
+  else if (stepping) p = 'waiting' // a request on its way keeps the cache warm; its end counts again
+  else if (resent) p = 'waiting' // a beat would write the conversation again: the turn's next request or its end counts
   // a conversation's first turn: its next request may send it anew, and a beat would write what that won't read
-  else if (busy && s.turns === 0) p = 'hidden'
+  else if (busy && s.turns === 0) p = 'waiting'
   else if (await checkSmall($)) p = 'waiting' // nothing to beat for until a turn grows it
   else {
     const now = await $.clock.now()
@@ -455,8 +456,6 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
     }
     if (!timer) armStep($, call, now)
   }
-  // a turn going quiet (a tool running, a permission waiting) counts down as idle time does, its heart unshown
-  if (busy) p = 'hidden'
   setPulse($, p)
   save($)
   await refreshLine($)
@@ -969,6 +968,13 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // typed over a running turn, the command runs at once but its reply is drawn only when the turn ends: the toast says it was taken
+  on('command.run', { command: 'cachebeat' }, async ($, e, next) => {
+    const r = await next(e)
+    if (busy && r.text) $.ui.toast(`cachebeat: ${r.text}`)
+    return r
+  })
+
   on('command.run', { command: 'cachebeat' }, async ($, e) => {
     ttl = await cacheTtl($) // what `auto` comes to, for the answer
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -1172,7 +1178,7 @@ export const register: Register = on => {
   // draws nothing added to the hint row: there the band above the prompt carries it
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     const p = await read($, pulse)
-    if (e.surface === 'desktop' || e.props.isWorking || p === 'hidden') return next(e)
+    if (e.surface === 'desktop' || p === 'hidden') return next(e)
     const c = await read($, settingsAtom)
     if (p === 'armed' && c.heartAnimate) animate($)
     const f = await read($, frameAtom)
@@ -1200,7 +1206,7 @@ export const register: Register = on => {
     const c = await read($, settingsAtom)
     isStatusOnBand = c.statusLine !== 'off'
     const line = await read($, lineAtom)
-    if (!isStatusOnBand || !line || e.props.hasSurvey || e.props.isWorking) return next(e)
+    if (!isStatusOnBand || !line || e.props.hasSurvey) return next(e)
     const p = await read($, pulse)
     if (p === 'armed' && c.lineAnimate) animateLine($)
     const f = c.lineAnimate ? await read($, lineFrameAtom) : 0

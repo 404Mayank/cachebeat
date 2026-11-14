@@ -583,6 +583,48 @@ test('the heart rides the hint row as its dim tail: still while waiting, beating
   expect(BEAT.map(f => `${f} ×0`)).toContain(tails.at(-1))
 })
 
+const WORKING = { ...HINT, props: { ...HINT.props, isWorking: true } } as const
+
+test('the heart shows through a turn: still while a request is on its way or the turn is a conversation\'s first, beating once the turn goes quiet', async ($: Engine, on: On) => {
+  const { clock, tails, reads } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
+  await $.turn.start({ text: 'hi', turnId: 't1' }) // the conversation's first turn: a beat would write what its next request won't read
+  await draw($, WORKING)
+  expect(tails.at(-1)).toBe(`${BEAT[0]} ×0`)
+  reads.push(usage(30_000, 14_000))
+  await step($, 't1', 0)
+  await clock.advance(10 * TICK)
+  await draw($, WORKING)
+  expect(tails.at(-1)).toBe(`${BEAT[0]} ×0`) // its request has landed, and the first turn still waits for its end
+  await $.turn.complete({ ...turn, turnId: 't1' })
+
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  await draw($, WORKING)
+  expect(tails.at(-1)).toBe(`${BEAT[0]} ×0`) // a request on its way
+  reads.push(usage(20_000, 24_000)) // read short of the 44k cached: it sent the conversation anew
+  await step($, 't2', 0)
+  await clock.advance(10 * TICK)
+  await draw($, WORKING)
+  expect(tails.at(-1)).toBe(`${BEAT[0]} ×0`) // beats wait for the turn's next request
+  reads.push(usage(44_000, 300))
+  await step($, 't2', 1) // the tool ended and its request read what the last cached: a quiet stretch with its countdown armed
+  const seen = new Set<string | undefined>()
+  for (let i = 0; i < BEAT.length; i++) {
+    await draw($, WORKING)
+    seen.add(tails.at(-1))
+    await clock.advance(TICK)
+  }
+  expect(seen.size).toBeGreaterThan(1)
+  expect([...seen].every(t => BEAT.map(f => `${f} ×0`).includes(t!))).toBe(true)
+})
+
+test('off, no heart shows through a turn', async ($: Engine, on: On) => {
+  const { tails } = await setup($, on)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await draw($, WORKING)
+  expect(tails.at(-1)).toBeUndefined()
+})
+
 test('a beat plays the blast in place of the heartbeat', async ($: Engine, on: On) => {
   const { clock, tails } = await setup($, on, { settings: { interval: 3 } })
   await cmd($, 'on')
@@ -1029,10 +1071,32 @@ test('after a compaction between turns, beats wait for the next turn', async ($:
   expect(forks.length).toBe(0)
 })
 
-const BAND = (surface: 'terminal' | 'desktop') => ({
+const BAND = (surface: 'terminal' | 'desktop', isWorking = false) => ({
   plugin: 'cachebeat', surface, component: 'AbovePrompt',
-  props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  props: { hasSurvey: false, isWorking, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
 }) as never
+
+test('on the desktop the band keeps its line through a turn', async ($: Engine, on: On) => {
+  await setup($, on, { settings: { heartAnimate: false, lineAnimate: false, showTokens: false } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await step($, 't2', 0) // a request of the turn landed: the countdown is on, the turn running on a tool
+  expect(await draw($, BAND('desktop', true))).toEqual(['engine', '♡ next beat in 50m'])
+})
+
+test('a command typed over a running turn takes effect at once, and a toast gives its reply', async ($: Engine, on: On) => {
+  const { toasts } = await setup($, on)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  const reply = await cmd($, 'on')
+  expect((await stateNow($)).session.enabled).toBe(true)
+  expect(toasts).toEqual([`cachebeat: ${reply}`])
+  await cmd($, '')
+  expect(toasts.length).toBe(2) // every command of cachebeat's, not only the one that turns it on
+  await $.turn.complete(turn)
+  await cmd($, 'off')
+  expect(toasts.length).toBe(2) // between turns the reply is drawn at once, and no toast repeats it
+})
 
 test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
   const { clock, logs, tails } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false, showTokens: false } })

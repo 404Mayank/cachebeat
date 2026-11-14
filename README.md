@@ -135,7 +135,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 ## What you'll see
 
-**The prompt heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next message.
+**The prompt heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next message or while a request of your turn is on its way. It shows during a turn too.
 
 **The turn line** sits under your latest turn. Before the first beat it reads `♡ next beat in 50m`, and after that `♥ cache kept warm ×3 · 184k cached · next in 42m`, with the time left (`· 1h 52m left`) while a keep-alive time is set. Its heart beats too, with an animation of its own under **Turn line**. When beats wait for your next message (see [Good to know](#good-to-know)), it says so; a cache that went cold reads `♡ cache went cold · beats start again on your next message`. When you send a new message, the line moves to that turn once it ends. Until then, in the terminal, a beat during the turn shows as a line in the log. In the desktop app the line stays above the prompt instead.
 
