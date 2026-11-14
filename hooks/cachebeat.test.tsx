@@ -22,8 +22,9 @@ const usage = (read: number, wrote: number) => ({
 const OPUS = 'claude-opus-5-5'
 const HOME = '/home/me/code/api' // the session's folder
 const OTHER = '/home/me/code/web'
-// a turn that sent its requests on Opus; one without usage sent none
-const turn = { answer: 'ok', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', usage: { ...usage(90_000, 0), model: OPUS } } as const
+// a turn that sent its requests on Opus; one without usage sent none. A turn none of whose requests were seen counts
+// from its start, durationMs before its end: these take no time
+const turn = { answer: 'ok', durationMs: 0, isAborted: false, turnId: 't', reason: 'answer', usage: { ...usage(90_000, 0), model: OPUS } } as const
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
 type World = {
@@ -63,7 +64,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   // one request of a turn: it read the cache (as `reads` says, else all 90k), then called a tool
   const reads: ReturnType<typeof usage>[] = []
+  const lengths: number[] = [] // how long each request takes to answer, timers firing meanwhile; none, at once
   on('turn.step', async function* (_$, e) {
+    const ms = lengths.shift()
+    if (ms) await clock.advance(ms)
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'tool_use', usage: { ...(reads.shift() ?? usage(90_000, 0)), model: OPUS } } as never
   })
   on('ui.log', (_$, e) => (logs.push(e.text), { value: undefined }) as never)
@@ -117,7 +121,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.compact', () => ({ messages: [said('user', 'summary')] }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   return {
-    clock, forks, prompts, logs, toasts, tails, store, specs, reads, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    clock, forks, prompts, logs, toasts, tails, store, specs, reads, lengths, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
     add: (role: 'user' | 'assistant', text: string) => (chat = [...chat, said(role, text)]),
   }
@@ -1650,7 +1654,7 @@ test('a conversation\'s first turn gets no mid-turn beat: its next request may c
   expect(forks).toEqual([])
   await $.turn.complete({ ...turn, turnId: 't1' })
   await clock.advance(3 * M)
-  expect(forks).toEqual([12 * M]) // after it, beats as ever
+  expect(forks).toEqual([9 * M, 12 * M]) // after it, beats as ever: at once, its one request sent 9m ago
 })
 
 test('a beat whose fork asked twice shows what the conversation\'s cache holds, not both reads', async ($: Engine, on: On) => {
@@ -2506,4 +2510,123 @@ test('a saved state from before the dollars left loses its last beat\'s cost and
   const now = restored(old)
   expect('lastUsd' in now).toBe(false)
   expect(now).toMatchObject({ enabled: true, lastRead: 47_738, lastWrote: 37, beats: 3 })
+})
+
+// the cache's lifetime runs from a request's start, not the end of its answer (Anthropic's prompt caching docs): a beat
+// counts from when the last request was sent, so a long answer brings it sooner
+
+/** A conversation's second turn starts at 0 (its first ended there), so its beats aren't held as a first turn's. */
+const secondTurn = async ($: Engine) => {
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'write it all out', turnId: 't2' })
+}
+
+test('a beat counts from when the last request was sent, not when its answer ended', async ($: Engine, on: On) => {
+  const { clock, forks, lengths } = await setup($, on, { settings: { interval: 3 } })
+  await secondTurn($)
+  lengths.push(2 * M) // sent at 0, answered at 2m
+  await step($, 't2', 0)
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  expect((await stateNow($)).session.nextBeat).toBe('in 1m')
+  await clock.advance(3 * M)
+  expect(forks).toEqual([3 * M]) // not 5m
+})
+
+test('of several requests in a turn, the last one sent counts', async ($: Engine, on: On) => {
+  const { clock, forks, lengths } = await setup($, on, { settings: { interval: 3 } })
+  await secondTurn($)
+  lengths.push(1 * M, 2 * M)
+  await step($, 't2', 0) // 0 to 1m
+  await clock.advance(30_000) // a tool runs
+  await step($, 't2', 1) // sent at 1m 30s, answered at 3m 30s
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await clock.advance(2 * M)
+  expect(forks).toEqual([4 * M + 30_000]) // not 6m 30s
+})
+
+test('a turn gone quiet beats an interval after its last request was sent', async ($: Engine, on: On) => {
+  const { clock, forks, prompts, lengths } = await setup($, on, { settings: { interval: 3 } })
+  await secondTurn($)
+  lengths.push(2 * M)
+  await step($, 't2', 0) // sent at 0, answered at 2m; then a long tool run
+  await clock.advance(1 * M)
+  expect(forks).toEqual([3 * M]) // not 5m
+  expect(prompts[0]).toStartWith('[cachebeat] Automated prompt cache keep-alive, not a message from the user. The request above')
+})
+
+test('an answer longer than the interval but within the cache\'s lifetime gets its beat at once, in time', async ($: Engine, on: On) => {
+  const { clock, forks, logs, lengths } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' } })
+  await secondTurn($)
+  lengths.push(4.5 * M) // the five-minute cache's 4m interval passes while the answer streams
+  await step($, 't2', 0)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', minutesLeft: 0 }) // 30s left
+  await clock.settle()
+  expect(forks).toEqual([4.5 * M]) // the moment it ends, before the cache lapses at 5m
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await clock.advance(4 * M)
+  expect(forks).toEqual([4.5 * M, 8.5 * M])
+  expect(logs.some(l => l.includes('cold') || l.includes('not served'))).toBe(false)
+})
+
+test('an answer longer than the cache\'s lifetime leaves it cold: said once, and beats wait for the next message', async ($: Engine, on: On) => {
+  const { clock, forks, logs, lengths } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, settings: { statusHeart: 'off', showTokens: false } })
+  await secondTurn($)
+  lengths.push(6 * M) // the cache read at its start lapsed at 5m, while the answer still streamed
+  await step($, 't2', 0)
+  await clock.settle()
+  await $.turn.complete({ ...turn, turnId: 't2' }) // its end doesn't make the cache warm again
+  await clock.advance(20 * M)
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['beats wait for your next turn: the cache went cold (6m since it was last read)'])
+  expect((await stateNow($)).session).toMatchObject({ enabled: true, paused: 'the cache went cold' })
+  expect(await draw($, row('r1'))).toEqual(['engine', '♡ cache went cold · beats start again on your next message'])
+})
+
+test('an answer longer than the cache\'s lifetime, with Cache gone cold set to stop, switches it off', async ($: Engine, on: On) => {
+  const { clock, forks, logs, lengths } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, settings: { onCold: 'stop' } })
+  await secondTurn($)
+  lengths.push(6 * M)
+  await step($, 't2', 0)
+  await clock.settle()
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await clock.advance(20 * M)
+  expect(forks).toEqual([])
+  expect(logs).toEqual(['stopped: the cache went cold (6m since it was last read)'])
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+// a fork's answer taking time: the wall clock jumps (`sleep`), and the kit's timers, which can't be moved from inside
+// a beat's own timer, keep their time, as `forks` records it
+test('a beat counts from when it was sent, however long it takes to answer', async ($: Engine, on: On) => {
+  const t = await setup($, on, { settings: { interval: 3 }, during: async n => { if (n === 1) t.sleep(1 * M) } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await t.clock.advance(5 * M)
+  expect(t.forks).toEqual([3 * M, 5 * M]) // sent at 3m, answered at 4m; the next at 6m on the wall, not 7m
+})
+
+test('a beat answered after a request sent later than it keeps the later one', async ($: Engine, on: On) => {
+  const t = await setup($, on, { settings: { interval: 3 }, during: async n => {
+    if (n !== 1) return
+    await $.turn.start({ text: 'hi', turnId: 't2' })
+    t.sleep(30_000)
+    await step($, 't2', 0) // sent at 3m 30s, while the beat sent at 3m is on its way
+    await $.turn.complete({ ...turn, turnId: 't2' })
+  } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await t.clock.advance(5.5 * M)
+  expect(t.forks).toEqual([3 * M]) // not 6m on the wall: the request at 3m 30s read the cache later
+  await t.clock.advance(30_000)
+  expect(t.forks).toEqual([3 * M, 6 * M]) // 6m 30s on the wall
+})
+
+test('a turn whose requests cachebeat didn\'t see counts from the turn\'s start', async ($: Engine, on: On) => {
+  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
+  await clock.advance(10 * M)
+  await $.turn.complete({ ...turn, durationMs: 2 * M }) // begun at 8m, before cachebeat saw it
+  await clock.advance(3 * M)
+  expect(forks).toEqual([11 * M]) // not 13m
 })

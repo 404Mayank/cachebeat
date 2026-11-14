@@ -274,6 +274,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 
 - A keep-alive time counts from the command, and your messages don't extend it. Beats come only while the cache would otherwise go cold before the time is up, so the last one can come well before the end. A running turn finishes first, then the session turns off. A usage limit or an API error still stops it early.
 - Sending a message restarts the countdown, and so does each request Claude makes during a turn. A turn gets a beat once it has gone quiet for a whole interval, counted from its last request. A conversation's first turn gets none.
+- The countdown runs from when a request was sent, not from when its answer ended, since that's when the cache's lifetime starts. So a long answer brings the next beat sooner, and one that streams for longer than the cache lasts leaves it cold.
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
 - A resumed conversation (`claude --resume`, `--continue`, or `/resume`) waits for your next message too, and says so. Nothing of it is cached in this session yet, so no beat re-reads it before you decide to carry on.
 - After a conversation's first turn, Claude Code can cache the conversation anew where a beat can't reach it. A beat that finds this says so once, and beats wait for your next message rather than paying to write the cache again each time.
