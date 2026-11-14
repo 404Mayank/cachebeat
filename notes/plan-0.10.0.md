@@ -701,6 +701,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 3b: a command typed mid-turn answers at once (item 9)
 
+- **Built 2026-11-14** on `step3b-midturn`. The probe's answers are in mods-gotchas.md, "0.10.0 probes", "A command typed mid-turn": the reply is drawn only when the turn ends, a toast and a `$.ui.log` both draw at once, and the engine does draw `PromptHint` while working. The acknowledgement is a toast of the reply's text, only while a turn runs.
 - **Delivers:** the probe's answers in `notes/mods-gotchas.md`, the heart shown mid-turn whenever cachebeat is on, following the beat state (decided), then the chosen acknowledgement, with tests and the README line.
 - **Also delivers:** the desktop band's line kept through a turn (decided). The terminal turn line is unchanged.
 - **Depends on:** step 3, which settles the command's words.
