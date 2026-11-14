@@ -2,8 +2,6 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
 import type { Alert, BeatSettings, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
 import { TTL_MS, viewOf } from './cache'
-import { learnRate, money, priceOf, writeRate } from './prices'
-import type { Learned } from './prices'
 import type { CacheFacts, CacheView } from './cache'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
@@ -17,7 +15,6 @@ export const IDLE = AUTO['1h'] * MIN // the default silence before a beat on a s
 export const DEADLINE = DEFAULTS.stopAfterHours * 60 * MIN // default stop this long after the last real turn
 export const RETRY = MIN // after a transient API error
 export const STEP = MIN // the longest one timer waits: the deadline is the wall clock's, checked at each step (a sleep costs one)
-export const RISE_BOUND = 2.5 // the most an idle beat's cost may rise past its usage at list: fast mode doubles Opus, regional pricing adds 10%
 export const MAX_TTL = 60 * MIN // past this since the last cache read, the cache is gone whatever the TTL
 
 const pulse = atom({ plugin: 'cachebeat', key: 'pulse' } as const, 'hidden' as Pulse)
@@ -32,7 +29,7 @@ const pageAtom = atom({ plugin: 'cachebeat', key: 'page' } as const, { tab: 'bea
 const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
-  enabled: false, keepUntil: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, lastUsd: null, nextAt: null, beats: 0, row: null, small: null,
+  enabled: false, keepUntil: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, nextAt: null, beats: 0, row: null, small: null,
   isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0,
 }
 let s: Saved = { ...fresh }
@@ -66,7 +63,6 @@ let rowPending = false // the turn just ended: its closing row is the next new o
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
 let paneSurface = 'terminal' // where the settings pane last drew: the terminal's keys are walked here, a desktop's its own
 let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
-const learned: Learned = new Map() // re-cache rates the engine's own estimates gave, which the price table can't know
 let scheduling = 0 // counts schedule() calls: one still awaiting when a newer starts leaves the timer to it
 let isCovered = false // the keep-alive time is set and the cache outlives it, so schedule() armed no beat
 const rowsSeen = new Set<string>()
@@ -343,18 +339,15 @@ async function chatSize($: EngineInterface) {
 }
 
 /** What `viewOf` works the cache out from, as this session has it. */
-const cacheFacts = (contextTokens: number | null, writeUsdPerToken: number | null): CacheFacts => ({
-  lastWarm: s.lastWarm, ttl: s.isCacheShort ? '5m' : ttl, contextTokens, writeUsdPerToken,
+const cacheFacts = (contextTokens: number | null): CacheFacts => ({
+  lastWarm: s.lastWarm, ttl: s.isCacheShort ? '5m' : ttl, contextTokens,
 })
 
 /** Whether the cache is warm, cold or not yet cached, and what re-caching it would send: the one place this is read. */
 async function cacheNow($: EngineInterface): Promise<CacheView> {
   const now = await $.clock.now()
   const size = await chatSize($)
-  const model = await $.session.model()
-  // the next message writes the conversation at the main conversation's lifetime: 1.25× input for 5 minutes, 2× for an hour
-  const lifetime = s.isCacheShort ? '5m' : ttl
-  return viewOf(cacheFacts(size ?? null, size === undefined ? null : writeRate(model, lifetime, size, learned)), now)
+  return viewOf(cacheFacts(size ?? null), now)
 }
 
 /** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
@@ -384,7 +377,7 @@ function armStep($: EngineInterface, call: number, now: number) {
  */
 function endKeep($: EngineInterface, now: number) {
   const until = clockText(s.keepUntil!, now)
-  const lasts = viewOf(cacheFacts(null, null), now).expiresAt
+  const lasts = viewOf(cacheFacts(null), now).expiresAt
   const isKept = !s.paused && lasts !== null && lasts >= s.keepUntil!
   return stop($, isKept ? `kept warm until ${until}, as asked` : `keep-alive time up (${until})`)
 }
@@ -436,7 +429,7 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
       if (cfg.interval === 'auto' || s.keepUntil !== null) ttl = await cacheTtl($)
       if (call !== scheduling) return undefined
       // the cache outlives the keep-alive time without a beat: none is armed, and the time's end is waited for
-      isCovered = s.keepUntil !== null && (viewOf(cacheFacts(null, null), now).expiresAt ?? 0) >= s.keepUntil
+      isCovered = s.keepUntil !== null && (viewOf(cacheFacts(null), now).expiresAt ?? 0) >= s.keepUntil
       if (!isCovered) {
         ms = Math.max(0, idle() - since)
         s.nextAt = now + ms
@@ -564,7 +557,7 @@ async function beat($: EngineInterface): Promise<string> {
   if (cfg.interval !== 'auto') ttl = await cacheTtl($)
   const isLate = since > idle() + 2 * STEP
   const mayBeCold = isLate || idle() < TTL_MS[s.isCacheShort ? '5m' : ttl]
-  if (since >= MAX_TTL || (mayBeCold && viewOf(cacheFacts(null, null), now).state === 'cold')) {
+  if (since >= MAX_TTL || (mayBeCold && viewOf(cacheFacts(null), now).state === 'cold')) {
     const said = `the cache went cold (${fmt(since)} since it was last read)`
     // asked for by hand with beating off (/cachebeat now): nothing to pause or stop
     if (!s.enabled) return `${said}; no beat sent`
@@ -596,8 +589,6 @@ async function beat($: EngineInterface): Promise<string> {
     return `beats wait for your next turn: ${MODEL_CHANGED}`
   }
 
-  // the session's cost as the beat starts: while nothing else is running, what it rises by is the fork's price
-  const costBefore = await $.session.usage()
   // as the beat starts: a turn may end, and its last request cache more, while the beat is on its way
   const wasIdle = !busy
   const wasCached = cached
@@ -626,20 +617,7 @@ async function beat($: EngineInterface): Promise<string> {
     const then = !s.enabled ? 'not retried while off' : isWarmedSince ? 'a request since keeps it warm' : 'retrying in a minute'
     return `${'error' in r ? r.error : r.reason}; ${then}`
   }
-  const costAfter = await $.session.usage() // read at once: the engine has counted the fork by the time it answers
   const { cache_read_input_tokens: got, cache_creation_input_tokens: wrote } = r.usage
-  // Idle, the cost rose by this fork alone and so is its price, whatever the engine charged (a managed price, fast mode).
-  // A turn that began meanwhile, or a request of the main conversation, lands in the same difference: the usage priced at
-  // list then, its writes at the five-minute rate a fork's are billed at. Requests nothing here can see (a background
-  // subagent, a compaction, another mod's fork) land in it too: a rise past what this usage could cost at list, even
-  // fast mode's double, isn't the fork's. A managed price above that bound falls back to list
-  const isAlone = wasIdle && !busy && s.lastWarm === warmedAt
-  const rise = costBefore.cost !== undefined && costAfter.cost !== undefined ? costAfter.cost.usd - costBefore.cost.usd : null
-  const ceiling = priceOf(r.usage, model, '1h')
-  const isPlausible = rise !== null && rise > 0 && (ceiling === null || rise <= RISE_BOUND * ceiling)
-  const usd = isAlone && isPlausible ? rise : priceOf(r.usage, model, '5m')
-  s.lastUsd = usd
-  const price = usd === null ? '' : ` · ${money(usd)}`
   // after a conversation's first turn, a beat reading well short of what that turn cached, and writing the rest:
   // Claude Code sent the conversation anew and cached it where a beat can't reach, so each beat would write it
   // again. Within five minutes of that request the cache can't have lapsed, so even a beat writing more than it
@@ -655,7 +633,7 @@ async function beat($: EngineInterface): Promise<string> {
     // the first beat on a new model writes its cache, as the next turn would have: kept warm from here
     s.warmModel = model
     s.lastWarm = await $.clock.now()
-    const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written${price})`
+    const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written)`
     $.ui.log(warmed)
     await schedule($)
     return warmed
@@ -679,7 +657,7 @@ async function beat($: EngineInterface): Promise<string> {
   s.lastWrote = wrote
   s.beats++
   if (cfg.heartAnimate) blast = 0
-  const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written${price})`
+  const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
   if (logs(cfg.onBeat) || (s.row === null && !isStatusOnBand)) $.ui.log(renewed) // else no line at all says it
   if (toasts(cfg.onBeat)) $.ui.toast(`♥ cache kept warm · ${tokens(s.lastRead)} read`)
   await schedule($)
@@ -794,9 +772,6 @@ async function scoped($: EngineInterface, to: Target, word: string | undefined) 
   return `${where}: ${isMinutes ? `every ${patch.interval}m idle` : `new sessions start ${word}`}${kept} · this session: ${state}`
 }
 
-/** A dollar figure for the tools, without the float's trailing digits. */
-const roundUsd = (usd: number | null) => (usd === null ? null : Math.round(usd * 1e6) / 1e6)
-
 /** What the tools answer: this session's beating, the settings as they apply here, and this folder's own. */
 async function stateOf($: EngineInterface) {
   await syncSettings($)
@@ -814,7 +789,7 @@ async function stateOf($: EngineInterface) {
     state: view.state, ttl: view.ttl,
     lastReadMinutesAgo: whole(view.lastWarm === null ? null : view.at - view.lastWarm),
     minutesLeft: whole(view.state === 'warm' ? view.expiresAt! - view.at : null),
-    coldForMinutes: whole(view.coldFor), contextTokens: view.contextTokens, recacheUsd: roundUsd(view.recacheUsd),
+    coldForMinutes: whole(view.coldFor), contextTokens: view.contextTokens,
   }
   const from = intervalFrom()
   const session = {
@@ -823,7 +798,7 @@ async function stateOf($: EngineInterface) {
     keepAliveUntilLocal: s.keepUntil === null ? null : clockText(s.keepUntil, now),
     keepAliveMinutesLeft: s.keepUntil === null ? null : whole(Math.max(0, s.keepUntil - now)),
     cacheTtl: s.isCacheShort ? '5m' : ttl,
-    beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, lastBeatUsd: roundUsd(s.lastUsd), nextBeat, skipping: s.small, paused: s.paused,
+    beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, nextBeat, skipping: s.small, paused: s.paused,
   }
   const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
   return {
@@ -1061,8 +1036,6 @@ export const register: Register = on => {
   // each model has its own cache, and a beat goes to the current one: after a switch the old cache is
   // out of reach and the new model has none, so beats wait for the next turn, or the next writes it
   on('classic.PostModelSwitch', async ($, e, next) => {
-    // the engine priced a re-cache on the new model: a managed price the table can't know, or a model it lacks
-    learnRate(learned, { model: e.to_model, ttl: e.cache_ttl, tokens: e.context_tokens, usd: e.estimated_cache_write_usd, pricing: e.pricing })
     const r = await next(e)
     if (!busy && s.lastWarm !== null) {
       if (cfg.onModelSwitch === 'wait') {
