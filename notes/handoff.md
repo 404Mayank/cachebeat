@@ -15,6 +15,8 @@ Where the work stands, and what to do next. The design and every decision are in
 
 **What 0.9.3 is:** step 1 of the plan alone. It has the sleep fix (beats timed by the wall clock, checked at least once a minute), the **Cache gone cold** setting (default: wait for the next message), the "due now" wording, and `state.cache`. The plan was to ship it as 0.9.2, but that number was already taken, so step 1's commit messages on `dev` still say "0.9.2" and the plugin files of the release say 0.9.3. Dollars and everything later are 0.10.0, and are only on `dev`.
 
+**In progress since this was written (2026-11-14):** step 3b is being built in the worktree `../cachebeat-step3b` (branch `step3b-midturn`), ahead of the 0.9.3 release, which waits only on the live sleep check. Item 10 (Claude reads the state selectively) is being designed in plan-0.10.0.md. The decisions of 2026-11-14 are in plan-0.10.0.md, "Decided from it".
+
 ## What's waiting, in order
 
 1. **The live sleep check (P1), by the user.** The first try didn't prove anything. The session had a single turn (`hi`), so its first beat found the cache "out of a beat's reach" and beats paused before the sleep. The retest:
@@ -62,13 +64,13 @@ Where the work stands, and what to do next. The design and every decision are in
 
 The user's preferences are in memory, and repeated here so the next orchestrator follows them:
 
-- **Roles:**
-  - The main session orchestrates: it decides what runs, when, and who does it.
-  - An Opus session (`cachebeatopus1`, high effort) writes plans and reviews diffs. It doesn't code or schedule.
-  - Sonnet sessions (`sonnetcache1`, `sonnetcache2`) code.
+- **Roles** (the fleet as of 2026-11-14; the names change, so run ListAgents first):
+  - The main session (`cachebeatOrch`) orchestrates: it decides what runs, when, and who does it, and keeps these notes current as the work goes.
+  - Sessions are named `cachebeat<Model><Effort><NN>`. Fable (`cachebeatFableMedium01`) is for the determining moments: designs, and the review of each step's diff. Opus builds the harder steps and re-reviews fixes. Sonnet builds steps that have a detailed plan. Haiku does mechanical work: sweeps, running checks.
   - The `clear` session reports each session's context fill from its screen, and runs `/clear` on request.
+  - The earlier fleet (`cachebeatopus1`, `sonnetcache1`, `sonnetcache2`) is gone.
 - **One step at a time.** Each step is built, reviewed, fixed, re-reviewed, then merged into `dev` before the next one starts. Two items are bundled only when they're closely related.
-- **Context:** keep each session under about 300k tokens. Before a session starts work that doesn't need its old context, have `clear` clear it, and only while it's idle. So every brief stands alone: where to work, what to read, the user's decisions, what to do and not do, the checks, and what to report.
+- **Context:** about 300k tokens is where to think about clearing a session, not a rule: a warm session that already holds what the next task needs can cost less than a fresh one reading it all again, and the cost differs by model. Before a session starts work that doesn't need its old context, have `clear` clear it, and only while it's idle. So every brief stands alone: where to work, what to read, the user's decisions, what to do and not do, the checks, and what to report.
 - **Each step gets its own worktree:**
   ```sh
   git worktree add ../cachebeat-stepN -b stepN-<name> dev
