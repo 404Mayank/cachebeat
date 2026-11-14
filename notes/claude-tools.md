@@ -75,7 +75,7 @@ Two live sessions loaded the plugin with `--plugin-dir` and drove the tools over
 
 - **`nextBeat` has more states,** because beats can come mid-turn:
   - `in 42m`, counted from the turn's last request too (from its end until 0.10.0; from when it was sent since, the cache's lifetime running from a request's start: mods-gotchas.md, "The lifetime counts from a request's start")
-  - `50m after the request on its way`, while a request of the turn is answered
+  - `50m after the request on its way`, while a request of the turn is answered (since the request-start fix, `50m after the request on its way was sent`: the beat comes that long after the request was sent, not after its answer)
   - `after this turn`, while beats wait for the turn's end: a conversation's first turn, or a request that re-sent the conversation
   - `after the next turn` and `null`, as before
 
