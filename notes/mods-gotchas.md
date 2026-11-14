@@ -240,6 +240,8 @@ Item 9's probe. Claude Code 2.1.322, `--model haiku`, a terminal in tmux, the pl
 
 ## Dollars (built in step 2 of 0.10.0)
 
+**Removed on 2026-11-14 (the tokens-only step):** no dollar figure reaches a user or Claude any more, because the user said tokens are cachebeat's currency and dollars are either everywhere or nowhere. This section stays as the record of how they were worked out. `hooks/prices.ts` keeps the table as `ratiosOf(model)` (read, 5-minute write and 1-hour write against input), for CacheTax's input-token equivalents; the cost-delta around a fork, `RISE_BOUND`, the learned rates, `money()`, `lastUsd`, `recacheUsd` and `lastBeatUsd` are gone.
+
 How `hooks/prices.ts` and the beat's cost came out. "Observed" is a probe's or a test's result; "inferred" is a reading of it.
 
 - **Take prices from the pricing page, not the `claude-api` skill's table.** The page is `https://platform.claude.com/docs/en/about-claude/pricing.md` (checked 2026-11-09; the comment in `prices.ts` says so). The skill's table is cached (2026-10-06) and lists only input and output. Where they differ the page won: the skill says Sonnet 5.5 reads at $0.20, the page says $0.10 (0.05×).
