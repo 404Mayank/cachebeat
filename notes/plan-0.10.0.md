@@ -786,6 +786,24 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 - **CacheTax:** a tab beside Status in the `/cachebeat` page, opened by `/cachebeat stats`, kept 30 days.
 - **Step 1 ships early,** as 0.9.3 (0.9.2 was taken).
 
+## From cache-tax
+
+[karanb192/cache-tax](https://github.com/karanb192/cache-tax) (MIT, 2.4.2, read 2026-11-14) is the mod the CacheTax page is named after. It warms on a window you arm (`/keepwarm 90m`, 50-minute pings) and asks before a cold send. Proposed to the user, none decided yet:
+
+- **Ask, don't drop.** Its guard opens `$.ui.ask` with `Send anyway ($4.01)` and `Don't send`, and falls back to drop-once-then-resend only when the question is dismissed or nobody can answer (`-p`). One keypress instead of a resend, and no window setting. Item 4 kept this as the unused variant because P5 found the dropped text stays in the composer. It may also be the answer for Remote Control, if a remote client can answer an ask.
+- **Who gets guarded.** It holds every origin a person may have sent (`bridge`, `sdk`, `channel`, `slack-ping`, `unclassified`) and lets through, with the price logged, the ones nobody could resend: `task-notification`, `scheduled-trigger`, `peer`, `peer-send-message`, `projects-relay`, `coordinator`, `observer`, `observer-activity`. Item 4 holds `composer` only.
+- **A dollar floor** (`guard refuse 5`): hold only when the re-cache costs $5 or more. Ours is a token floor (`coldGuardTokens`). Dollars track what the user cares about across models, but need a price row.
+- **The message compares:** "re-writes up to 200,502 tokens = $4.01 (a warm turn would have cost $0.05)". "Up to", because after a resume the engine's context figure includes the last response's output.
+- **A resend from a new process goes through:** after a hold it stores the last response's time under the session id, so `claude -p` (one process per turn) isn't held forever.
+- **`guard test`:** asks once on the next prompt as if the cache were cold, so a user can see the guard without waiting an hour.
+- **A break-even figure** on its card: how many pings one re-cache pays for (80 on Fable 5.1). A natural line for our CacheTax page.
+- **Both installed:** it checks `$.command.list` at session start for its hook version and says so once. We should check for `keepwarm`/`cache-tax` the same way: with both mods on, a session gets two sets of beats and two guards.
+- **Team and Enterprise:** a managed plugin seated above a mod swallows the classic events and compaction. It falls back to `session.end` for `/clear` and to a message-count drop for compaction. Worth a check of what cachebeat relies on.
+- **`$.cacheTax.status()`** for other mods' status bands. We could offer `$.cachebeat.state()`.
+- **README sections:** "What it can reach" (the hooks and `$` calls, from the validator's scan) and "Prove it on your own session".
+
+What cachebeat already has that it lacks: on by default with no arming, settings by folder and a pane, the heart, beats during long turns, the 5-minute cache, usage-limit stops, tools for Claude, and (planned) stats that last past the session: its cold-write tally is in memory.
+
 ## Still open
 
 - **The plugin directory is dropped** (2026-11-14: verified organizations only). Every "validate in the portal" and "the directory will flag" line above is void: computed `$.store` keys, the cold guard's README line "for the directory", and step 9's portal check need no validation. Keep the README line about the guard anyway: it tells users what the guard does.
