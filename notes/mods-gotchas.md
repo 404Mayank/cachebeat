@@ -350,6 +350,9 @@ How `/cachebeat 2h` came out, and what differs from the plan. Nothing here was r
 
   Or push and let CI run both legs.
 
+  Without approving the script, the wrapper says "claude native binary not installed", but the binary is already there: run `node_modules/@anthropic-ai/claude-code-linux-x64/claude plugin test <a copy of the repo>` directly (done 2026-11-14).
+- **Two hooks on one event with the same matcher are accepted on 2.1.287.** Step 3b registers `command.run` with `{ command: 'cachebeat' }` twice (the toast wrapper, then the answering hook; first registered is outermost). The suite, its mid-turn toast test included, passes on the 2.1.287 binary's test kit (2026-11-14). The "registered twice" refusal under "The test kit" is about a test's own hooks beside `mock.clock`. A live load on 2.1.287 wasn't tried.
+
 ## Types
 
 - **`tool.call` matchers only take known tool names.** With MCP servers connected, the generated `McpToolInputs` lists only those servers' tools, so `{ tool: 'mcp__cachebeat__set' }` fails `tsc`. Declare the plugin's own tools in `types/index.d.ts` under `interface McpToolInputs`; that also types `e.session` and `e.settings`. Pinboard doesn't, and probably fails `tsc` once an MCP server is connected (a guess, not checked).
