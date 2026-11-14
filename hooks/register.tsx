@@ -55,6 +55,7 @@ let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let turnId = '' // that turn's id: its end is told from a fork's by it
 let stepping = false // a request of that turn is on its way, which keeps the cache warm itself
+let isTurnWarmed = false // a request of that turn read the cache, and stamped when it was sent
 let cached = 0 // tokens the main conversation's last request read from the cache or wrote to it
 let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
 let beating = false
@@ -415,7 +416,7 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
     s.keepUntil = null // a keep-alive time is for a session that beats: off ends it
   }
   if (!s.enabled) p = 'hidden'
-  else if (stepping) p = 'waiting' // a request on its way keeps the cache warm; its end counts again
+  else if (stepping) p = 'waiting' // a request on its way keeps the cache warm; once answered, the count runs from when it was sent
   else if (resent) p = 'waiting' // a beat would write the conversation again: the turn's next request or its end counts
   // a conversation's first turn: its next request may send it anew, and a beat would write what that won't read
   else if (busy && s.turns === 0) p = 'waiting'
@@ -542,6 +543,8 @@ const ASK_MID_TURN = '[cachebeat] Automated prompt cache keep-alive, not a messa
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
   if (stepping) return 'a request is on its way; the beat waits for it'
+  // one on its way sets the next when it's answered: a turn ending meanwhile, or /cachebeat now, would send a second
+  if (beating) return 'a beat is on its way; the next counts from it'
   const now = await $.clock.now()
   const since = now - (s.lastWarm ?? now)
   const warmedAt = s.lastWarm
@@ -593,6 +596,7 @@ async function beat($: EngineInterface): Promise<string> {
   const wasIdle = !busy
   const wasCached = cached
   const wasFirst = s.turns === 1
+  const sentAt = await $.clock.now() // the cache it reads lives from here, however long the answer takes
   beating = true
   // tagged, so a request log or a proxy tells a beat from the user's own messages, and the model too
   const forking = $.model.fork({ prompt: busy ? ASK_MID_TURN : ASK })
@@ -632,7 +636,7 @@ async function beat($: EngineInterface): Promise<string> {
   if (isNewModel) {
     // the first beat on a new model writes its cache, as the next turn would have: kept warm from here
     s.warmModel = model
-    s.lastWarm = await $.clock.now()
+    warmFrom(sentAt)
     const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written)`
     $.ui.log(warmed)
     await schedule($)
@@ -646,12 +650,12 @@ async function beat($: EngineInterface): Promise<string> {
     // this beat wrote it afresh, so beat at that from here
     if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m') return stop($, why)
     s.isCacheShort = true
-    s.lastWarm = await $.clock.now()
+    warmFrom(sentAt)
     announce($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
     await schedule($)
     return `${why}; beating every ${AUTO['5m']}m`
   }
-  s.lastWarm = await $.clock.now()
+  warmFrom(sentAt)
   // what the conversation's cache holds: a fork that tried a tool asks twice, and its usage counts both reads
   s.lastRead = cached > 0 ? Math.min(got, cached) : got
   s.lastWrote = wrote
@@ -678,7 +682,7 @@ function beatNow($: EngineInterface) {
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
-  : ms === undefined ? (stepping ? 'counts from the end of the request on its way' : busy ? 'starts after this turn' : isCovered ? 'no more beats needed' : 'starts after your next turn')
+  : ms === undefined ? (stepping ? 'counts from when the request on its way was sent' : busy ? 'starts after this turn' : isCovered ? 'no more beats needed' : 'starts after your next turn')
   : `next beat ${untilNext(ms)}`
 
 /** Where the interval comes from: this folder's own, or the settings for all folders. */
@@ -686,9 +690,17 @@ const intervalFrom = () => (own.interval !== undefined ? 'folder' : 'all folders
 
 const isWhole = (word: string) => /^\d+$/.test(word)
 
-/** A request of the main conversation read the cache just now: the count starts again from it. */
-async function markWarm($: EngineInterface) {
-  s.lastWarm = await $.clock.now()
+/**
+ * A request sent at `at` read or wrote the cache. Its lifetime runs from a request's start, not the end of its answer,
+ * so that is the time kept: the latest of them, as a beat can be answered after a request sent later than it.
+ */
+const warmFrom = (at: number) => {
+  s.lastWarm = Math.max(s.lastWarm ?? at, at)
+}
+
+/** A request of the main conversation, sent at `sentAt`, read the cache: the count starts again from it. */
+async function markWarm($: EngineInterface, sentAt: number) {
+  warmFrom(sentAt)
   s.warmModel = await $.session.model()
   s.paused = null
 }
@@ -779,7 +791,7 @@ async function stateOf($: EngineInterface) {
   const now = await $.clock.now()
   const nextBeat = !s.enabled || s.small ? null
     : s.nextAt !== null ? untilNext(s.nextAt - now)
-    : stepping ? `${fmt(idle())} after the request on its way`
+    : stepping ? `${fmt(idle())} after the request on its way was sent`
     : busy ? 'after this turn'
     : isCovered ? 'none needed'
     : 'after the next turn'
@@ -1048,7 +1060,7 @@ export const register: Register = on => {
   })
 
   // a compaction replaces the conversation, so the prefix a beat would warm is gone; the next turn
-  // caches the new one. One within a turn needs nothing: the turn's end starts the count from there
+  // caches the new one. One within a turn needs nothing: the turn's next request starts the count from when it's sent
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
@@ -1064,6 +1076,7 @@ export const register: Register = on => {
       busy = true
       turnId = e.turnId
       stepping = true // its first request goes out next
+      isTurnWarmed = false // a turn.complete skipped (one ending while a beat runs, after a reload) left it set
       s.asked = await $.clock.now()
       s.row = null // the line moves to this turn's row once it ends
       await schedule($)
@@ -1071,13 +1084,16 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // each request of the main conversation's turn reads the cache, so the count starts again when one ends; a turn
-  // that then goes quiet for the whole interval (a long tool run, a permission prompt left waiting) gets a beat
+  // each request of the main conversation's turn reads the cache, so the count starts again from when it was sent,
+  // once its answer shows it read or wrote the cache; a turn that then goes quiet for the whole interval (a long tool
+  // run, a permission prompt left waiting) gets a beat
   on('turn.step', async function* ($, e, next) {
     const isMain = busy && e.agentId === undefined && e.turnId === turnId
+    let sentAt = 0
     if (isMain) {
       stepping = true
       await schedule($)
+      sentAt = await $.clock.now() // the cache's lifetime runs from the request's start, not the end of its answer
     }
     const r = yield* next(e)
     if (isMain) {
@@ -1090,7 +1106,8 @@ export const register: Register = on => {
         // request, or its end
         resent = got + MISSED < cached
         cached = got + wrote
-        await markWarm($)
+        await markWarm($, sentAt)
+        isTurnWarmed = true
       }
       await schedule($)
     }
@@ -1104,13 +1121,17 @@ export const register: Register = on => {
       stepping = false
       resent = false // after the turn, a beat reaches what its last request cached
       rowPending = true
-      s.lastReal = await $.clock.now()
-      // a turn that sent no request (interrupted before one, refused by the API) warmed nothing
+      const now = await $.clock.now()
+      s.lastReal = now
+      // a turn that sent no request (interrupted before one, refused by the API) warmed nothing. Its requests stamped
+      // the cache when each was sent, and its end moves nothing later; one whose requests cachebeat didn't see (begun
+      // before it loaded) counts from the turn's start, the earliest its last request can have been sent
       if (e.usage) {
-        await markWarm($)
+        if (!isTurnWarmed) await markWarm($, now - e.durationMs)
         s.tail = await tailOf($)
         s.turns++
       }
+      isTurnWarmed = false
       await syncSettings($)
       await schedule($)
     }
