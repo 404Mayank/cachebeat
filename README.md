@@ -133,6 +133,8 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 | `/cachebeat local reset` | Drops this folder's own settings: it follows all folders again |
 | `/cachebeat settings` | Opens the settings menu |
 
+A command typed while Claude is working takes effect at once. Claude Code shows the command and its reply in the transcript only when the turn ends, so cachebeat shows the reply in a toast right away.
+
 ## What you'll see
 
 **The prompt heart** sits at the end of the hint line under the prompt, with the beat count beside it. It beats while a beat is scheduled, bursts when one lands, and holds still while it waits for your next message or while a request of your turn is on its way. It shows during a turn too.
