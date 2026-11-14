@@ -1,4 +1,4 @@
-# Handoff: 0.9.3 out for review, 0.10.0 half built (2026-11-09)
+# Handoff: 0.9.3 out for review, 0.10.0 half built (2026-11-09, brought up to date 2026-11-14)
 
 Where the work stands, and what to do next. The design and every decision are in [plan-0.10.0.md](plan-0.10.0.md). This file says where things are, what's waiting, and how the work was run.
 
@@ -8,14 +8,18 @@ Where the work stands, and what to do next. The design and every decision are in
 | --- | --- |
 | `main` / `origin/main` | 0.9.2 (`c84ac68`, released 2026-10-13 from a cloud session: the `h` → `hash` rename in `hashOf`). |
 | `v0.9.3` | The 0.9.3 release branch (`efa2be6`, pushed), [PR #13](https://github.com/404Mayank/cachebeat/pull/13). CI is green on 2.1.287 and latest. It's checked out in the worktree `/home/zyrus/Desktop/Projects/cachebeat-rel`. |
-| `dev` | Steps 0, 1, 2, 2b and 3 of 0.10.0 merged, `main` and `origin/dev` merged in. 212 tests pass, tsc clean. **Not pushed:** 35+ commits ahead of `origin/dev`. Pushing `dev` is harmless (nothing reads it), but ask the user first. |
+| `dev` | Steps 0, 1, 2, 2b, 3 and 3b of 0.10.0 merged, `main` and `origin/dev` merged in. 216 tests pass (run 2026-11-14). The orchestrator pushes `dev` as notes land; check `git status -sb` for what's ahead of `origin/dev`. |
 | CI on `dev` | `ci.yml` now type-checks on both legs. A `floor` job reads the minimum version from the README badge and feeds the matrix through `fromJSON`. **None of it has run on GitHub yet.** PR #13 ran `main`'s old `ci.yml`, so the 0.10.0 release PR is the first run. `main`'s ruleset blocks only force-pushes and deletion and requires no named checks, so renamed jobs can't block a merge. |
 | `tmp-093` | A local scratch branch: step 1 (`f6b5971`) with `origin/main` merged in, which the release branch took its files from. Delete it after 0.9.3 is out. |
 | `long-turn`, `v0.8.2`, `worktree-agent-…` | Older branches, not from this work. Leave them. |
 
 **What 0.9.3 is:** step 1 of the plan alone. It has the sleep fix (beats timed by the wall clock, checked at least once a minute), the **Cache gone cold** setting (default: wait for the next message), the "due now" wording, and `state.cache`. The plan was to ship it as 0.9.2, but that number was already taken, so step 1's commit messages on `dev` still say "0.9.2" and the plugin files of the release say 0.9.3. Dollars and everything later are 0.10.0, and are only on `dev`.
 
-**In progress since this was written (2026-11-14):** step 3b is being built in the worktree `../cachebeat-step3b` (branch `step3b-midturn`), ahead of the 0.9.3 release, which waits only on the live sleep check. Item 10 (Claude reads the state selectively) is being designed in plan-0.10.0.md. The decisions of 2026-11-14 are in plan-0.10.0.md, "Decided from it".
+**Since this was written (2026-11-14):**
+- Step 3b is built and merged (`32ec2f8`): the heart shows through a turn, and a `/cachebeat` command typed mid-turn gets a toast. Its worktree and branch are gone.
+- Item 10 (Claude reads the state by section, and its own context) is designed in plan-0.10.0.md as step 3c, and its six questions are with the user.
+- The decisions of 2026-11-14 are in plan-0.10.0.md, "Decided from it", and the plan was brought in line with them the same day: the cold guard asks, the directory's checks are gone, the screenshots arrived.
+- The 0.9.3 release still waits only on the live sleep check.
 
 ## What's waiting, in order
 
@@ -39,12 +43,12 @@ Where the work stands, and what to do next. The design and every decision are in
      - Run the checks again before you commit the merge.
    - Remove the `cachebeat-rel` worktree and the `tmp-093` and `v0.9.3` local branches.
    - Add a line to notes/README.md, "How 0.7.0 went out, as a pattern": 0.9.3 was step 1 cut from its own merge commit, because `dev` already held later work.
-4. **Then 0.10.0, step 3b onwards,** one step at a time, as plan-0.10.0.md "Steps, in order" sets out:
-   - 3b: a command typed mid-turn answers at once, and the heart shows through a turn
-   - 4: resume
-   - 5: the cold guard
-   - 6: Status
-   - 7: CacheTax
+4. **Then 0.10.0, step 3c onwards,** one step at a time, as plan-0.10.0.md "Steps, in order" sets out. Step 3b is built and merged.
+   - 3c: Claude reads what it needs (item 10; designed, waits on the user's answers)
+   - 4: resume (nothing blocks it)
+   - 5: the cold guard, which now asks `Send` / `Don't send`; its probes G1–G4 come first
+   - 6: Status (waits on the dollar answer and a look pass)
+   - 7: CacheTax (the same)
    - 8: the GIF
    - 9: the sweep and the release
 
@@ -52,11 +56,12 @@ Where the work stands, and what to do next. The design and every decision are in
 
 - **CacheTax is [karanb192/cache-tax](https://github.com/karanb192/cache-tax)** (MIT), another mod that warms the cache and guards cold sends. What's worth borrowing from it is in plan-0.10.0.md, "From cache-tax". Credit it in the README only if what's taken is substantial (the user, 2026-11-14).
 - **The idle cost rise** (+$0.002 with nothing running, step 2's live check) is left alone unless testing shows it again.
-- **The screenshots** the user sent for the Status and CacheTax pages (`/usage`, the TTL / last-active view, `/stats`) have never arrived. Every pasted image so far came through as the same unrelated picture: six files, byte-identical, under the session's `images/` folder. Steps 6 and 7 are provisional until the screenshots arrive. Ask for a file path, or for the screenshot to be copied again.
-- **The cold guard:**
-  - **Remote Control messages are held too** (the user, 2026-11-14), if a live check shows the hold works there. The docs don't say how a dropped prompt shows on a Remote Control client: see plan-0.10.0.md, "Still open". If it doesn't work, the guard skips `bridge` and the README suggests running `/cachebeat` before sending from a remote session.
-  - Still recommended but not confirmed:
-  - A custom **send again within** takes 1–15 minutes.
+- **The screenshots arrived** (`/usage` and `/stats`; plan-0.10.0.md, "Decided from it", says what's in them). Steps 6 and 7 no longer wait on them. They wait on the dollar answer and on a look pass against the screenshots that the user approves (plan-0.10.0.md, item 5, "What steps 6 and 7 wait on").
+- **Dollars:** remove `≈$` from everything users and Claude see, keeping `prices.ts` for the token-equivalent ratios, or keep and extend them? Asked on 2026-11-14, not answered. The plan marks every place it touches with `[$?]` (plan-0.10.0.md, "Still open").
+- **Item 10's six questions** (plan-0.10.0.md, item 10, "Open, for the user").
+- **The cold guard** (plan-0.10.0.md, item 4, rewritten 2026-11-14: it asks `Send` / `Don't send`, and the **send again within** window is gone, so its 1–15 minute range is no longer a question):
+  - **Remote Control messages are held too** (the user, 2026-11-14), if a live check shows the question reaches a Remote Control client and can be answered there (G4). If it can't, the guard skips `bridge` and the README suggests running `/cachebeat` before sending from a remote session.
+  - **Provisional, for the user:** the new **if unanswered** setting's default (`drop`), whether `drop` should also close the question after a while, its 1–15 minute range for the send-after value, and `channel`, `slack-ping` and `unclassified` messages passing unasked.
 - **P8,** checking that `prompt.submit`, `$.session.id` and the resume fields exist on 2.1.287. CI already runs the tests on 2.1.287. `dev`'s `ci.yml` adds tsc on that leg, but it hasn't run yet. Once it does, each step's tests answer P8 for whatever that step uses.
 - **The user's default model** is `haiku` in `~/.claude/settings.json`, because their `/model haiku` during the sleep test saves the default. Earlier it was `opus`, and before that a probe set it to `sonnet`. Mention it if it matters. Don't change it.
 
@@ -69,6 +74,7 @@ The user's preferences are in memory, and repeated here so the next orchestrator
   - Sessions are named `cachebeat<Model><Effort><NN>`. Fable (`cachebeatFableMedium01`) is for the determining moments: designs, and the review of each step's diff. Opus builds the harder steps and re-reviews fixes. Sonnet builds steps that have a detailed plan. Haiku does mechanical work: sweeps, running checks.
   - The `clear` session reports each session's context fill from its screen, and runs `/clear` on request.
   - The earlier fleet (`cachebeatopus1`, `sonnetcache1`, `sonnetcache2`) is gone.
+- **Base sessions and forks** (since 2026-11-14). `cachebeatOpusHigh01` and `cachebeatSonnetHigh02` are base sessions: read-only, holding the notes and the source. Each build step runs in a fork of one of them, so the builder starts with that context already read instead of reading it again. The `clear` session makes the fork when asked, and closes it once its step is merged. The bases themselves don't build.
 - **One step at a time.** Each step is built, reviewed, fixed, re-reviewed, then merged into `dev` before the next one starts. Two items are bundled only when they're closely related.
 - **Context:** about 300k tokens is where to think about clearing a session, not a rule: a warm session that already holds what the next task needs can cost less than a fresh one reading it all again, and the cost differs by model. Before a session starts work that doesn't need its old context, have `clear` clear it, and only while it's idle. So every brief stands alone: where to work, what to read, the user's decisions, what to do and not do, the checks, and what to report.
 - **Each step gets its own worktree:**

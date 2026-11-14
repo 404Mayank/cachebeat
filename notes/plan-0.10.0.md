@@ -1,6 +1,6 @@
 # 0.10.0: cache state, keep-alive time, resume, cold guard, dollars, CacheTax
 
-Status (2026-11-09, end of day): steps 0, 1, 2, 2b and 3 are built, reviewed and merged into `dev`; step 3b is next. Step 1 ships alone as **0.9.3** ([PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green, waiting on the portal check and the live sleep check). It was planned as 0.9.2, but a cloud session had already released 0.9.2 on 2026-10-13 (the `h` rename), so read "0.9.2" below as 0.9.3. Where to start: notes/handoff.md. The user answered the plan's questions the same day ("Decisions" at the end). Items 5 and 7 (the summary and CacheTax pages) are **provisional** until the user re-sends the reference screenshots: their content is settled here, their look isn't.
+Status (2026-11-14): steps 0, 1, 2, 2b, 3 and 3b are built, reviewed and merged into `dev`; step 3c (item 10) is designed and waits on the user's answers, and step 4 is the next to build. The plan was brought in line with the decisions of 2026-11-14 that day: items 2, 4 and 5 changed, and every place the open dollar question touches carries the mark **[$?]** ("Still open"). Step 1 ships alone as **0.9.3** ([PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green, waiting on the live sleep check alone: the plugin directory is dropped, so nothing waits on its portal). It was planned as 0.9.2, but a cloud session had already released 0.9.2 on 2026-10-13 (the `h` rename), so read "0.9.2" below as 0.9.3. Where to start: notes/handoff.md. The user answered the plan's questions the same day ("Decisions" at the end). Items 5 and 7 (the Status and CacheTax pages) are still **provisional**, but no longer for the screenshots, which arrived ("Decided from it"): they wait on the dollar answer and on a look pass against the screenshots (item 5, "What steps 6 and 7 wait on").
 
 **Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 and P8 are still pending.
 
@@ -13,7 +13,7 @@ The user asked for eight things:
 1. **Bug:** after the machine wakes from sleep, the turn line stays on "next in 1m".
 2. **Resume:** after `--resume`, `--continue` or `/resume`, cachebeat either waits for the next turn or doesn't start at all.
 3. **`/cachebeat <time>`** should stop setting the interval, which belongs in settings. It should set how long cachebeat keeps the cache warm, then stop. **Stop after idle**'s text must say how the two interact.
-4. **Cold guard:** a message sent to a session whose cache has gone cold is held once. A second send goes through, with a warning saying how long the cache has been cold. There's a setting for this session and one for all sessions.
+4. **Cold guard:** a message sent to a session whose cache has gone cold is held once. A second send goes through, with a warning saying how long the cache has been cold. There's a setting for this session and one for all sessions. (As first asked. Since 2026-11-14 the guard asks `Send` / `Don't send` instead: item 4.)
 5. **Bare `/cachebeat`** shows a summary, like `/usage`: warm or cold, TTL, last active, and so on.
 6. **Dollar figures** in cachebeat.
 7. **A CacheTax page,** like `/stats`: what beats cost, what they saved, cold sends.
@@ -39,8 +39,8 @@ Read this before any step. An implementer must not treat an inferred point as fa
 - **`prompt.submit` can refuse a prompt.** A hook answers `{ drop: reason }` without calling `next` (`:9104`). "The text is shown to the user as the reason."
   - `origin` is **always present** on the input (`:9095`): `composer` is the user's Enter at the terminal, `bridge` is Remote Control, and `plugin` is a plugin's `$.prompt.submit` (`:8865–8985`). It's absent only on the *result*, where absent means "the user's own".
   - `turnId` is set when the prompt was typed over a running turn (`:9072`).
-  - A hook that fails lets the prompt through (`:4093`). The guard fails open by default; keep it that way: no `.catch` that drops.
-- **The `$` time a hook spends doesn't count against its 10s budget** (`:5099`). So a `prompt.submit` hook may await `$.ui.ask` (`:2420`), the engine's own question dialog. That's an alternative to drop-and-resend; see the cold guard's alternatives.
+  - A hook that fails lets the prompt through (`:4093`). The guard fails open by default; keep it that way: no `.catch` on the hook. (The one `try` is around its question, where a rejection is the user dismissing it: item 4.)
+- **The `$` time a hook spends doesn't count against its 10s budget** (`:5099`). So a `prompt.submit` hook may await `$.ui.ask` (`:2420`), the engine's own question dialog. That's how the cold guard asks (item 4, since 2026-11-14).
 - **`session.end` has `resume.id`,** "what `claude --resume <id>` takes, the ending session's own" (`:11495`). `$.session.id()` is "the transcript file's name" (`:2796`). The classic hook input carries `session_id` (`:827`).
 - **`$.state` is host memory.** That's why `read($, saved)` is null after `--resume` (mods-gotchas.md, "Resuming a conversation"). Only `$.store` persists.
 
@@ -79,6 +79,8 @@ This section is the whole brief for step 1. Read it with "What's definitive and 
 - A real repeating "next in 1m" also comes from the RETRY loop (:497–500) while the network is still down after waking. That one is truthful and stays.
 
 #### 1a. The shared cache state
+
+**[$?]** `writeUsdPerToken` and `recacheUsd` below are built; they change with the dollar answer.
 
 One pure module, `hooks/cache.ts`, plus one reader in `register.tsx`. Everything that says "warm", "cold", "cold for 2h" or "$ to re-cache" reads it, in this step and every later one. Nothing else works this out.
 
@@ -147,7 +149,9 @@ The user decided this, and asked for a setting to choose.
 
 - **When the cache counts as gone cold,** in `beat()`, just after the `stopAfterHours` check (:457), replacing :458:
   - `since >= MAX_TTL`, as today, or
-  - the beat is late (`since > idle() + 2 * STEP`: a suspended or stalled process, or retries) and `since >= TTL_MS[effective ttl]`. An on-time beat never counts: a custom interval longer than the TTL keeps today's "not served" handling. This catches a 5-minute cache that a 10-minute sleep let lapse. Without it, the beat writes the whole cache again, then stops as "not served".
+  - the cache is past its lifetime (`viewOf(…).state === 'cold'`) and it could have been reached in time: `isLate || idle() < TTL_MS[effective ttl]`, where `isLate` is `since > idle() + 2 * STEP` (a suspended or stalled process, or retries).
+  - **As built, this is wider than first planned.** The plan counted a late beat only. The code also counts an on-time beat whenever the interval is shorter than the lifetime, since such a beat should have arrived before the cache lapsed. Only an on-time beat on an interval as long as the lifetime or longer finds the cache gone by design, and keeps the "not served" handling. It catches a 5-minute cache that a 10-minute sleep let lapse: without it, the beat writes the whole cache again, then stops as "not served".
+  - **`/cachebeat now` with beating off** answers `the cache went cold (…); no beat sent`: there's nothing to pause or stop (as built).
 - **Then, by the new setting `onCold`:**
   - `'wait'` (the default): `await pause($, COLD, said)` with `said` = `` `the cache went cold (${fmt(since)} since it was last read)` ``, and return `` `beats wait for your next turn: ${said}` ``, as the other pauses in `beat()` do (:473). `const COLD = 'the cache went cold'` sits beside `MODEL_CHANGED` (:381). The log, through `pause`: `beats wait for your next turn: the cache went cold (2h 14m since it was last read)`.
   - `'stop'`: return `stop($, …)` with the reason `the cache went cold (2h 14m since it was last read)`. This replaces today's "over an hour since the cache was last read, so it has expired" (the retry test at cachebeat.test.tsx:530–537 asserts it; see Tests).
@@ -245,7 +249,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 #### Releasing 0.9.2
 
-- Bump `version` in `.claude-plugin/plugin.json` to `0.9.2`. Then follow notes/README.md, "Releasing, step by step": branch `v0.9.2` off `main`, take the plugin files from `dev`, run the three checks, PR, validate the branch in the portal, fast-forward.
+- Bump `version` in `.claude-plugin/plugin.json` to `0.9.2`. Then follow notes/README.md, "Releasing, step by step": branch `v0.9.2` off `main`, take the plugin files from `dev`, run the three checks, PR, fast-forward. (The portal validation that stood here went with the directory, 2026-11-14.)
 - **The release notes' summary:**
   - The turn line no longer sticks on "next in 1m" after your computer wakes from sleep. Beats catch up within a minute.
   - **Changed default:** a cache that goes cold before a beat reaches it (after sleep, after retries, or `/cachebeat now` on a cold cache) used to switch cachebeat off. Now beats wait and start again on your next message. Set **Cache gone cold** to stop for the old behavior.
@@ -254,6 +258,8 @@ Every "next" text goes through it, and no caller writes "in" itself:
 **Risk:** a 60s `$.clock.after` is one host dispatch a minute while armed. That's negligible next to the 80ms animation tickers.
 
 ### Item 6: dollars (step 2)
+
+**[$?]** Built as written here. The whole item changes with the dollar answer: either the `≈$` figures leave everything users and Claude see and `prices.ts` stays for its ratios, or they stay and later steps extend them.
 
 **What the API offers:** see "Facts". There's no per-request dollar figure. The engine prices a re-cache at a switch or resume, and keeps a session total.
 
@@ -300,7 +306,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 **The design** (decided with the user; see "Decisions"):
 
-- **`/cachebeat <duration>`:** on for this session, keeping the cache warm until `now + duration`. Then cachebeat turns itself off for the session: "kept warm for 2h, as asked".
+- **`/cachebeat <duration>`:** on for this session, keeping the cache warm until `now + duration`. Then cachebeat turns itself off for the session. **As built,** the message gives the time of day, not the duration: `kept warm until 4:30 PM, as asked` (with the weekday when that isn't today), or `keep-alive time up (4:30 PM)` when the cache didn't last to the time (paused, cold, no turn). Storing the duration would have needed a second saved field (mods-gotchas.md, "Keep-alive time").
   - The time counts from the command, a fixed deadline. Messages in between don't extend it.
   - **Grammar:** `30m`, `2h`, `1h30m`, `1.5h`, `90min`. A unit is required. Add `parseDuration` in `settings.ts` alongside the other readers. It returns minutes in 5–2880 (48h, the same cap as Stop after idle's custom value).
   - **A bare number** (`/cachebeat 30`) changes nothing and answers: `/cachebeat 30m keeps the cache warm for 30 minutes. The beat interval is in /cachebeat settings, or /cachebeat global 30.` Existing users typed it for the old meaning, and a silent new meaning would be wrong for them.
@@ -315,7 +321,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - `turnOn` (:597) loses its interval branch, and the pane loses `sessionMinutes`, `sessionNow` and `dropSession`.
 - **Scheduling, in `schedule()`:**
   - Don't arm a beat that isn't needed. Skip it when `s.keepUntil !== null && s.lastWarm + TTL_MS[ttl] >= s.keepUntil`: the cache outlives the deadline without it.
-  - Arm a step timer to `keepUntil`, and run `stop($, 'kept warm for 2h, as asked')` when it's reached. Write that as a branch of `wallCheck` so there's one timer.
+  - Arm a step timer to `keepUntil`, and stop with the message above when it's reached. Write that as a branch of `wallCheck` so there's one timer. **As built,** `schedule()` also watches the deadline while beats aren't armed (paused, skipping, covered), or it would pass unseen.
   - While a turn runs at the deadline, stop at the turn's end.
 - **Stop after idle** doesn't apply while `keepUntil` is set. The duration is what the user asked for, up to 48h. **Stop at usage** and API errors still stop it.
   - Row help (settings.ts:288) becomes: `Beating stops after this long without a message from you. A session given its own time (/cachebeat 2h) keeps to that instead.`
@@ -327,7 +333,7 @@ Every "next" text goes through it, and no caller writes "in" itself:
   - Answers: `this session: on until 4:30 PM (2h), every 50m idle · next beat in 49m`. Time of day through `toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })`. **Check** that the sandbox has `Intl`; if not, use the relative `2h` alone.
 - **`global` / `local <minutes>`** keep setting **Beat after idle**, unchanged (register.tsx:628–655).
 - **The tool:**
-  - `session.intervalMinutes` becomes `session.keepAliveMinutes` (5–2880, or null to clear). Setting it turns beating on, unless `enabled: false` comes with it.
+  - `session.intervalMinutes` becomes `session.keepAliveMinutes` (5–2880, or null to clear). Setting it turns beating on. **As built,** `enabled: false` with it is refused, naming both fields: `schedule()` clears the time whenever the session is off, so the pair would drop the time at once (claude-tools.md, "0.10.0").
   - `state.session` gains `keepAliveUntil` (ISO string or null) and `keepAliveMinutesLeft`. `intervalFrom` loses `session`.
   - `summary()` (tools.ts:193) says `this session on for 2h`.
   - Update `McpToolInputs` (types/index.d.ts:81).
@@ -344,11 +350,11 @@ Every "next" text goes through it, and no caller writes "in" itself:
 **Tests** (replace the session-interval tests, which `grep -n "cmd(\$, '[0-9]" hooks/cachebeat.test.tsx` finds):
 - `/cachebeat 2h` turns on and says `until`.
 - No beat is armed once `lastWarm + TTL >= keepUntil`.
-- It turns off at the deadline with the message.
+- It turns off at the deadline with the message (`kept warm until …, as asked`, or `keep-alive time up (…)` when the cache didn't last).
 - Stop after idle is ignored while a keep-alive is set, and applies again after `/cachebeat on`.
 - `/cachebeat 30` refuses with the hint, and nothing changes.
 - `/cachebeat 1m` and `/cachebeat 72h` refuse with the range.
-- `set` with `keepAliveMinutes` turns on, and `null` clears it.
+- `set` with `keepAliveMinutes` turns on, `null` clears it, and the pair with `enabled: false` is refused.
 - An old `saved` with `idle` reloads without error, and the interval follows the settings.
 - `global 30` still sets **Beat after idle**.
 
@@ -373,11 +379,11 @@ Every "next" text goes through it, and no caller writes "in" itself:
 - Write it in `save()` only when `enabled`, `keepUntil` or `beats` changed since the last write. Track what was last written in a module variable. Step 5 adds `guard` to what's tracked.
 - **Never write in `session.end`.** Exits run under a 1.5s bound for the whole chain (`index.d.ts:11045`).
 - **Prune** at `session.start`: `$.store.keys()`, drop `session:*` older than 30 days.
-- **Risk:** a computed key in a `$` call's argument hasn't been through the directory scan. A template literal isn't a cast, so it should pass. Validate the step's branch in the portal (`404Mayank/cachebeat@<branch>`) before building on it. If it's flagged, fall back to one `sessions` key read fresh before each write, as `saveOwn` does (register.tsx:139), and accept the rare lost update.
+- **The key is computed** (a template literal in a `$` call's argument). The directory's scan was the worry, and the directory is dropped, so there's no portal check and no fallback to a shared `sessions` key. `claude plugin validate` and `plugin test` are the checks, as for every step.
 
 **The flow:**
 - **`classic.SessionStart`, `source: 'resume'`:**
-  - Stash `{ id: e.session_id, secondsSince, likelyExpired, contextTokens, usd }` in a module variable `resumeHint`.
+  - Stash `{ id: e.session_id, secondsSince, likelyExpired, contextTokens }` in a module variable `resumeHint`. (`estimated_cache_write_usd` isn't kept: see Seeding.)
   - Its fields are optional in the types, and may be absent on 2.1.287 (P8). Absent fields mean the cache state stays `unknown`, and the guard doesn't hold.
 - **`--resume` / `--continue`, at `session.start` with messages present:**
   1. Read `` `session:${await $.session.id()}` ``. If there's a record, `s = { ...fresh, enabled, keepUntil, beats }`. Otherwise keep today's `cfg.defaultOn`.
@@ -385,7 +391,11 @@ Every "next" text goes through it, and no caller writes "in" itself:
   3. Then `pause($, RESUMED, …)` as now.
   - A keep-alive whose deadline has passed comes back off.
 - **`/resume`:** the same, from the `classic.SessionStart` hook, which runs after `anotherConversation`. **Use `e.session_id`:** P2 found that `$.session.id()` inside that hook is still the id of the conversation *left behind* (it is the resumed id by the next prompt). Don't use `$.session.id()` for the record key there.
-- **Seeding:** `s.lastWarm = now − secondsSince × 1000` sets `source: 'resume'`. Take `now` when the hook's event arrived, not when the apply runs, if the two can differ. `seconds_since_last_response` counts from the last main-thread response, not from a fork (P3, inferred from one case), which matches what `lastWarm` should be after a restart. Use `estimated_cache_write_usd / context_tokens` as the session's write rate (step 2's override), mind its 4-decimal rounding, and leave `prompt_cache_likely_expired` to the TTL comparison cachebeat already makes (the `true` case wasn't seen).
+- **Seeding** sets two things, and nothing else:
+  - **`s.lastWarm = now − secondsSince × 1000`.** Take `now` when the hook's event arrived, not when the apply runs, if the two can differ. `seconds_since_last_response` counts from the last main-thread response, not from a fork (P3, inferred from one case), which matches what `lastWarm` should be after a restart. Leave `prompt_cache_likely_expired` to the TTL comparison cachebeat already makes (the `true` case wasn't seen).
+  - **The conversation's size, until the first response:** a new `Saved` field (`s.resumeTokens`, from `context_tokens`), which `cacheNow` uses while `chatSize` has no figure, and the first turn clears. Without it the cold guard's size check (item 4) has nothing to compare on a resumed session's first message, the case the guard matters most for. **Check in this step (R1):** whether `$.session.usage().context.tokens` already has a figure after `--resume`, before any response. If it does, the field isn't needed.
+  - **There is no `source` on the cache state.** An earlier draft of this line had seeding set `source: 'resume'`; `CacheFacts` and `CacheView` have no such field (item 1a, `hooks/cache.ts`), and nothing reads one. Don't add it.
+  - **No write rate is learned from the resume hint.** An earlier draft took `estimated_cache_write_usd / context_tokens` as the session's rate. `learnRate` can't take it: resume's `classic.SessionStart` has no `pricing` field (so a managed price can't be told from list price) and no lifetime field, in the 2.1.287 and 2.1.319 declarations alike (mods-gotchas.md, "Dollars"). **[$?]** If dollars stay, a probe of what the engine prices there comes first; if they go, the figure is unused.
 - **The `RESUMED` constant's comment** (:383) and the README stay true: no beat re-reads the conversation before the user's next message. The uncached hint is untouched.
 
 **Function names** handed `$`, each new in the file: `restoreConversation($, id)`, `seedFromResume($, hint)`.
@@ -410,80 +420,110 @@ Every "next" text goes through it, and no caller writes "in" itself:
 
 ### Item 4: the cold guard (step 5)
 
-**The design** (decided with the user; see "Decisions"):
+Rewritten 2026-11-14 around "Decided from it": the guard **asks** (`Send` / `Don't send`) instead of dropping the message and waiting for a second send. The first design's arm, its **send again within** window and `coldGuardWindow` are gone. The message speaks in tokens. Choices made in this rewrite that the user hasn't confirmed are marked **provisional**.
 
-- **Three new settings** in `BeatSettings` and `DEFAULTS`, on the **Limits** tab after **Cache gone cold**. They work for all folders and this folder through the existing scopes. The tool schema comes from the rows, and `ABOUT` needs an entry for each (`tsc` refuses a missing one).
+**The design:**
+
+- **Three settings** in `BeatSettings` and `DEFAULTS`, on the **Limits** tab after **Cache gone cold**. They work for all folders and this folder through the existing scopes. The tool schema comes from the rows, and `ABOUT` needs an entry for each (`tsc` refuses a missing one).
 
   ```ts
   { key: 'coldGuard', label: 'Cold guard', values: [true, false], fmt: onOff,
-    help: "Holds your first message to a session whose cache has gone cold, says what sending it costs, and lets the next one through if you send again soon." },
-  { key: 'coldGuardWindow', label: '  send again within', values: [2, 3, 5], show: s => s.coldGuard, fmt: v => `${v}m`,
-    help: 'How long after a held message a second send goes through. After that, the next send is held again.',
-    custom: { placeholder: 'e.g. 4m', parse: parseWindow } },
+    help: 'Asks before sending a message to a session whose cache has gone cold, and says how many tokens sending it caches again.' },
   { key: 'coldGuardTokens', label: '  chats from', values: [10_000, 20_000, 50_000, 100_000], show: s => s.coldGuard, fmt: v => `${tokens(Number(v))} tokens`,
-    help: 'The smallest chat the guard holds a message for: a smaller one is cheap to cache again.',
+    help: 'The smallest chat the guard asks about: a smaller one is cheap to cache again.',
     custom: { placeholder: 'e.g. 35k', parse: parseTokens } },
+  { key: 'coldGuardUnanswered', label: '  if unanswered', values: ['drop', 2, 5, 10], show: s => s.coldGuard,
+    fmt: v => (v === 'drop' ? "don't send" : `send after ${v}m`),
+    help: "What happens to a held message when the question isn't answered: it isn't sent, or it's sent after this long.",
+    custom: { placeholder: 'e.g. 3m', parse: parseWait } },
   ```
 
-  - **Defaults:** `coldGuard: true`, `coldGuardWindow: 3`, and `coldGuardTokens: 20_000`, the same as `skipSmallTokens`'s default. Make the shared figure one `const SMALL_CHAT = 20_000` in settings.ts, used by both defaults.
-  - **`parseWindow`** is a new reader beside the others (settings.ts:192–196): `reader('minutes', { '': 1, m: 1, min: 1 }, 1, 15, true)`.
-  - **`normalize()`:** today it checks number settings only by type. Add range checks for the two numbers, through their readers, as `interval` has at :78: a stored `coldGuardWindow` of 90 falls back to 3.
+  - **Defaults:** `coldGuard: true`, and `coldGuardTokens: 20_000`, the same as `skipSmallTokens`'s default. Make the shared figure one `const SMALL_CHAT = 20_000` in settings.ts, used by both defaults.
+  - **`coldGuardUnanswered` is the user's new setting** ("drop the message, or send it after a timeout"). **Provisional,** all three:
+    - **`'drop'` is the default.** A guard that sends by itself after a few minutes guards less.
+    - **What `'drop'` does:** the question stays open until it's answered, and the message is never sent unanswered. No timeout applies to it. Whether `'drop'` should also close the question after a while is the user's to say.
+    - **A number is minutes, 1–15:** the message is sent when the question has gone that long unanswered. `parseWait` is a new reader beside the others in settings.ts: `reader('minutes', { '': 1, m: 1, min: 1 }, 1, 15, true)`.
+  - **Dismissing the question (Esc) never sends,** under either value: the user saw it and declined.
+  - **`normalize()`:** today it checks number settings only by type. Add range checks for `coldGuardTokens` and a numeric `coldGuardUnanswered`, through their readers, as `interval` has: a stored `coldGuardUnanswered` of 90 falls back to `'drop'`.
 - **A session override:** `s.guard: boolean | null` in `Saved` (null follows the setting), from `/cachebeat guard on|off` and the tool's `session.coldGuard` (`true`/`false`/`null`).
   - The pane's **Cold guard** row shows `on · this session` while the session overrides it, and `r` drops the override. That's the marker pattern step 3 removed from the interval, so reuse its shape.
   - `/clear` keeps it, as `anotherConversation` keeps `enabled`. A resume restores it from the session record (step 4 adds `guard` to the record).
-- **The hook:** `on('prompt.submit', async ($, e, next) => …)`, with no `.catch`, so a failure lets the prompt through. It holds the prompt only when **all** of these hold:
+- **The hook:** `on('prompt.submit', async ($, e, next) => …)`. It asks only when **all** of these hold:
   1. The guard applies here: `s.guard ?? cfg.coldGuard`.
-  2. `e.origin.kind === 'composer'`. Not `bridge` (Remote Control: how a held message shows there is unknown), `plugin`, `sdk`, `peer` or a scheduled trigger.
+  2. The origin is one a person can be asked about: see "Who is asked" below.
   3. `e.turnId === undefined` and `!busy`. Mid-turn, the cache is being read anyway.
-  4. **No check on a leading `/` or `!`** (P6): `!` commands and plugin and built-in slash commands (`/cachebeat`, `/clear`, `/resume`, `/help`) never reach `prompt.submit`. A skill or prompt-type command does, with its text as typed (`/simplify`). It sends the conversation, so it is held like plain text.
-  5. `(await cacheNow($)).state === 'cold'`, written as a plain statement first. `unknown` (a new conversation, or a resume without a hint) never holds.
+  4. **No check on a leading `/` or `!`** (P6): `!` commands and plugin and built-in slash commands (`/cachebeat`, `/clear`, `/resume`, `/help`) never reach `prompt.submit`. A skill or prompt-type command does, with its text as typed (`/simplify`). It sends the conversation, so it is asked about like plain text.
+  5. `(await cacheNow($)).state === 'cold'`, read in a statement of its own. `unknown` (a new conversation, or a resume without a hint) never asks.
   6. `contextTokens >= cfg.coldGuardTokens`.
-  7. The guard isn't armed: see below.
-- **The arm** is two module variables: `armedFor` (the `s.lastWarm` it was armed on) and `armedUntil` (wall ms).
-  - **First send:** set `armedFor = s.lastWarm` and `armedUntil = now + cfg.coldGuardWindow × MIN`, then return without `next`:
+- **The question,** in the engine's own dialog:
 
-    ```
-    { drop: 'cachebeat: the cache has been cold for 2h 14m, so this message caches 184k tokens again (≈$0.69 at API prices). Send again within 3m to go ahead.' }
-    ```
+  ```ts
+  $.ui.ask('The cache has been cold for 2h 14m, so this message caches 184k tokens again. Send it?', ['Send', "Don't send"])
+  ```
 
-    Leave the `(≈$…)` out while `recacheUsd` is null.
-  - **A send while armed** (`armedFor === s.lastWarm && now < armedUntil`, any text) calls `next(e)` and warns with `$.ui.log('sent on a cold cache: cold for 2h 14m, 184k tokens cached again')`. **Where a log lands (P5):** a `$.ui.log` before a drop draws as a `● cachebeat: …` row just above the drop row. After `next(e)` on a mid-turn prompt, a log wasn't found on screen, so warn on a send that goes through with a toast (not tried) or try the log first in this step.
-  - **A send after the window** is held again, and re-arms.
-  - **A turn that warms the cache** changes `s.lastWarm`, so `armedFor` no longer matches. No timer is needed.
-- **Counting** for step 7: a held send, and a cold send with its tokens and dollars.
+  - **`Send`** (compared exactly: free text typed under "Other" is not a yes) calls `next(e)`, and logs `sent on a cold cache: cold for 2h 14m, 184k tokens cached again`.
+  - **Anything else, and a dismissal** (the call rejects), returns `{ drop: 'cachebeat: not sent. The cache has been cold for 2h 14m, and sending caches 184k tokens again.' }`. P5: the text stays in the composer, and the reason draws as `Prompt dropped by a hook: <reason>`.
+  - **Where the log lands** (P5): a `$.ui.log` before a drop draws as a `● cachebeat: …` row just above the drop row. After `next(e)` on a mid-turn prompt, a log wasn't found on screen. This one isn't mid-turn; try the log first in this step, and a toast if it doesn't show.
+  - **One question at a time.** A module variable holds the open question's promise. A prompt that arrives while it's open waits on the same answer instead of opening a second dialog.
+- **It fails open, except at the question.** No `.catch` on the hook: a failure anywhere in it lets the prompt through (`index.d.ts:4093`). The `$.ui.ask` call alone sits in a `try`, because its rejection is the user dismissing it.
+- **The timeout** (a numeric `coldGuardUnanswered`): race the ask against a promise that a `$.clock.after` callback resolves. Not `$.clock.sleep`: "the hook's budget runs on through it" (2.1.319 declarations), and the hook has 10s.
+  - When the timer wins, the hook calls `next(e)` and logs `sent on a cold cache after 5m unanswered: 184k tokens cached again`.
+  - **Probe first (G1–G3 below).** `$.ui.ask` takes no timeout, and nothing in the declarations closes its dialog. If the dialog can't be closed once the message has gone, the question becomes our own pane (`$.ui.open` with two buttons, closed with the pane's own close), for both values of the setting.
+- **Counting** for step 7: each question asked, and each cold send with its tokens (an answer of `Send`, a timeout, or an origin that isn't asked).
 - **The guard runs with beating off.** It's about the cache, not about beats, and `markWarm` runs either way.
 
-**P5 found the dropped text stays in the composer** (the reason draws as a transcript row, `Prompt dropped by a hook: <reason>`, and Enter on the same text raises the event again), so drop-and-resend is the build and the variant below is **not needed**. It stays here for the case where the text were lost (decided with the user):
-- Ask `Cache cold for 2h 14m: cache 184k tokens again (≈$0.69)?` with `Send` and `Don't send`.
-- `Send` calls `next(e)`. Anything else, a dismissal included (it rejects: use `.catch` on the ask call, then drop), returns the drop.
-- There's no arm and no window in that variant, and the window setting isn't added. Record which variant was built in the step's notes.
+**Who is asked.** The hook holds an allowlist, so an origin added by a later Claude Code passes until someone decides about it. (The first design held `composer` only. cache-tax holds more, but it drops and waits for a resend, which needs nobody at a dialog.)
+
+| Origin | Asked? | Why |
+| --- | --- | --- |
+| `composer` | Yes | The user's Enter at the prompt. |
+| `bridge` | **If the live check passes** ("Still open") | The user's own message from a phone or the web. The user wants it held. Whether a remote client can answer a `$.ui.ask` isn't in the declarations. If it can't: not asked, and the README suggests `/cachebeat` before sending from a remote session. |
+| `unclassified` | No | The declarations put engine-queued idle notices and delivery receipts under it too, "a non-user source". A question there could wait on nobody. |
+| `sdk` | No | `claude -p` and the Agent SDK: `$.ui.ask` rejects in a `-p` run, "no one to ask". |
+| `channel`, `slack-ping` | No | A person sent it, but from Slack or Telegram, where the dialog doesn't draw. |
+| `task-notification`, `scheduled-trigger`, `peer`, `peer-send-message`, `projects-relay`, `coordinator`, `observer`, `observer-activity`, `auto-continuation`, `plugin` | No | Nobody is at a dialog for these. |
+
+An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and counted as a cold send, so CacheTax still shows what it cost. **Provisional:** `channel`, `slack-ping` and `unclassified` passing. With a numeric **if unanswered** they could be asked safely, since the message goes anyway after the wait; that's a later choice.
+
+**Probes, before the hook is built:**
+
+| # | Question | How |
+| --- | --- | --- |
+| G1 | When a timer wins the race and the hook returns `next(e)`, what happens to the `$.ui.ask` dialog still open? Can anything close it? | A probe mod asks from `prompt.submit` and sends after 20s. Watch the dialog, then answer it late. |
+| G2 | Does a wait on a `$.clock.after` promise count against the hook's 10s while a `$.ui.ask` is in flight? The `$` time a hook spends doesn't count (`index.d.ts:5099`); whether this wait is `$` time is **inferred**. | The same probe, with the wait at 30s. |
+| G3 | Can the test kit answer `ui.ask`, and make it reject? | A test hooks `on('ui.ask', …)` with a value, and with a throw. If it can't, the question goes behind a function the tests can replace. |
+| G4 | `bridge`: does the question reach a Remote Control client, and can it be answered there? | "Still open", the Remote Control check. |
 
 **Risks:**
-- **The directory will likely flag a hook that refuses user prompts** (the policy-hold class of `DENIES_PERMISSION`, notes/directory.md). Put a README line under "What it sends": `With Cold guard on, cachebeat holds back your first message to a session whose cache has gone cold, says what sending it will cost, and lets it through if you send again within a few minutes.` Validate the branch in the portal before merging to `main`.
-- **2.1.287:** P8.
+- **2.1.287:** P8. Its declarations carry `prompt.submit`, `$.ui.ask` and the origin kinds (generated 2026-11-14), but nothing has run there.
 
 **Function names:** `guardColdSend($, e)` for the hook body, if it's pulled out.
 
-**Tests** (the mid-turn case is real: a composer prompt typed over a running turn arrives with `turnId` set. P7: raise it as `await $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false })`. The kit stamps no origin, so **every guard test passes one**: left out, `e.origin` is `undefined`, the hook is skipped, and the prompt goes through. A test that expects a send to pass would then pass for the wrong reason):
-- **Holding:**
-  - Cold and big: the first send is dropped, naming the age, the size and `3m`. A second within 3m goes through with the warning.
-  - A second send after 3m 1s is held again, and a third within the new window goes through.
-  - After a held send, a turn warms the cache, then it goes cold again: the next send holds, since the arm was tied to the old stretch.
-  - Resumed with `seconds_since_last_response` past the TTL (step 4): the first message holds.
-- **Not holding:**
+**Tests** (the mid-turn case is real: a composer prompt typed over a running turn arrives with `turnId` set. P7: raise it as `await $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false })`. The kit stamps no origin, so **every guard test passes one**: left out, `e.origin` is `undefined`, the hook is skipped, and the prompt goes through. A test that expects a send to pass would then pass for the wrong reason. How the question is answered in a test is G3):
+- **Asking:**
+  - Cold and big: the question names the age and the size in tokens, and no dollars. `Send` lets the prompt through with the log; `Don't send` drops it with the reason; a dismissal drops it.
+  - Free text under "Other" drops it.
+  - A second prompt while the question is open gets the same answer, and one dialog is opened.
+  - Resumed with `seconds_since_last_response` past the TTL (step 4): the first message is asked about.
+- **Unanswered:**
+  - `coldGuardUnanswered: 'drop'`: nothing is sent however long the clock advances.
+  - `coldGuardUnanswered: 5`: sent at 5m with the unanswered log, and not before.
+  - An answer before the timeout wins, and the timer does nothing after.
+- **Not asking:**
   - Warm.
   - `unknown`.
   - Under `coldGuardTokens`.
-  - `origin` `plugin`, and `bridge`.
+  - Each origin in the table's "No" rows: sent, logged and counted. `bridge` follows what G4 found.
   - Mid-turn (`turnId` set). (Live, a prompt typed mid-turn arrives with `turnId` set. No test in the kit has set it: pass it in this step's test.)
 - **Scopes:**
-  - Guard off for all folders, on for the session: holds. And the reverse.
-  - The folder's own `coldGuardWindow` applies.
-- **Settings:** `normalize` replaces an out-of-range window or token count.
+  - Guard off for all folders, on for the session: asks. And the reverse.
+  - The folder's own `coldGuardUnanswered` applies.
+- **Settings:** `normalize` replaces an out-of-range token count or wait.
+- **The hook fails open:** with `cacheNow` made to throw, the prompt goes through.
 
 **README:**
-- The Limits table rows: `Cold guard | Holds your first message to a session whose cache has gone cold, and says how long it's been cold and what sending will cost. Send again within the window to go ahead. | on`, then `  send again within | … | 3 minutes`, then `  chats from | … | 20k tokens`.
-- The directory line above.
+- The Limits table rows: `Cold guard | Asks before sending a message to a session whose cache has gone cold, saying how long it's been cold and how many tokens sending it caches again. | on`, then `  chats from | The smallest chat it asks about | 20k tokens`, then `  if unanswered | What happens when the question isn't answered: the message isn't sent, or it's sent after a few minutes | don't send`.
+- Under "What it sends": `With Cold guard on, cachebeat asks before sending your message to a session whose cache has gone cold. Messages nobody can be asked about (scheduled tasks, other sessions, claude -p) are sent as usual.`
 - `/cachebeat guard on|off` in the Commands table.
 
 ### Item 5: bare `/cachebeat` shows a summary (step 6, provisional)
@@ -491,10 +531,11 @@ Every "next" text goes through it, and no caller writes "in" itself:
 **Current behavior:** one line of text (register.tsx:834–843).
 
 **The design:** Claude Code's `/status`, `/config`, `/usage` and `/stats` are tabs of one dialog. Mirror that: the settings pane gains two read-only tabs, **Status** and **CacheTax**, ahead of the five settings tabs.
+- **Their ids are `summary` and `cachetax`** (chosen 2026-11-14). Not `status`: `hooks/settings.ts` already gives that id to the **Turn line** tab, `register.tsx` keys the preview's speed off it, and the pane test asserts `tab:status`. The titles the user sees stay **Status** and **CacheTax**.
 - Bare `/cachebeat` opens it on **Status**, `/cachebeat stats` on **CacheTax**, and `/cachebeat settings` on **Beating**, as today.
 - The command still answers its one line as `text`, so the transcript keeps a record, and Claude sees it in `-p`, where nothing draws.
 
-**Status** draws from `cacheNow($)` and the session:
+**Status** draws from `cacheNow($)` and the session. **[$?]** The `≈$` figures on the Size and This session rows change with the dollar answer; the mock-up is left as it was until then.
 
 ```
 Cache        warm · read 12m ago · about 48m left (1-hour cache)          | cold for 2h 14m
@@ -507,22 +548,40 @@ Last message 12m ago
              Warm or cold is judged by time since the cache was last read, as Claude Code judges it; each beat and turn confirms it.
 ```
 
-- **Pane mechanics** (pane.tsx `settingsPane`, register.tsx :1080–1146): the read-only tabs have no rows, so going into one is a no-op, and the focus ring stays on the tab bar.
-  - The 1–5 hotkeys become 1–7.
-  - `firstOf` (:751) gets a case for tabs with no rows.
-  - `TABS` stays settings-only. Add the two tabs in the pane's own list, so `rowOf`, `accept` and the tool schema never see them.
+- **Pane mechanics** (pane.tsx `settingsPane`, and the pane's hooks in register.tsx):
+  - **`TABS` stays settings-only,** so `rowOf`, `accept` and the tool schema never see the read-only tabs.
+  - **A second list, `PAGES`, is what the pane walks:** `export const PAGES = [{ id: 'summary', title: 'Status' }, { id: 'cachetax', title: 'CacheTax' }, ...TABS]` in settings.ts, beside `TABS`. Everything that moves between tabs reads it in place of `TABS`:
+    - the tab bar's buttons and the hotkey hint in pane.tsx (`TABS.map`, `` `1-${TABS.length}` ``), so the hotkeys become 1–7
+    - the `ui.focus` hook's wrap off either end of the tab bar (`TABS.findIndex`, `TABS[0]`, `TABS.at(-1)`)
+    - the `ui.scroll` hook's step along the tab bar (the modulo over `TABS.length`)
+
+    Left on `TABS`, the arrows would wrap past the two new tabs and only the hotkeys would reach them.
+  - **A read-only tab has no rows:** `settingsPane` draws its page instead of rows (`TABS.find(…) ?? TABS[0]` becomes a lookup in `PAGES`), its ring is empty, and `firstOf` answers `tab:<id>` for it, so Enter on it goes nowhere and the focus stays on the tab bar.
+  - The two places that read `.preview` and `.rows` off a tab (`TABS.find(t => t.id === page.tab)?.preview`, `firstOf`) keep working: a read-only page has neither.
 - **Desktop:** the same pane draws there, as the settings menu does.
 - **Refresh:** the pane's `tickAtom` already redraws on each step timer (step 1). No new clock.
 
 **Tests:**
-- Bare `/cachebeat` opens the pane on Status (assert `ui.open` was called, and `pageAtom.tab === 'status'`) and still answers the line.
+- Bare `/cachebeat` opens the pane on Status (assert `ui.open` was called, and `pageAtom.tab === 'summary'`) and still answers the line.
 - Status shows `cold for` after a skewed sleep.
 - `/cachebeat settings` still opens on Beating.
-- The tab hotkeys reach all seven.
+- The tab hotkeys reach all seven, and the arrows walk all seven and wrap from `tab:alerts` to `tab:summary` and back.
+- **For whoever edits the pane tests next:** the existing test is named "the settings pane: six tabs, …" and asserts five (`tab:beating` … `tab:alerts`). It becomes seven here; fix the name with it.
 
 **README:** the Commands table: `/cachebeat` opens the status page, `/cachebeat stats` opens CacheTax. A short "Status" paragraph under "What you'll see".
 
+**What steps 6 and 7 wait on** (2026-11-14). The screenshots arrived (`/usage` and `/stats`; "Decided from it" says what's in them), so nothing waits on them any more. Both pages are still provisional, for two things:
+- **The dollar answer** ("Still open"). Both mock-ups carry `≈$`.
+- **A look pass against the screenshots, for the user to approve,** before either page is built. What it has to settle:
+  - Status's Cache row against `/usage`'s own line (`… · warm (1h TTL, last activity 32s ago)`)
+  - CacheTax's three columns against `/stats`' range switch (`All time · Last 7 days · Last 30 days`)
+  - whether CacheTax gets `/stats`' heatmap by day
+
+  No API gives either built-in page's figures, so both pages draw from cachebeat's own counts whatever the look.
+
 ### Item 7: CacheTax (step 7, provisional)
+
+**[$?]** The `usd`, `keptUsd` and `coldUsd` counters, the page's dollar rows and its Net change with the dollar answer. The user agreed the Net is in input-token equivalents (tokens weighted by each model's read and write price ratios); the record and the mock-up below are left as they were until the answer comes.
 
 **What's counted.** These are per session, in the same `session:${id}` record as step 4, so concurrent sessions never collide:
 
@@ -532,7 +591,7 @@ stats: {
     beats: number; read: number; wrote: number; usd: number // what beats cost
     kept: number; keptUsd: number   // turns that came back to a cache a beat kept warm, and the re-cache they avoided
     cold: number; coldTokens: number; coldUsd: number // turns sent on a cold cache, and what re-caching cost
-    held: number                    // sends the cold guard held
+    held: number                    // sends the cold guard asked about (item 4), whatever the answer
   } }
 }
 ```
@@ -555,23 +614,23 @@ Cold sends         1        6        20     ≈$0.69 · ≈$4.20 · ≈$13.80 pa
 Held by guard      1        4        11
 ```
 
-  A daily bar row (like `/stats`' activity row) is a later choice, once the screenshots are back.
+  A daily row or heatmap (like `/stats`') is for the look pass (item 5, "What steps 6 and 7 wait on").
 - **Function names:** `countBeat($, …)`, `countTurn($, …)`, `taxPage($)`.
 
 **Tests:**
 - A beat adds to today's `beats` and `usd`.
 - A turn after a kept stretch adds `kept`.
 - A cold turn adds `cold`.
-- A held send adds `held`.
+- A send the guard asks about adds `held`; answered `Send`, or sent unanswered, it adds `cold` too.
 - Two sessions' records add up on the page.
 - A record older than 30 days is pruned, and isn't counted.
 - The page renders with no records (all zeros, no `NaN`).
 
-**README:** the Privacy section gains "and, for each session, counts of beats, tokens, estimated dollars and cold sends by day, kept on your machine for 30 days to show on the CacheTax page. Nothing of it is sent anywhere." A short CacheTax paragraph under "What you'll see".
+**README:** **[$?]** the Privacy section gains "and, for each session, counts of beats, tokens, estimated dollars and cold sends by day, kept on your machine for 30 days to show on the CacheTax page. Nothing of it is sent anywhere." A short CacheTax paragraph under "What you'll see".
 
 ### Item 8: the demo GIF (step 8)
 
-Rerecord `assets/demo.tape` with `demo.py` once steps 1–7 have merged and the look is settled. It shows `/cachebeat 2h`, the Status tab, a beat landing, and the cold guard's held send. The recording steps are in the scripts. Only `assets/demo.gif` ships.
+Rerecord `assets/demo.tape` with `demo.py` once steps 1–7 have merged and the look is settled. It shows `/cachebeat 2h`, the Status tab, a beat landing, and the cold guard's question. The tape still types `/cachebeat 5`, which step 3 refuses (step 8 below). The recording steps are in the scripts. Only `assets/demo.gif` ships.
 
 ### Item 9: a command typed mid-turn says nothing until the turn ends (step 3b)
 
@@ -680,13 +739,13 @@ inputSchema: object({
 }),
 ```
 
-- **Sections, not fields.** Four names, checked by the schema.
+- **Sections, not fields.** Four names. The schema lists them and the hook checks them (below): the engine doesn't enforce a plugin tool's schema.
   - `context` (≈50 tokens), `cache` (≈35) and `session` (≈85) are small enough that a field filter inside them saves nothing.
   - `settings` is the big one (≈250): the answer's `settings`, `folder`, `allFolders` and `defaults` keys together, since each is read in the light of the others.
   - The sections follow the Status page's rows (item 5): Cache and Size are `cache` and `context`, Beating and This session are `session`.
 - **The answer's shape doesn't change:** the same top-level keys as today, less the ones not asked for, plus `context`.
 - **Nothing named answers everything.** A session that started before the update holds the old schema and sends `{}`: it gets what it always got. A lazy caller costs tokens, never correctness.
-- **A bad `only`** (not a list, or a name that isn't a section) is refused in the hook, in `parseSet`'s style: `nothing read: only takes context, cache, session or settings, not "beats"`. The schema should stop it first; whether the engine checks a plugin tool's input against its schema isn't in the declarations.
+- **A bad `only`** (not a list, or a name that isn't a section) is refused in the hook, in `parseSet`'s style: `nothing read: only takes context, cache, session or settings, not "beats"`. The schema won't stop it: a plugin tool's input schema isn't enforced (mods-gotchas.md, "The engine", found live).
 - **The answer is printed compact** (`JSON.stringify(x)`; `json` in register.tsx indents by 2 today). About 30% fewer tokens on every answer, `set`'s too. Claude is the only reader: the transcript row is drawn by us.
 - **The transcript line names what was read:** `cachebeat · read context, cache`, and `cachebeat · read the state` for everything.
 
@@ -819,9 +878,15 @@ Each step is finished, tested and merged into `dev` before the next starts.
 **For every step, these bite:**
 
 - **On 2.1.287, a function handed `$` must have a name used nowhere else in the file,** not even as a local `const`. The loader refuses the whole module. Grep for each new name.
-- **Don't pass a `$` call a constant whose value is a cast.** Write the request in the call: `$.ui.open({ id: …, … })`, never `$.ui.open(OPEN)` with `OPEN = {…} as const`.
-- **Matchers are literals:** `on('tool.call', { tool: 'mcp__cachebeat__set' }, …)`, never a constant.
-- **`$` calls are plain statements:** no parentheses, `??`, `!` or casts around them. `const x = await $.store.get('k')`, then use `x`.
+- **A function handed `$` is declared at the top of the file,** not as an arrow inside `register`. `claude plugin validate` fails on it, on 2.1.287 and 2.1.322 alike: `$ is passed to "inner", which is not a function declared at the top of this file` (and "No digest").
+- **Three older rules were the directory's alone, and no longer bind** (checked 2026-11-14; the directory is dropped):
+  - a `$` call given a constant whose value is a cast (`$.ui.open(OPEN)` with `OPEN = {…} as const`)
+  - a matcher that isn't a literal (`{ tool: SOME.constant }`, hooks registered in a loop)
+  - a `$` call that isn't a plain statement (parentheses, `??`, `!` or a cast around it)
+
+  **The check:** a scratch plugin doing all three (`(await $.session.model()) ?? …`, `$.store.set('k', X)` with `X` cast, `((await $.store.get('k')) as …)?.a`, `(await $.clock.now())!`, `{ command: NAME }`, `{ tool: TOOL.a }`, `on` in a `for` loop) passes `claude plugin validate` and its test under `claude plugin test`, on 2.1.287 and on 2.1.322. Validate lists every `$` call and hook. It prints a matcher it can't resolve as `?` (an object's member, an imported constant; a top-level `const` string and a loop's values do resolve), and that fails nothing: `validate --strict` passes the release branch with `ui.focus{requestId=?}`. **Not checked:** a live session. The kit and validate load the module as a session does; that a session treats these the same is inferred.
+  - The same goes for `h` and `Fragment` as names in a `.tsx` file, and for 2.1.322's `gating hook without .catch` lines, which are information: `--strict` passes with nine of them.
+  - **Existing code keeps the old shape;** nothing needs rewriting. New code may use whichever reads best. Literal matchers are still worth it where they're free: `validate`'s listing then names the tool.
 - **Run the checks, and fail on the summary:**
 
   ```sh
@@ -833,6 +898,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Tool text is fixed for the session.** To see a changed description, start a new session.
 - **Store writes read the store fresh first** (`changeSettings`, `saveOwn`).
 - **Plugin files and notes go in separate commits.** Record what took time in `notes/mods-gotchas.md` as you go.
+- **Nothing is validated in the directory's portal any more** (dropped 2026-11-14). `validate --strict` on the release branch is the last check.
 - **Each step keeps CI's 2.1.287 leg green.** A new API that fails there either moves the floor (README badge :12, which CI's matrix reads, and Requirements :31) or gets dropped. Ask the user before moving the floor.
 
 ### Step 0: the live checks (P1–P8)
@@ -842,7 +908,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Bundles:** checks only, no shipped code.
 - **How:** a scratch probe mod outside the repo (`claude --plugin-dir <probe>`), driven in tmux as mods-gotchas.md "/rewind" describes. P1 needs the user to suspend the machine.
 - **Why first:** P5 can change the cold guard's whole shape, P2 and P3 the resume design, and P4 the dollar source.
-- **Status:** P2–P7 done 2026-11-09. None changed the shape of a design (P5 kept drop-and-resend, P4 kept the `cost.usd` delta, P3 kept the plan's two-order resume), but each changed a detail: see items 2, 4 and 6. P1 and P8 are pending.
+- **Status:** P2–P7 done 2026-11-09. None changed the shape of a design at the time (P5 kept drop-and-resend, P4 kept the `cost.usd` delta, P3 kept the plan's two-order resume), but each changed a detail: see items 2, 4 and 6. The guard has since become a question (item 4, 2026-11-14); P5 still says what a drop looks like, which the `Don't send` answer uses. P1 and P8 are pending.
 
 ### Step 1: cache state and the sleep fix, released as 0.9.2 (shared piece, item 1)
 
@@ -860,6 +926,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 2: dollars (item 6)
 
+- **[$?]** What it delivered changes with the dollar answer.
 - **Delivers:** `hooks/prices.ts`, the rate override from engine estimates, `recacheUsd`, the `≈$` beat log, `state.session.lastBeatUsd`, and the README cost paragraph.
 - **Built 2026-11-09** on `step2-dollars`; what came out differently, and why, is in mods-gotchas.md, "Dollars (built in step 2 of 0.10.0)".
 - **Depends on:** step 1 (`CacheView`). P4 is answered (see item 6).
@@ -911,22 +978,23 @@ Each step is finished, tested and merged into `dev` before the next starts.
 ### Step 4: resume (item 2)
 
 - **Delivers:** per-session store records, restore, seeding from the resume hint, the new resume line, README and Privacy.
-- **Depends on:** step 3 (`keepUntil`), step 1 (cache state), P8 (P2 and P3 are answered), and the portal check on computed store keys.
+- **Depends on:** step 3 (`keepUntil`), step 1 (cache state), and P8 (P2 and P3 are answered). No portal check: the directory is dropped.
+- **Checks in the step:** R1 (item 2, Seeding).
 
 ### Step 5: the cold guard (item 4)
 
-- **Delivers:** the `coldGuard`, `coldGuardWindow` and `coldGuardTokens` settings, the session override, the `prompt.submit` hook, the arm and its window, the warning, the tool fields, and the README rows and directory line.
-- **Depends on:** step 1 (state), step 2 (the `≈$` in the message), step 4 (a resumed session's first message is the case that matters most), and P8 (P5–P7 are answered).
+- **Delivers:** the probes G1–G4 first; then the `coldGuard`, `coldGuardTokens` and `coldGuardUnanswered` settings, the session override, the `prompt.submit` hook and its question, the origin allowlist, the timeout, the logs, the tool fields, and the README rows and line.
+- **Depends on:** step 1 (state), step 4 (a resumed session's first message is the case that matters most), P8 (P5–P7 are answered), and the user's word on what's marked provisional in item 4. Not on step 2: the question speaks in tokens.
 
 ### Step 6: the Status page (item 5, provisional)
 
 - **Delivers:** the pane's Status tab, and bare `/cachebeat` opening it.
-- **Depends on:** steps 1–5 (everything it shows) and the screenshots.
+- **Depends on:** steps 1–5 (everything it shows), the dollar answer, and the look pass (item 5, "What steps 6 and 7 wait on"). The screenshots arrived.
 
 ### Step 7: CacheTax (item 7, provisional)
 
 - **Delivers:** the counters in the session record, the CacheTax tab, `/cachebeat stats`, and README and Privacy.
-- **Depends on:** step 2 (dollars), step 4 (the record), step 5 (held and cold sends), step 6 (the tabbed pane), and the screenshots.
+- **Depends on:** step 2 (the prices, for the ratios at least), step 4 (the record), step 5 (asked and cold sends), step 6 (the tabbed pane), the dollar answer, and the look pass. The screenshots arrived.
 - **Bundles:** collection with display, since neither is testable without the other.
 
 ### Step 8: the demo GIF (item 8)
@@ -942,10 +1010,10 @@ Each step is finished, tested and merged into `dev` before the next starts.
   - the notes
   - and no stale wording anywhere: "expired" (it's "cold"), the per-session interval, `/cachebeat <minutes>`
   - `tsc` clean on the types the newest Claude Code generates, not only on the checkout's (see step 2b)
-- **What it is:** bump `version`, do a full README pass (Features list, Commands table, Privacy), validate the release branch in the portal (the cold guard and computed store keys are new to the scan), PR, and release notes.
+- **What it is:** bump `version`, do a full README pass (Features list, Commands table, Privacy), run `validate --strict` on the release branch, PR, and release notes. No portal validation: the directory is dropped.
 - **Release notes** call out:
   - the reversed `/cachebeat <minutes>` (with "use `/cachebeat global 30` or the menu for the interval")
-  - the cold guard, on by default, and how to turn it off
+  - the cold guard, on by default: it asks before a cold send, and how to turn it off
   - that resumed sessions now keep on/off
 - **Process:** notes/README.md, "Releasing, step by step".
 
@@ -956,9 +1024,9 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **A moving "cold for 2h 14m" in the turn line.** Nothing redraws the line while beats wait, so it would need a timer of its own for a cosmetic age. Status shows it live instead.
 - **Dollars: `cost.usd` deltas only.** They can't price "re-cache avoided" or a cold send ahead of time, and a mid-turn beat's delta includes the turn. They're kept as the idle-beat source if P4 holds.
 - **Keep-alive counted from the last message** (a per-session Stop after idle) instead of a fixed deadline. "1h 52m left" would reset on every message, and "keep alive for 2h, then go" reads as a deadline. The user chose the deadline.
-- **A cold guard second send allowed at any time until the cache is warm again** (the first proposal). The user chose a window: a send long after the warning is as unconsidered as the first.
-- **The cold guard as a confirm dialog (`$.ui.ask`).** It's kinder if dropped text is lost (P5), but it's not what the user asked for. It's the fallback.
-- **One shared `sessions` or `stats` store key.** Open sessions writing it lose each other's updates, even reading fresh first. It's the fallback only if the portal flags computed keys.
+- **A cold guard that drops the message and lets a second send through:** at any time until the cache is warm again (the first proposal), then within a window (**send again within**, the design until 2026-11-14). The user chose a question instead: one keypress, no resend, no window setting.
+- **The cold guard's question in our own pane (`$.ui.open`)** instead of the engine's dialog. More to build and to get right on each surface. It's the fallback if G1 finds the engine's dialog can't be closed (item 4).
+- **One shared `sessions` or `stats` store key.** Open sessions writing it lose each other's updates, even reading fresh first. It was the fallback had the directory flagged computed keys; with the directory dropped it isn't needed.
 - **Separate panes for Status and CacheTax.** They would duplicate the pane's focus, desktop and Esc handling, which took 0.7.x to get right.
 - **"Expired" for the cold state.** "Cold" is shorter, pairs with "warm", and names the guard. The user chose "cold" for all visible text.
 
@@ -974,15 +1042,16 @@ The user's answers to the questions this plan first asked, 2026-11-09:
   - a unit is required, 5m–48h; a bare `/cachebeat 30` changes nothing and explains why
   - the per-session interval is removed everywhere
   - `global` / `local <minutes>` keep setting **Beat after idle**
-- **The cold guard:**
+- **The cold guard** (as first decided on 2026-11-09, and changed on 2026-11-14; item 4 is the current design):
   - It's on by default.
   - Cold means the time since the last cache read is past the cache's lifetime (1h or 5m, as cachebeat reads it).
-  - A second send goes through only within **send again within** (default 3m, a setting; the user put it at 2–5 minutes). After it, the next send is held again. **Recommended, not confirmed:** the custom value's range of 1–15 minutes.
-  - **chats from** (default 20k tokens, the same as Skip small chats) is the smallest chat it holds for.
-  - Remote Control messages aren't held. **Recommended, not confirmed:** the user's answer didn't cover it.
-  - If P5 shows a held message's text is lost, it asks in a Send / Don't send dialog instead.
+  - **It asks** (`Send` / `Don't send`). ~~A second send goes through only within **send again within**.~~ The window, its 2–5 minute default and its 1–15 minute custom range went with the resend (2026-11-14).
+  - **chats from** (default 20k tokens, the same as Skip small chats) is the smallest chat it asks about.
+  - **Remote Control messages are held too,** if the live check shows the question works there (the user, 2026-11-14; "Still open"). ~~Remote Control messages aren't held.~~
+  - **If unanswered** (`coldGuardUnanswered`) says what an unanswered question does: don't send, or send after a timeout (the user, 2026-11-14). Its default, what "don't send" does over time, and its range are provisional (item 4).
+  - It speaks in tokens, with no dollar floor.
 - **Warm status:** nothing live exists to read. The plan says "likely warm" and shows the time left.
-- **Dollars:**
+- **Dollars** (**[$?]**: reopened 2026-11-14, "Still open"):
   - `≈$` at API prices everywhere, with one dim line on Status and CacheTax on a subscription
   - none in the turn line
 - **CacheTax:** a tab beside Status in the `/cachebeat` page, opened by `/cachebeat stats`, kept 30 days.
@@ -990,10 +1059,10 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 
 ## From cache-tax
 
-[karanb192/cache-tax](https://github.com/karanb192/cache-tax) (MIT, 2.4.2, read 2026-11-14) is the mod the CacheTax page is named after. It warms on a window you arm (`/keepwarm 90m`, 50-minute pings) and asks before a cold send. Proposed to the user, none decided yet:
+[karanb192/cache-tax](https://github.com/karanb192/cache-tax) (MIT, 2.4.2, read 2026-11-14) is the mod the CacheTax page is named after. It warms on a window you arm (`/keepwarm 90m`, 50-minute pings) and asks before a cold send. What was proposed to the user from it; what they decided is under "Decided from it":
 
-- **Ask, don't drop.** Its guard opens `$.ui.ask` with `Send anyway ($4.01)` and `Don't send`, and falls back to drop-once-then-resend only when the question is dismissed or nobody can answer (`-p`). One keypress instead of a resend, and no window setting. Item 4 kept this as the unused variant because P5 found the dropped text stays in the composer. It may also be the answer for Remote Control, if a remote client can answer an ask.
-- **Who gets guarded.** It holds every origin a person may have sent (`bridge`, `sdk`, `channel`, `slack-ping`, `unclassified`) and lets through, with the price logged, the ones nobody could resend: `task-notification`, `scheduled-trigger`, `peer`, `peer-send-message`, `projects-relay`, `coordinator`, `observer`, `observer-activity`. Item 4 holds `composer` only.
+- **Ask, don't drop.** Its guard opens `$.ui.ask` with `Send anyway ($4.01)` and `Don't send`, and falls back to drop-once-then-resend only when the question is dismissed or nobody can answer (`-p`). One keypress instead of a resend, and no window setting. **Decided: item 4 now asks.** It may also be the answer for Remote Control, if a remote client can answer an ask (G4).
+- **Who gets guarded.** It holds every origin a person may have sent (`bridge`, `sdk`, `channel`, `slack-ping`, `unclassified`) and lets through, with the price logged, the ones nobody could resend: `task-notification`, `scheduled-trigger`, `peer`, `peer-send-message`, `projects-relay`, `coordinator`, `observer`, `observer-activity`. Item 4 now asks about `composer`, and `bridge` if the live check passes; its table says what each other origin gets, and why it differs from this list (a question needs someone at the dialog; a drop-and-resend doesn't).
 - **A dollar floor** (`guard refuse 5`): hold only when the re-cache costs $5 or more. Ours is a token floor (`coldGuardTokens`). Dollars track what the user cares about across models, but need a price row.
 - **The message compares:** "re-writes up to 200,502 tokens = $4.01 (a warm turn would have cost $0.05)". "Up to", because after a resume the engine's context figure includes the last response's output.
 - **A resend from a new process goes through:** after a hold it stores the last response's time under the session id, so `claude -p` (one process per turn) isn't held forever.
@@ -1008,9 +1077,9 @@ What cachebeat already has that it lacks: on by default with no arming, settings
 
 ### Decided from it (the user, 2026-11-14)
 
-These replace what item 4 says where they differ. Fold them into item 4 when step 5 is planned.
+Folded into item 4, and the directory and screenshot lines through the plan, on 2026-11-14.
 
-- **The guard asks** (`Send` / `Don't send`) instead of dropping and waiting for a resend. So `coldGuardWindow` ("send again within") and the arm go.
+- **The guard asks** (`Send` / `Don't send`) instead of dropping and waiting for a resend. So the window setting and the drop-then-resend bookkeeping go.
 - **The guard talks in tokens,** not dollars, and so does the rest of 0.10.0: tokens are cachebeat's currency. No dollar floor: `coldGuardTokens` stays the only floor. What happens to step 2's dollars, already built, is open below.
 - **A new setting says what an unanswered question does:** drop the message, or send it after a timeout. `$.ui.ask` takes no timeout and only "rejects when dismissed, and in a `-p` run". Racing it against `$.clock.after` would send the message, but nothing in the declarations closes the dialog left open. Probe that first; if it can't be closed, the question has to be our own pane (`$.ui.open`), which we can close.
 - **The README carries an Important note** above Features that `/cachebeat <time>` changed in 0.10.0 (added 2026-11-14). Say the same on top of the 0.10.0 release notes. Take the note out a release or two later.
@@ -1020,10 +1089,16 @@ These replace what item 4 says where they differ. Fold them into item 4 when ste
 
 ## Still open
 
-- **The plugin directory is dropped** (2026-11-14: verified organizations only). Every "validate in the portal" and "the directory will flag" line above is void: computed `$.store` keys, the cold guard's README line "for the directory", and step 9's portal check need no validation. Keep the README line about the guard anyway: it tells users what the guard does.
-- **Holding a Remote Control message,** pending a live check in step 5. The user wants `bridge` prompts held like the composer's. What the docs say (the 2.1.319 declarations and code.claude.com/docs/en/plugins/mods/events, read 2026-11-14): `origin.kind === 'bridge'` is "the user's message through the Remote Control bridge (a phone or web client)"; `{ drop: reason }` is allowed for any origin and "the text is shown to the user as the reason". Nothing says where a remote client shows that reason, or whether the phone keeps the text to send again. `$.ui.ask` "rejects when dismissed, and in a `-p` run"; whether a remote client can answer one is not stated either. The check: from a phone, send to a cold session over `coldGuardTokens`, and note what the phone shows and whether a second send goes through. If the reason never reaches the phone, skip `bridge` and put a README line suggesting `/cachebeat` before sending from a remote session (check first that `/cachebeat` answers over Remote Control).
-
-- **The screenshots** for the Status and CacheTax pages. Both designs here are provisional until they come.
-- **P1 and P8,** pending: P1 needs the machine suspended, P8 needs Claude Code 2.1.287. P2–P7 are answered. Also not checked in step 0: a live `prompt_cache_likely_expired: true`, any origin but `composer`, and the desktop app.
+- **Dollars: remove them, or keep and extend?** Asked of the user on 2026-11-14, not answered. Tokens are cachebeat's currency (the user, the same day), and step 2's dollars are already built.
+  - **Remove** (the orchestrator's recommendation): `≈$` leaves everything users and Claude see: the beat log, `state`'s `recacheUsd` and `lastBeatUsd`, the tool text, the README's cost paragraph, and the Status and CacheTax mock-ups. `hooks/prices.ts` stays for its read and write ratios, which CacheTax's Net needs (input-token equivalents, agreed).
+  - **Keep and extend:** the figures stay, the Status and CacheTax pages draw them as mocked up, and the resume estimate needs its probe (item 2, Seeding).
+  - **Every place that changes with the answer is marked `[$?]`:** `grep -n '\[\$?\]' notes/plan-0.10.0.md`. They are item 1a (the built fields), item 6 (whole), item 2 (the resume estimate), item 5 (the Status mock-up), item 7 (the counters, the page, the Privacy line), step 2, and Decisions. Item 10 already says what it does either way. One pass over those finishes it.
+- **The cold guard's provisional points** (item 4), for the user: the default of **if unanswered** (`drop`); whether `drop` should also close the question after a while; the 1–15 minute range; and `channel`, `slack-ping` and `unclassified` messages passing unasked.
+- **Item 10's six questions** ("Open, for the user" there).
+- **The look pass for Status and CacheTax** against the screenshots (item 5, "What steps 6 and 7 wait on"). The screenshots themselves arrived.
+- **Holding a Remote Control message,** pending a live check in step 5. The user wants `bridge` prompts held like the composer's. What the docs say (the 2.1.319 declarations and code.claude.com/docs/en/plugins/mods/events, read 2026-11-14): `origin.kind === 'bridge'` is "the user's message through the Remote Control bridge (a phone or web client)"; `{ drop: reason }` is allowed for any origin and "the text is shown to the user as the reason". Nothing says where a remote client shows that reason, or whether the phone keeps the text to send again. `$.ui.ask` "rejects when dismissed, and in a `-p` run"; whether a remote client can answer one is not stated either. The check (G4 in item 4), now that the guard asks: from a phone, send to a cold session over `coldGuardTokens`, and note whether the question shows there, whether it can be answered there, and what `Don't send` leaves on the phone. If the question never reaches the phone, skip `bridge` and put a README line suggesting `/cachebeat` before sending from a remote session (check first that `/cachebeat` answers over Remote Control).
+- **P1 and P8,** pending: P1 needs the machine suspended. P2–P7 are answered. Also not checked in step 0: a live `prompt_cache_likely_expired: true`, any origin but `composer`, and the desktop app.
+  - **P8 is narrower than it was.** The declarations 2.1.287 writes (generated 2026-11-14 from the local 2.1.287 binary) carry `prompt.submit`, `$.ui.ask`, `$.session.id`, the origin kinds, and resume's four fields. All are optional in the types and nothing has *run* there: each step's tests on CI's 2.1.287 leg answer the rest.
+- **The plugin directory is dropped** (2026-11-14: verified organizations only). The lines that required a portal check or cited the directory as a risk were removed or rewritten the same day (items 1, 2 and 4, steps 4 and 9, the per-step rules).
 - **The session's cost rose with nothing running.** In step 2's live check, `cost.usd` rose by +0.00202 while the session sat idle, with no beat and no turn. It's unexplained. It fell outside a beat's window, so no beat's figure took it in. A request like that landing inside the window is what the rise bound (`RISE_BOUND`) is for: on a Haiku beat (about $0.0005) the bound rejects it and the beat is priced from its usage; on an Opus beat (about $0.02) it passes as about 10% more. On a model the table lacks, the rise has no bound.
 - **`beat()` needs a `beating` guard** (a later step). A manual `/cachebeat now` during a scheduled fork sends two forks: `beat()` and `beatNow` check neither `beating` nor the other. It predates step 2 (found in step 2's review); nothing fixes it yet.
