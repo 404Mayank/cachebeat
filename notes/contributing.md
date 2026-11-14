@@ -22,7 +22,7 @@ Your edits to the hooks reload in the running session. Changes to the tools' des
 Before sending a change:
 
 ```sh
-claude plugin validate --strict .   # checks the plugin the way Claude Code loads it
+claude plugin validate --strict .   # checks the plugin the way Claude Code loads it; on `dev` it flags CLAUDE.md, which is expected
 claude plugin test .                # runs the test suite
 npx -p typescript tsc -p .          # type-checks, once Claude Code has loaded the plugin
 ```
