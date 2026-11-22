@@ -250,10 +250,10 @@ Claude Code 2.1.329, `--model haiku`, tmux, the plugin loaded from an archive co
 | Typed mid-turn | At once | Again at the turn's end |
 | --- | --- | --- |
 | `on` | toast `cachebeat: this session: on, every 50m idle · next beat in 50m`; the prompt heart appears | the reply row |
-| `30` (a number alone) | toast `cachebeat: nothing changed: a time needs its unit now. /cachebeat 2h keeps the cache warm for 2 hours, then turns off.…` (cut: the pointer to `global`/`settings` is lost) | the reply row, whole |
+| `30` (a number alone) | toast `cachebeat: nothing changed: add a unit, like 30m · interval: /cachebeat global 30` (whole, three lines; was cut after the first sentence until the reply was shortened in `step-short`) | the reply row, whole |
 | `30m` | toast `cachebeat: this session: on until 5:28 AM (30m), every 50m idle · starts after this turn` | the reply row |
 | `now` | toast `cachebeat: a turn is running; the beat waits for it to end` | the reply row |
-| `banana` | toast `cachebeat: usage: /cachebeat [on\|off\|<time, like 2h>\|now\|settings] · global […` (cut) | the reply row |
+| `banana` | toast `cachebeat: usage: on, off, a time like 2h, now, settings · global or local: on, off, minutes · local reset` (whole, three lines; the old bracketed text was cut after `global [`, long unbroken tokens wrapping badly) | the reply row |
 | `off` | toast `cachebeat: this session: off` | the reply row |
 | bare `/cachebeat` | toast with the status (`cachebeat: off` when off) | the reply row |
 | `settings` | **the pane opens**, in a side panel with the turn still drawing beside it | the reply row `cachebeat: settings opened` |
