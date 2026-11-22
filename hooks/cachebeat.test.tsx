@@ -275,7 +275,7 @@ test('commands answer for the state they find', async ($: Engine, on: On) => {
   expect(await cmd($, 'on')).toBe('this session: on, every 50m idle · starts after your next turn')
   expect(await cmd($, 'on')).toBe('this session: already on, every 50m idle · starts after your next turn')
   expect(await cmd($, 'off')).toBe('this session: off')
-  expect(await cmd($, 'bogus')).toBe('usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]')
+  expect(await cmd($, 'bogus')).toBe('usage: on, off, a time like 2h, now, settings · global or local: on, off, minutes · local reset')
 })
 
 test('a global default on starts a new session beating', async ($: Engine, on: On) => {
@@ -1116,7 +1116,7 @@ test('every form of the command typed over a running turn toasts its reply, a mi
   const replies: string[] = []
   for (const form of forms) replies.push((await cmd($, form))!)
   expect(toasts).toEqual(replies.map(r => `cachebeat: ${r}`))
-  expect(replies).toContain(`usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]`) // banana
+  expect(replies).toContain(`usage: on, off, a time like 2h, now, settings · global or local: on, off, minutes · local reset`) // banana
 })
 
 test('the settings command typed over a running turn toasts nothing: the pane it opens holds toasts until it closes', async ($: Engine, on: On) => {
@@ -1291,7 +1291,7 @@ test('r takes the focused setting back to its default; a custom value stays in i
   await ui.unmount()
 })
 
-const USAGE = 'usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
+const USAGE = 'usage: on, off, a time like 2h, now, settings · global or local: on, off, minutes · local reset'
 
 test('a folder\'s own settings win over all folders\', for starting on and the interval', async ($: Engine, on: On) => {
   const { clock, forks } = await setup($, on, { folders: { [HOME]: { defaultOn: true, interval: 5 } } })
@@ -2317,7 +2317,7 @@ test('a keep-alive time can be typed with a space, or after on', async ($: Engin
 
 test('a bare number changes nothing and says what it means now', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
-  const said = 'nothing changed: a time needs its unit now. /cachebeat 2h keeps the cache warm for 2 hours, then turns off. The beat interval is a setting: /cachebeat global 30, or /cachebeat settings.'
+  const said = 'nothing changed: add a unit, like 30m · interval: /cachebeat global 30'
   expect(await cmd($, '30')).toBe(said)
   expect(await cmd($, '')).toBe('off')
   await cmd($, '2h')
