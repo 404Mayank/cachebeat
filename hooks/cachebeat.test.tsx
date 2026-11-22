@@ -2606,6 +2606,29 @@ test('a beat counts from when it was sent, however long it takes to answer', asy
   expect(t.forks).toEqual([3 * M, 5 * M]) // sent at 3m, answered at 4m; the next at 6m on the wall, not 7m
 })
 
+test('a beat warming a new model counts from when it was sent, however long it takes to answer', async ($: Engine, on: On) => {
+  const t = await setup($, on, {
+    settings: { onModelSwitch: 'warm', interval: 3 }, fork: [{ ...ok, usage: usage(0, 90_000) }, ok],
+    during: async n => { if (n === 1) t.sleep(1 * M) },
+  })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  t.switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await t.clock.advance(5 * M)
+  expect(t.logs).toContain("♥ warmed the new model's cache (90,000 written)")
+  expect(t.forks).toEqual([3 * M, 5 * M]) // sent at 3m, answered at 4m; the next at 6m on the wall, not 7m
+})
+
+test('a beat finding the short cache counts from when it was sent, however long it takes to answer', async ($: Engine, on: On) => {
+  const miss = { ...ok, usage: usage(0, 90_000) }
+  const t = await setup($, on, { fork: [miss, ok], during: async n => { if (n === 1) t.sleep(1 * M) } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await t.clock.advance(IDLE + 3 * M)
+  expect(t.forks).toEqual([IDLE, IDLE + 3 * M]) // sent at 50m, answered at 51m; the next at 54m on the wall, not 55m
+})
+
 test('a beat answered after a request sent later than it keeps the later one', async ($: Engine, on: On) => {
   const t = await setup($, on, { settings: { interval: 3 }, during: async n => {
     if (n !== 1) return
@@ -2646,6 +2669,24 @@ test('a turn ending while the beat its long last answer brought is on its way se
   expect(t.forks).toEqual([4.5 * M])
   expect(t.logs.filter(l => l.startsWith('♥ cache renewed'))).toHaveLength(1)
   expect((await stateNow($)).session.beats).toBe(1)
+})
+
+test('a beat that fails while later requests came due, and were dropped as it ran, leaves the next beat to the one that warmed', async ($: Engine, on: On) => {
+  const err = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: usage(0, 0) }
+  let release!: () => void
+  const t = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, fork: [err, ok], during: async n => { if (n === 1) await new Promise<void>(r => (release = r)) } })
+  await secondTurn($)
+  t.lengths.push(4.5 * M, 4.5 * M)
+  await step($, 't2', 0) // sent at 0, answered at 4m 30s: a beat is due at once
+  await t.clock.settle() // it forks mid-turn, and is held on its way (the API overloaded, retrying)
+  await step($, 't2', 1) // sent at 4m 30s, answered at 9m: its beat is due at once, and the guard drops it
+  await $.turn.complete({ ...turn, turnId: 't2' }) // due at once again, dropped again
+  await t.clock.settle()
+  release() // the held beat fails, overloaded; a request since warmed the cache
+  await t.clock.settle()
+  expect(t.forks).toEqual([4.5 * M, 9 * M]) // the beat it left is sent from that request, at once
+  await t.clock.advance(8 * M)
+  expect(t.forks).toEqual([4.5 * M, 9 * M, 13 * M, 17 * M]) // and every 4m after
 })
 
 test('/cachebeat now while a beat is on its way sends no second one', async ($: Engine, on: On) => {
