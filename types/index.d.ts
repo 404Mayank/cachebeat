@@ -18,6 +18,8 @@ export type Saved = {
   tail: string | null // how the conversation ended after the last turn: another ending means /rewind took it back
   asked: number | null // when the user last sent a message (a turn's start): Stop after idle counts from it
   turns: number // turns this conversation has had: after its first, Claude Code can cache it anew out of a beat's reach
+  compactions: number // the main conversation's compactions cachebeat has seen; /clear and /resume start the count again
+  lastCompactAt: number | null // when the latest was
 }
 
 /** How long the main conversation's prompt cache lives. */

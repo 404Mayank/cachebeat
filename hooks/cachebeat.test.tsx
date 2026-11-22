@@ -28,7 +28,9 @@ const turn = { answer: 'ok', durationMs: 0, isAborted: false, turnId: 't', reaso
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
 type World = {
-  fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown; settings?: Partial<typeof DEFAULTS>
+  fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown
+  contextPercent?: number; breakdown?: Record<string, unknown> // the rest of the engine's context figures, with `contextTokens`
+  settings?: Partial<typeof DEFAULTS>
   env?: Record<string, string>; settingsFile?: Record<string, unknown>; isSubscription?: boolean
   folders?: Record<string, unknown> // the store's folders, by path
   chat?: ReturnType<typeof said>[] // the conversation as the session starts: one there means a resumed session
@@ -75,7 +77,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('session.usage', () => ({
     value: {
       startedAt: 0,
-      context: { tokens: world.contextTokens, window: 200_000, ...(world.lastUsage ? { breakdown: { apiUsage: world.lastUsage } } : {}) },
+      context: {
+        tokens: world.contextTokens, window: 200_000, ...(world.contextPercent === undefined ? {} : { percent: world.contextPercent }),
+        ...(world.lastUsage || world.breakdown ? { breakdown: { ...(world.lastUsage ? { apiUsage: world.lastUsage } : {}), ...world.breakdown } } : {}),
+      },
       rateLimits: world.isSubscription === false ? [] : [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
     },
   }) as never)
@@ -801,8 +806,10 @@ type Args = Record<string, unknown>
 const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
-const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', keepAliveUntil: null, keepAliveUntilLocal: null, keepAliveMinutesLeft: null, cacheTtl: '1h', beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, nextBeat: null, skipping: null, paused: null }
-const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null }
+const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', keepAliveUntil: null, keepAliveUntilLocal: null, keepAliveMinutesLeft: null, beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, nextBeat: null, skipping: null, paused: null }
+const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null }
+const LIMITS = [{ kind: 'five_hour', percentUsed: 10 }] // the stub's usage windows
+const FRESH_CONTEXT = { tokens: null, window: 200_000, percent: null, autoCompactAt: null, compactions: 0, lastCompactionMinutesAgo: null, lastMessageMinutesAgo: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
 const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unknown) => ({
   plugin: 'cachebeat', surface: 'terminal', component, requestId: 'u1',
@@ -823,7 +830,7 @@ test('both tools register, every setting in the schema with the pane\'s ranges',
 
 test('state on a fresh session: off, at the default interval, the settings as they are', async ($: Engine, on: On) => {
   await setup($, on)
-  expect(await stateNow($)).toEqual({ session: FRESH, cache: FRESH_CACHE, settings: DEFAULTS, folder: { path: HOME, own: {} }, defaults: {} })
+  expect(await stateNow($)).toEqual({ session: { ...FRESH, usageLimits: LIMITS }, cache: FRESH_CACHE, context: FRESH_CONTEXT, settings: DEFAULTS, folder: { path: HOME, own: {} }, defaults: {} })
   await call($, 'set', { settings: { interval: 30, showTokens: false } })
   expect((await stateNow($)).defaults).toEqual({ interval: 'auto', showTokens: true })
 })
@@ -836,11 +843,11 @@ test('a keep-alive time turns beating on and leaves the interval; null drops it'
   const local = clockText(clock.now() + 120 * M, clock.now())
   expect(await set($, { session: { keepAliveMinutes: 120 } })).toEqual({
     changed: ['session.enabled', 'session.keepAliveMinutes'],
-    session: { ...FRESH, enabled: true, keepAliveUntil: until, keepAliveUntilLocal: local, keepAliveMinutesLeft: 120, nextBeat: 'after the next turn' }, settings: {},
+    session: { ...FRESH, enabled: true, keepAliveUntil: until, keepAliveUntilLocal: local, keepAliveMinutesLeft: 120, nextBeat: 'after the next turn' }, settings: {}, shadowed: [],
   })
   expect(stored(store).interval).toBe('auto')
   expect(await set($, { session: { keepAliveMinutes: null } })).toEqual({
-    changed: ['session.keepAliveMinutes'], session: { ...FRESH, enabled: true, nextBeat: 'after the next turn' }, settings: {},
+    changed: ['session.keepAliveMinutes'], session: { ...FRESH, enabled: true, nextBeat: 'after the next turn' }, settings: {}, shadowed: [],
   })
   expect((await set($, { session: { keepAliveMinutes: null } })).changed).toEqual([]) // none to drop
 })
@@ -855,15 +862,15 @@ test('turning off through the tool drops the keep-alive time with it', async ($:
 test('set answers with what changed and those settings alone; null resets a setting', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await set($, { settings: { skipSmall: true, skipSmallTokens: 35_000, interval: 'auto' } })).toEqual({
-    changed: ['settings.skipSmall', 'settings.skipSmallTokens'], session: FRESH, settings: { skipSmall: true, skipSmallTokens: 35_000 },
+    changed: ['settings.skipSmall', 'settings.skipSmallTokens'], session: FRESH, settings: { skipSmall: true, skipSmallTokens: 35_000 }, shadowed: [],
   })
   expect(await set($, { settings: { skipSmallTokens: null, heartHex: null } })).toEqual({
-    changed: ['settings.skipSmallTokens'], session: FRESH, settings: { skipSmallTokens: 20_000 },
+    changed: ['settings.skipSmallTokens'], session: FRESH, settings: { skipSmallTokens: 20_000 }, shadowed: [],
   })
   expect(stored(store)).toEqual({ ...DEFAULTS, skipSmall: true })
   // a session that follows the default moves with it, but the call changed the default alone
   expect(await set($, { settings: { interval: 30 } })).toEqual({
-    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30, intervalFrom: 'all folders' }, settings: { interval: 30 },
+    changed: ['settings.interval'], session: { ...FRESH, intervalMinutes: 30, intervalFrom: 'all folders' }, settings: { interval: 30 }, shadowed: [],
   })
 })
 
@@ -902,7 +909,7 @@ test('a call with any bad value is refused whole, saying what each takes', async
   expect(await deny({ session: { keepAliveMinutes: 20 }, settings: { interval: 30, stopAtUsage: 5, heartTiming: 'fast' } }))
     .toBe('nothing changed: settings.stopAtUsage takes 10–100 percent or null, not 5; settings.heartTiming takes lubdub, linear, or null, not "fast"')
   expect(store.has('settings')).toBe(false)
-  expect((await stateNow($)).session).toEqual(FRESH)
+  expect((await stateNow($)).session).toEqual({ ...FRESH, usageLimits: LIMITS })
 })
 
 test('turned on mid-turn, it says so, and beats an interval after the turn ends', async ($: Engine, on: On) => {
@@ -930,13 +937,166 @@ test('the tools answer without the permission path beneath them', async ($: Engi
   await setup($, on)
   const bash = await $.tool.call({ tool: 'Bash', command: 'ls' }) // the hook is live for other tools
   expect([bash.isError, bash.text]).toEqual([true, 'no'])
-  expect((await stateNow($)).session).toEqual(FRESH)
+  expect((await stateNow($)).session).toEqual({ ...FRESH, usageLimits: LIMITS })
 })
 
 test('a subagent can read, never change', async ($: Engine, on: On) => {
   await setup($, on)
   expect((await call($, 'set', { agentId: 'sub', session: { enabled: true } })).deny).toBe('Only the main conversation changes cachebeat.')
-  expect((await stateNow($, { agentId: 'sub' })).session).toEqual(FRESH)
+  expect((await stateNow($, { agentId: 'sub' })).session).toEqual({ ...FRESH, usageLimits: LIMITS })
+})
+
+/** The sections an answer has, in the order it gives them. */
+const keysOf = (answer: Record<string, unknown>) => Object.keys(answer)
+
+test('state with only answers the sections named, once the loop has read the whole', async ($: Engine, on: On) => {
+  await setup($, on)
+  await stateNow($) // the first read
+  expect(keysOf(await stateNow($, { only: ['context'] }))).toEqual(['context'])
+  expect(keysOf(await stateNow($, { only: ['session', 'cache'] }))).toEqual(['session', 'cache']) // in the order the answer keeps, not the order asked
+  expect(keysOf(await stateNow($, { only: ['settings'] }))).toEqual(['settings', 'folder', 'defaults']) // no allFolders while the folder has none of its own
+  await call($, 'set', { folder: { stopAtUsage: 80 } })
+  expect(keysOf(await stateNow($, { only: ['settings'] }))).toEqual(['settings', 'folder', 'allFolders', 'defaults'])
+  expect(keysOf(await stateNow($, { only: [] }))).toEqual(['session', 'cache', 'context', 'settings', 'folder', 'allFolders', 'defaults']) // nothing named: all
+  expect(keysOf(await stateNow($))).toEqual(['session', 'cache', 'context', 'settings', 'folder', 'allFolders', 'defaults'])
+})
+
+test('a loop\'s first read is answered whole whatever it names, and says why; the next is not widened', async ($: Engine, on: On) => {
+  await setup($, on)
+  const first = await stateNow($, { only: ['context'] })
+  expect(keysOf(first)).toEqual(['whole', 'session', 'cache', 'context', 'settings', 'folder', 'defaults'])
+  expect(first.whole).toBe('your first read in this conversation')
+  expect(keysOf(await stateNow($, { only: ['context'] }))).toEqual(['context'])
+  expect(keysOf(await stateNow($))).not.toContain('whole') // a read that named nothing was whole already
+})
+
+test('a read that named nothing, as a loop\'s first, says nothing of being widened', async ($: Engine, on: On) => {
+  await setup($, on)
+  expect(keysOf(await stateNow($))).toEqual(['session', 'cache', 'context', 'settings', 'folder', 'defaults'])
+  expect(keysOf(await stateNow($, { only: ['cache'] }))).toEqual(['cache']) // and it counts as the first read
+})
+
+test('after /clear, a compaction of the main conversation, or a noticed rewind, a narrow read is whole again', async ($: Engine, on: On) => {
+  const { clock, rewind, talk } = await setup($, on, { settings: { interval: 3 } })
+  const narrow = async () => keysOf(await stateNow($, { only: ['cache'] }))
+  const WHOLE = ['whole', 'session', 'cache', 'context', 'settings', 'folder', 'defaults']
+  await cmd($, 'on')
+  talk('long question')
+  await $.turn.complete(turn)
+  expect(await narrow()).toEqual(WHOLE)
+  expect(await narrow()).toEqual(['cache'])
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect(await narrow()).toEqual(WHOLE)
+  expect(await narrow()).toEqual(['cache'])
+  await $.session.compact({ messages: [said('user', 'summary')] } as never)
+  expect(await narrow()).toEqual(WHOLE)
+  expect(await narrow()).toEqual(['cache'])
+  await $.session.compact({ messages: [said('user', 'summary')], agentId: 'sub' } as never) // a subagent's own: not the conversation Claude read it in
+  expect(await narrow()).toEqual(['cache'])
+  await cmd($, 'on')
+  talk('another question')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  rewind(2)
+  await clock.advance(3 * M) // the beat notices the rewind
+  expect(await narrow()).toEqual(WHOLE)
+  expect(await narrow()).toEqual(['cache'])
+})
+
+test('a subagent\'s first read is whole after the main loop\'s, and its context says whose it is', async ($: Engine, on: On) => {
+  await setup($, on)
+  const main = await stateNow($, { only: ['context'] })
+  expect(main.context).not.toHaveProperty('of')
+  const sub = await stateNow($, { only: ['context'], agentId: 'sub' })
+  expect(keysOf(sub)).toEqual(['whole', 'session', 'cache', 'context', 'settings', 'folder', 'defaults'])
+  expect(sub.context.of).toBe('main conversation')
+  expect(keysOf(await stateNow($, { only: ['context'], agentId: 'sub' }))).toEqual(['context'])
+  expect(keysOf(await stateNow($, { only: ['cache'], agentId: 'other' }))).toContain('whole') // each subagent has its own first read
+  expect(keysOf(await stateNow($, { only: ['context'] }))).toEqual(['context'])
+})
+
+test('context: the engine\'s figures, null where it has none, and the compactions cachebeat saw', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { contextTokens: 80_000, contextPercent: 40, breakdown: { isAutoCompactEnabled: true, autoCompactThreshold: 167_000 } })
+  await stateNow($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await clock.advance(5 * M)
+  expect((await stateNow($, { only: ['context'] })).context).toEqual({
+    tokens: 80_000, window: 200_000, percent: 40, autoCompactAt: 167_000, compactions: 0, lastCompactionMinutesAgo: null, lastMessageMinutesAgo: 5,
+  })
+  await $.turn.complete(turn)
+  await $.session.compact({ messages: [said('user', 'summary')] } as never)
+  await clock.advance(3 * M)
+  expect((await stateNow($, { only: ['context'] })).context).toMatchObject({ compactions: 1, lastCompactionMinutesAgo: 3, lastMessageMinutesAgo: 3 }) // the turn ended at 5m
+  await $.session.compact({ messages: [said('user', 'summary')] } as never)
+  expect((await stateNow($, { only: ['context'] })).context).toMatchObject({ compactions: 2, lastCompactionMinutesAgo: 0 })
+  await $.session.compact({ messages: [said('user', 'summary')], agentId: 'sub' } as never)
+  expect((await stateNow($, { only: ['context'] })).context.compactions).toBe(2) // a subagent's compaction is not the conversation's
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect((await stateNow($, { only: ['context'] })).context).toMatchObject({ compactions: 0, lastCompactionMinutesAgo: null, lastMessageMinutesAgo: null })
+})
+
+test('context is null where the engine has no figure, and auto-compact off gives no threshold', async ($: Engine, on: On) => {
+  await setup($, on, { breakdown: { isAutoCompactEnabled: false, autoCompactThreshold: 167_000 } })
+  expect((await stateNow($)).context).toEqual(FRESH_CONTEXT) // no tokens, no percent yet
+})
+
+test('a bad only is refused, naming the sections', async ($: Engine, on: On) => {
+  await setup($, on)
+  await stateNow($)
+  const ONLY = 'nothing read: only takes context, cache, session, or settings'
+  expect((await call($, 'state', { only: 'cache' })).deny).toBe(`${ONLY}, in a list, not "cache"`)
+  expect((await call($, 'state', { only: ['beats'] })).deny).toBe(`${ONLY}, not "beats"`)
+  expect((await call($, 'state', { only: ['cache', 'beats', 'x'] })).deny).toBe(`${ONLY}, not "beats" or "x"`)
+  expect((await call($, 'state', { only: ['cache', 'beats'], agentId: 'sub' })).deny).toBe(`${ONLY}, not "beats"`)
+  expect(keysOf(await stateNow($, { agentId: 'sub', only: ['cache'] }))).toContain('whole') // a refusal reads nothing: the loop's first read is still to come
+})
+
+test('set answers which settings it saved that this folder has its own of, and needs no read first', async ($: Engine, on: On) => {
+  await setup($, on)
+  expect((await set($, { settings: { interval: 30 } })).shadowed).toEqual([]) // the loop's first call, with no read before it
+  await call($, 'set', { folder: { interval: 20, showTokens: false } })
+  expect((await set($, { settings: { interval: 25, showTokens: false, skipSmall: true } })).shadowed).toEqual(['interval', 'showTokens'])
+  expect((await set($, { settings: { interval: 25 } })).shadowed).toEqual([]) // unchanged: nothing saved
+  expect((await set($, { settings: { interval: 40 }, folder: { interval: null } })).shadowed).toEqual([]) // dropped by the same call
+  expect(keysOf(await stateNow($, { only: ['cache'] }))).toContain('whole') // a set is not a read
+})
+
+test('the folder schema repeats no description, and its limits stay', async ($: Engine, on: On) => {
+  await setup($, on)
+  const own = props((props(SET.inputSchema).folder as { anyOf: unknown[] }).anyOf[0])
+  const all = props(props(SET.inputSchema).settings)
+  expect(Object.keys(own).sort()).toEqual(Object.keys(all).sort())
+  expect(Object.values(own).filter(f => 'description' in (f as object))).toEqual([])
+  expect(typeof (all.interval as Args).description).toBe('string')
+  expect((own.interval as Args).anyOf).toEqual((all.interval as Args).anyOf)
+  expect((await call($, 'set', { folder: { interval: 0 } })).deny).toBe('nothing changed: folder.interval takes auto, 1–55 minutes, or null, not 0')
+})
+
+test('the answers print compact, on one line', async ($: Engine, on: On) => {
+  await setup($, on)
+  expect((await call($, 'state')).result).not.toContain('\n')
+  expect((await call($, 'set', { settings: { interval: 30 }, folder: { stopAtUsage: 80 } })).result).not.toContain('\n')
+})
+
+test('state names the usage windows', async ($: Engine, on: On) => {
+  await setup($, on, { percentUsed: 37 })
+  expect((await stateNow($)).session.usageLimits).toEqual([{ kind: 'five_hour', percentUsed: 37 }])
+})
+
+// what writing the context again comes to, in input tokens: 1.25× for a five-minute cache and 2× for an hour's
+for (const [ttl, env, tokens] of [['1h', {}, 240_012], ['5m', { FORCE_PROMPT_CACHING_5M: '1' }, 150_008]] as const) {
+  test(`cache.recacheInputTokens is the conversation at the ${ttl} cache's write price`, async ($: Engine, on: On) => {
+    await setup($, on, { lastUsage: usage(40_000, 80_000), env })
+    expect((await stateNow($, { only: ['cache'] })).cache).toMatchObject({ ttl, contextTokens: 120_006, recacheInputTokens: tokens })
+  })
+}
+
+test('the transcript row names what was read', async ($: Engine, on: On) => {
+  await setup($, on)
+  expect(await draw($, toolRow('ToolUse', TOOL.state, { only: ['context', 'cache'] }))).toEqual(['cachebeat · read context, cache'])
+  expect(await draw($, toolRow('ToolUse', TOOL.state, { only: ['settings', 'context'] }))).toEqual(['cachebeat · read context, settings'])
+  expect(await draw($, toolRow('ToolUse', TOOL.state, { only: [] }))).toEqual(['cachebeat · read the state'])
+  expect(await draw($, toolRow('ToolUse', TOOL.state, { only: ['beats'] }))).toEqual(['cachebeat · read the state'])
 })
 
 test('a call is one dim line in the transcript, its answer not drawn', async ($: Engine, on: On) => {
@@ -964,8 +1124,8 @@ const TTL_CASES: [string, World, string, number][] = [
 for (const [name, world, ttl, minutes] of TTL_CASES) {
   test(`auto reads the cache's lifetime: ${name}`, async ($: Engine, on: On) => {
     await setup($, on, world)
-    const { session } = await stateNow($)
-    expect([session.cacheTtl, session.intervalMinutes]).toEqual([ttl, minutes])
+    const { session, cache } = await stateNow($)
+    expect([cache.ttl, session.intervalMinutes]).toEqual([ttl, minutes])
   })
 }
 
@@ -986,7 +1146,7 @@ test('under auto, a cache gone before the hour beats every 4m from there, and st
   await clock.advance(IDLE)
   expect(logs.at(-1)).toBe("the cache was not served (0 read, 90,000 written): this session's cache lasts 5 minutes, so beats come every 4m")
   expect(await cmd($, '')).toBe('on, every 4m idle · 0 beats · next beat in 4m')
-  expect((await stateNow($)).session.cacheTtl).toBe('5m')
+  expect((await stateNow($)).cache.ttl).toBe('5m')
   await clock.advance(8 * M)
   expect(forks).toEqual([IDLE, IDLE + 4 * M, IDLE + 8 * M])
   expect(logs.at(-1)).toContain('stopped: the cache was not served')
@@ -1170,7 +1330,7 @@ test('the status line\'s heart beats as one glyph by default, and its setting ta
 test('Claude sets what 0.7.0 added: auto, and what /model does', async ($: Engine, on: On) => {
   const { store } = await setup($, on, { settings: { interval: 30 } })
   expect(await set($, { settings: { interval: 'auto', onModelSwitch: 'warm' } })).toMatchObject({
-    changed: ['settings.interval', 'settings.onModelSwitch'], session: { intervalMinutes: 50, cacheTtl: '1h' },
+    changed: ['settings.interval', 'settings.onModelSwitch'], session: { intervalMinutes: 50 },
   })
   expect([stored(store).interval, stored(store).onModelSwitch]).toEqual(['auto', 'warm'])
   expect((await call($, 'set', { settings: { onModelSwitch: 'later' } })).deny)
@@ -2003,12 +2163,12 @@ test('viewOf: unknown before anything is cached, warm to the last millisecond, t
 
 test('state says whether the cache is warm, with beating off too: unknown, warm, then cold', async ($: Engine, on: On) => {
   const { clock, sleep } = await setup($, on, { contextTokens: 120_000 })
-  expect((await stateNow($)).cache).toEqual({ ...FRESH_CACHE, contextTokens: 120_000 })
+  expect((await stateNow($)).cache).toEqual({ ...FRESH_CACHE, contextTokens: 120_000, recacheInputTokens: 240_000 })
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, contextTokens: 120_000 })
+  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, contextTokens: 120_000, recacheInputTokens: 240_000 })
   sleep(80 * M) // 90m since the last read
-  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, contextTokens: 120_000 })
+  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, contextTokens: 120_000, recacheInputTokens: 240_000 })
 })
 
 test('state judges a cache found short by its five minutes', async ($: Engine, on: On) => {

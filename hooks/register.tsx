@@ -7,8 +7,9 @@ import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
 import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, isObject, lookOf, minutesText, normalize, normalizeOwn, parseDuration, rowOf, spans, tokens } from './settings'
 import type { Span, Value } from './settings'
-import { SET, STATE, label, parseSet, summary } from './tools'
-import type { SetChange } from './tools'
+import { ratiosOf } from './prices'
+import { SET, STATE, label, parseOnly, parseSet, readSummary, summary } from './tools'
+import type { Section, SetChange } from './tools'
 
 const MIN = 60_000
 export const IDLE = AUTO['1h'] * MIN // the default silence before a beat on a subscription's one-hour cache
@@ -30,7 +31,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 
 const fresh: Saved = {
   enabled: false, keepUntil: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, nextAt: null, beats: 0, row: null, small: null,
-  isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0,
+  isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0, compactions: 0, lastCompactAt: null,
 }
 let s: Saved = { ...fresh }
 
@@ -66,6 +67,7 @@ let paneSurface = 'terminal' // where the settings pane last drew: the terminal'
 let ttl: Ttl = '1h' // the main conversation's cache lifetime, as last read
 let scheduling = 0 // counts schedule() calls: one still awaiting when a newer starts leaves the timer to it
 let isCovered = false // the keep-alive time is set and the cache outlives it, so schedule() armed no beat
+const fullReads = new Set<string>() // the loops (`main`, or a subagent's id) whose copy of `state` is whole: a narrow read of any other is widened
 const rowsSeen = new Set<string>()
 
 export const fmt = (ms: number) => minutesText(Math.max(1, Math.ceil(ms / MIN)))
@@ -581,6 +583,7 @@ async function beat($: EngineInterface): Promise<string> {
   // no event marks /rewind, which runs between turns: the conversation's ending tells it. Mid-turn the ending
   // grows by itself, as each tool's result lands
   if (!busy && s.tail !== null && await isRewound($, s.tail)) {
+    fullReads.clear() // what Claude read of cachebeat's state no longer matches the conversation it keeps
     await pause($, REWOUND, REWOUND)
     return `beats wait for your next turn: ${REWOUND}`
   }
@@ -712,6 +715,7 @@ async function markWarm($: EngineInterface, sentAt: number) {
 /** After /clear or /resume: another conversation, its count from zero, this session's switch and keep-alive time kept. */
 async function anotherConversation($: EngineInterface) {
   s = { ...fresh, enabled: s.enabled, keepUntil: s.keepUntil, isCacheShort: s.isCacheShort }
+  fullReads.clear() // Claude's copy of the state went with the conversation
   cached = 0 // nothing of it cached yet
   resent = false
   await syncSettings($)
@@ -789,37 +793,69 @@ async function scoped($: EngineInterface, to: Target, word: string | undefined) 
 }
 
 /** What the tools answer: this session's beating, the settings as they apply here, and this folder's own. */
-async function stateOf($: EngineInterface) {
-  await syncSettings($)
-  ttl = await cacheTtl($) // usage can cross into credits between turns
-  const now = await $.clock.now()
+const wholeMinutes = (ms: number | null) => (ms === null ? null : Math.floor(ms / MIN))
+
+/** This session's beating. */
+async function sessionOf($: EngineInterface, now: number) {
   const nextBeat = !s.enabled || s.small ? null
     : s.nextAt !== null ? untilNext(s.nextAt - now)
     : stepping ? `${fmt(idle())} after the request on its way was sent`
     : busy ? 'after this turn'
     : isCovered ? 'none needed'
     : 'after the next turn'
-  const view = await cacheNow($)
-  const whole = (ms: number | null) => (ms === null ? null : Math.floor(ms / MIN))
-  const cache = {
-    state: view.state, ttl: view.ttl,
-    lastReadMinutesAgo: whole(view.lastWarm === null ? null : view.at - view.lastWarm),
-    minutesLeft: whole(view.state === 'warm' ? view.expiresAt! - view.at : null),
-    coldForMinutes: whole(view.coldFor), contextTokens: view.contextTokens,
-  }
   const from = intervalFrom()
-  const session = {
+  return {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: from === 'all folders' && cfg.interval === 'auto' ? 'auto' : from,
     keepAliveUntil: s.keepUntil === null ? null : new Date(s.keepUntil).toISOString(),
     keepAliveUntilLocal: s.keepUntil === null ? null : clockText(s.keepUntil, now),
-    keepAliveMinutesLeft: s.keepUntil === null ? null : whole(Math.max(0, s.keepUntil - now)),
-    cacheTtl: s.isCacheShort ? '5m' : ttl,
+    keepAliveMinutesLeft: s.keepUntil === null ? null : wholeMinutes(Math.max(0, s.keepUntil - now)),
     beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, nextBeat, skipping: s.small, paused: s.paused,
   }
-  const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
+}
+
+/** The prompt cache as it is judged now, and what writing the conversation to it again would come to. */
+async function cacheOf($: EngineInterface) {
+  const view = await cacheNow($)
+  const write = ratiosOf(await $.session.model())[view.ttl === '1h' ? 'write1h' : 'write5m']
   return {
-    session, cache, settings: cfg, folder: { path: root, own },
-    ...(Object.keys(own).length ? { allFolders: global } : {}), defaults,
+    state: view.state, ttl: view.ttl,
+    lastReadMinutesAgo: wholeMinutes(view.lastWarm === null ? null : view.at - view.lastWarm),
+    minutesLeft: wholeMinutes(view.state === 'warm' ? view.expiresAt! - view.at : null),
+    coldForMinutes: wholeMinutes(view.coldFor), contextTokens: view.contextTokens,
+    recacheInputTokens: view.contextTokens === null ? null : Math.round(view.contextTokens * write),
+  }
+}
+
+/** The main conversation's context window as the engine reports it, and what cachebeat saw of its compactions. */
+async function contextOf($: EngineInterface, now: number, isSubagent: boolean) {
+  const { context } = await $.session.usage({ breakdown: 'summary' }) // estimated here, no request sent
+  const breakdown = context.breakdown
+  const lastWord = Math.max(s.lastReal ?? -Infinity, s.asked ?? -Infinity)
+  return {
+    tokens: context.tokens ?? null, window: context.window, percent: context.percent ?? null,
+    autoCompactAt: breakdown?.isAutoCompactEnabled ? breakdown.autoCompactThreshold ?? null : null,
+    compactions: s.compactions, lastCompactionMinutesAgo: wholeMinutes(s.lastCompactAt === null ? null : now - s.lastCompactAt),
+    lastMessageMinutesAgo: wholeMinutes(lastWord === -Infinity ? null : now - lastWord),
+    ...(isSubagent ? { of: 'main conversation' } : {}),
+  }
+}
+
+/** What `state` answers: each section asked for (none named: all of them), the main conversation's however a subagent asks. */
+async function stateOf($: EngineInterface, only: readonly Section[] = [], isSubagent = false) {
+  await syncSettings($)
+  ttl = await cacheTtl($) // usage can cross into credits between turns
+  const now = await $.clock.now()
+  const wants = (name: Section) => only.length === 0 || only.includes(name)
+  const defaults = Object.fromEntries(Object.keys(changed(cfg)).map(k => [k, DEFAULTS[k as keyof BeatSettings]]))
+  const { rateLimits } = wants('session') ? await $.session.usage() : { rateLimits: [] }
+  return {
+    ...(wants('session') ? { session: { ...await sessionOf($, now), usageLimits: rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, resetsAt: l.resetsAt })) } } : {}),
+    ...(wants('cache') ? { cache: await cacheOf($) } : {}),
+    ...(wants('context') ? { context: await contextOf($, now, isSubagent) } : {}),
+    ...(wants('settings') ? {
+      settings: cfg, folder: { path: root, own },
+      ...(Object.keys(own).length ? { allFolders: global } : {}), defaults,
+    } : {}),
   }
 }
 
@@ -842,10 +878,14 @@ async function answerSet($: EngineInterface, before: Before, change: SetChange) 
     ...[...set.map(([k]) => k), ...dropped].map(k => `folder.${k}`),
   ]
   const folder = change.folder === undefined ? {} : { folder: { path: root, ...Object.fromEntries([...set, ...dropped.map(k => [k, null])]) } }
-  return { changed, session: (await stateOf($)).session, settings: Object.fromEntries(settings), ...folder }
+  await syncSettings($)
+  ttl = await cacheTtl($) // the interval it answers is what `auto` comes to
+  // saved for all folders, and not what this folder follows: it has its own
+  const shadowed = settings.map(([k]) => k).filter(k => k in own)
+  return { changed, session: await sessionOf($, await $.clock.now()), settings: Object.fromEntries(settings), ...folder, shadowed }
 }
 
-const json = (x: unknown) => JSON.stringify(x, null, 2)
+const json = (x: unknown) => JSON.stringify(x)
 
 async function openSettings($: EngineInterface) {
   await syncSettings($)
@@ -1001,7 +1041,16 @@ export const register: Register = on => {
     return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'}${upcoming}` }
   })
 
-  on('tool.call', { tool: 'mcp__cachebeat__state' }, async $ => ({ result: json(await stateOf($)) }))
+  // a loop's first read is answered whole whatever it names: Claude holds nothing of cachebeat's state until it has read it
+  on('tool.call', { tool: 'mcp__cachebeat__state' }, async ($, e) => {
+    const only = parseOnly(e.only)
+    if ('error' in only) return { deny: only.error }
+    const loop = e.agentId ?? 'main'
+    const isFirst = !fullReads.has(loop)
+    fullReads.add(loop)
+    const answer = await stateOf($, isFirst ? [] : only, e.agentId !== undefined)
+    return { result: json(isFirst && only.length ? { whole: 'your first read in this conversation', ...answer } : answer) }
+  })
 
   on('tool.call', { tool: 'mcp__cachebeat__set' }, async ($, e) => {
     if (e.agentId) return { deny: 'Only the main conversation changes cachebeat.' }
@@ -1028,7 +1077,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__cachebeat__state' } }, async ($, e, next) => {
     if (e.props.isErrored) return next(e)
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor>cachebeat · read the state</Text>
+    return <Text dimColor>{`cachebeat · ${readSummary((e.props.input as { only?: unknown } | undefined)?.only)}`}</Text>
   })
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__cachebeat__set' } }, async ($, e, next) => {
@@ -1070,7 +1119,13 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
-    if (isDone) s.turns = 0 // a conversation anew: its next turn sends it as a first one
+    if (isDone) {
+      s.turns = 0 // a conversation anew: its next turn sends it as a first one
+      s.compactions++
+      s.lastCompactAt = await $.clock.now()
+      fullReads.clear() // the conversation Claude read cachebeat's state in is gone
+      save($)
+    }
     if (isDone && !busy && s.lastWarm !== null) await pause($, 'compaction replaced the conversation', 'compaction replaced the conversation')
     return r
   })
