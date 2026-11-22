@@ -553,17 +553,21 @@ async function beat($: EngineInterface): Promise<string> {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
     if (!isTransient) return stop($, r.error === 'rate_limit' ? 'rate limited' : `API error (${r.error})`)
-    // a request of a turn begun meanwhile warmed the cache, and set the next beat from it: no retry needed
+    // a request sent meanwhile warmed the cache: no retry, the next beat counts from it. That request's own schedule() may
+    // have come due while this beat was on its way, and the guard above dropped the beat it brought: set it again here
     const isWarmedSince = s.lastWarm !== warmedAt
-    if (s.enabled && !stepping && !isWarmedSince) {
-      const call = scheduling
-      const at = await $.clock.now()
-      if (call === scheduling) {
-        // its own call number, so a step check parked in an await on an older chain ends instead of running on beside it
-        const mine = ++scheduling
-        timer?.cancel()
-        s.nextAt = at + RETRY
-        armStep($, mine, at)
+    if (s.enabled && !stepping) {
+      if (isWarmedSince) await schedule($)
+      else {
+        const call = scheduling
+        const at = await $.clock.now()
+        if (call === scheduling) {
+          // its own call number, so a step check parked in an await on an older chain ends instead of running on beside it
+          const mine = ++scheduling
+          timer?.cancel()
+          s.nextAt = at + RETRY
+          armStep($, mine, at)
+        }
       }
     }
     const then = !s.enabled ? 'not retried while off' : isWarmedSince ? 'a request since keeps it warm' : 'retrying in a minute'
