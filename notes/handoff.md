@@ -8,7 +8,7 @@ Start here. The design and every decision are in [plan-0.10.0.md](plan-0.10.0.md
 
 ## Update 2026-11-23 (session `cachebeat-cf`)
 
-- **v0.9.3 is now `740ae82`, pushed, and CI is green on PR #13** (2.1.287 and latest). On top of `efa2be6` it has the request-start port (`9c6c1d5`), the 2.1.329+ compat fix plus 2b's type fix (`4e386ad`), and the retry fix (`740ae82`). It passes 181/0 on 2.1.287, 2.1.322, 2.1.329 and 2.1.330. **It waits only on the user's sleep check.** The answer to open question 1 was yes: the request-start fix is in.
+- **0.9.3 shipped on 2026-11-23** (`740ae82`, PR #13 merged, tag and release out, release notes edited). It carries the request-start, compat and retry fixes. P1 passed live (mods-gotchas, "0.10.0 probes"). `main` is merged into `dev` (`3cde69f`, `version` 0.9.3). The `cachebeat-rel` worktree and the `v0.9.3` and `tmp-093` branches are gone. Item 2 of "What to do next" is done; open question 1 and P1 are answered.
 - **dev is at the merges `bbd8c4c` (retry) and `6033664` (compat)** and passes 212/0 on all four engines.
 - **2.1.329 changed the band above the prompt to one row per plugin.** Only the tests broke (mods-gotchas, "From 2.1.329…"). Still unchecked: what the desktop draws for core's node in cachebeat's row.
 - **The fleet was spawned fresh on 2026-11-23 by `clear`:** `cachebeatOpusHigh01` (review and plan from now on), `cachebeatSonnetHigh01` (easier builds) and `cachebeatOpusXhigh01` (only when stuck; retune it to medium and rename it for the harder builds). The base/fork scheme below is retired, and the old sessions are offline.
