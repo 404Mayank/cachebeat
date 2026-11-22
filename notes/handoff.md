@@ -78,6 +78,13 @@ One step at a time: build, check on both versions, review, fix, merge, then the 
 
 ## Open with the user
 
+**Answered on 2026-11-23:**
+- Q1: the request-start fix went into 0.9.3, which has shipped. P1 passed.
+- Q2, item 10: keep the first-read rule (whole on a loop's first read). Include all four extras: compact answers, `cache.recacheInputTokens`, `session.usageLimits` in `state`, and the README CLAUDE.md tip. The user asked whether the README explains how to use the tools; it does (Quick start, "Ask Claude"), and the tip is one extra line for users who want Claude to check its context unasked.
+- Q4, the long answer: the user called it rare and asked for a web check. The platform docs (prompt-caching page, read 2026-11-23) confirm the lifetime runs from the request's start, with the example "a 4-minute streamed response means a follow-up must begin about 1 minute after it finishes". Left as is: the generic cold line, and **Cache gone cold** decides. The other two Q4 items take the recommendations: the Good to know bullet is enough, and a beat may fire mid-turn.
+- Q5, step 3b: skip the "settings opened" toast. Also **verify live on 2.1.329** that every `/cachebeat` command typed mid-turn (on, off, a time, now, settings, bare) gives feedback at once. The user's point: anyone typing and moving on needs to know it took, not wait for the turn to end. This runs as a 3b follow-up before step 3c.
+- Still open: Q3, the guard's choices. Ask before step 5.
+
 Asked on 2026-11-14 and not answered unless marked. Each has a recommendation.
 
 **Proceeded on without an explicit answer. Reversible; tell the user plainly.**
