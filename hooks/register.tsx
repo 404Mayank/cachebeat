@@ -903,6 +903,7 @@ function say($: EngineInterface, text: string) {
   void update($, tickAtom, t => t + 1)
 }
 
+const OPENED = 'settings opened'
 const USAGE = 'usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
 
 export const register: Register = on => {
@@ -959,10 +960,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // typed over a running turn, the command runs at once but its reply is drawn only when the turn ends: the toast says it was taken
+  // typed over a running turn, the command runs at once but its reply is drawn only when the turn ends: the toast says it was taken.
+  // The settings pane opens at once and is feedback enough; it holds toasts, so this one would show only after the pane closes
   on('command.run', { command: 'cachebeat' }, async ($, e, next) => {
     const r = await next(e)
-    if (busy && r.text) $.ui.toast(`cachebeat: ${r.text}`)
+    if (busy && r.text && r.text !== OPENED) $.ui.toast(`cachebeat: ${r.text}`)
     return r
   })
 
@@ -971,7 +973,7 @@ export const register: Register = on => {
     const words = e.args.trim().toLowerCase().split(/\s+/).filter(Boolean)
     if (words[0] === 'settings' || words[0] === 'config') {
       await openSettings($)
-      return { text: 'settings opened' }
+      return { text: OPENED }
     }
     if (words[0] === 'now') return { text: await beatNow($) }
     if (words[0] === 'global' || words[0] === 'local') return { text: await scoped($, words[0] === 'local' ? 'folder' : 'global', words[1]) }

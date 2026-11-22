@@ -243,6 +243,29 @@ Item 9's probe. Claude Code 2.1.322, `--model haiku`, a terminal in tmux, the pl
   - **Haiku writes 2,500 words in under 15s,** too fast to type over. A turn that stays working long enough: six sequential `sleep 8` Bash calls (a single `sleep 45` is refused by the harness, which tells the model to background it, and a backgrounded one ends the turn). Start the probe with `--allowedTools 'Bash(sleep:*)'`.
   - **Don't write `echo ===` in the shell tool's zsh:** `===` expands as a command and aborts the line.
 
+#### Every form, live on 2.1.329 (2026-11-23, the 3b follow-up)
+
+Claude Code 2.1.329, `--model haiku`, tmux, the plugin loaded from an archive copy of `dev` (`e37f8cc`) in a scratch folder with the installed cachebeat disabled. Two short turns, then a turn of six `sleep 8` calls (and a second of four) with the commands typed over it: four Haiku turns in all. "At once" is the first frame captured 0.5s after Enter. A toast is a box in the transcript's top right corner, its text cut at four lines with `…`.
+
+| Typed mid-turn | At once | Again at the turn's end |
+| --- | --- | --- |
+| `on` | toast `cachebeat: this session: on, every 50m idle · next beat in 50m`; the prompt heart appears | the reply row |
+| `30` (a number alone) | toast `cachebeat: nothing changed: a time needs its unit now. /cachebeat 2h keeps the cache warm for 2 hours, then turns off.…` (cut: the pointer to `global`/`settings` is lost) | the reply row, whole |
+| `30m` | toast `cachebeat: this session: on until 5:28 AM (30m), every 50m idle · starts after this turn` | the reply row |
+| `now` | toast `cachebeat: a turn is running; the beat waits for it to end` | the reply row |
+| `banana` | toast `cachebeat: usage: /cachebeat [on\|off\|<time, like 2h>\|now\|settings] · global […` (cut) | the reply row |
+| `off` | toast `cachebeat: this session: off` | the reply row |
+| bare `/cachebeat` | toast with the status (`cachebeat: off` when off) | the reply row |
+| `settings` | **the pane opens**, in a side panel with the turn still drawing beside it | the reply row `cachebeat: settings opened` |
+
+Every form gave feedback at once, the mistyped ones too, so only the `settings` toast was changed. Not run live: `global`/`local` (the same `command.run` path, so the same toast) and `config` (the same pane as `settings`).
+
+- **Bare `/cachebeat` doesn't open the pane,** though step 3b's brief assumed it did: it answers the status text, as the code does. Only `settings` and `config` open it.
+- **The pane holds toasts** (`holdToasts: true` in `openSettings`). Mid-turn `/cachebeat settings` queued its "settings opened" toast behind the pane, and it drew only once the pane closed with Escape: late, and saying nothing the pane doesn't. Step 3b's follow-up skips it (`OPENED` in `register.tsx`); the reply row at the turn's end still reads "settings opened". Two tests: every form toasts its reply, and `settings`/`config` toast nothing.
+- **A reply is drawn again when the turn ends for every form,** as before: eight `❯ /cachebeat` rows with their `⎿` replies after the closing message.
+- **The engine's echo row drops the arguments:** every command's row reads `❯ /cachebeat`, with nothing after it. Idle too (`/cachebeat 45m` echoed as `❯ /cachebeat`), so it isn't a mid-turn effect and cachebeat can't change it. Only the reply row says which form it was.
+- **Process:** a second Escape typed after the pane closed interrupted the turn ("Interrupted · What should Claude do instead?"). Capture with the whole pane or `head`, not `tail`: the toast is at the top, and a `tail` of the screen missed the `on` toast the first time.
+
 ## The lifetime counts from a request's start (found live, 2026-11-14)
 
 Anthropic's docs say the cache's lifetime "is measured from the start of the request that writes or reads the cache entry, not from the end of its response". Observed, one trial and one control, Claude Code 2.1.322, Haiku, `claude -p --resume`, the five-minute cache forced with `FORCE_PROMPT_CACHING_5M=1` (the writes came back as `ephemeral_5m_input_tokens`), cachebeat disabled, a 52k-token unique filler as the first message:
