@@ -1109,6 +1109,24 @@ test('a command typed over a running turn takes effect at once, and a toast give
   expect(toasts.length).toBe(2) // between turns the reply is drawn at once, and no toast repeats it
 })
 
+test('every form of the command typed over a running turn toasts its reply, a mistyped one too', async ($: Engine, on: On) => {
+  const { toasts } = await setup($, on)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  const forms = ['on', '30m', '30', 'now', 'banana', 'global 20', 'off', '']
+  const replies: string[] = []
+  for (const form of forms) replies.push((await cmd($, form))!)
+  expect(toasts).toEqual(replies.map(r => `cachebeat: ${r}`))
+  expect(replies).toContain(`usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]`) // banana
+})
+
+test('the settings command typed over a running turn toasts nothing: the pane it opens holds toasts until it closes', async ($: Engine, on: On) => {
+  const { toasts } = await setup($, on)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  expect(await cmd($, 'settings')).toBe('settings opened')
+  expect(await cmd($, 'config')).toBe('settings opened')
+  expect(toasts).toEqual([])
+})
+
 test('on the desktop the band above the prompt carries the status line, and a beat logs no line', async ($: Engine, on: On) => {
   const { clock, logs, tails } = await setup($, on, { settings: { heartAnimate: false, lineAnimate: false, showTokens: false } })
   const band = async () => (await draw($, BAND('desktop'))).filter(t => t !== 'engine').join('').replace('\u00a0', ' ') // the space after the heart can't collapse
