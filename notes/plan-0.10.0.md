@@ -1,6 +1,6 @@
-# 0.10.0: cache state, keep-alive time, resume, cold guard, dollars, CacheTax
+# 0.10.0: cache state, keep-alive time, resume, cold guard, dollars, Stats
 
-Status (2026-11-14): steps 0, 1, 2, 2b, 3 and 3b are built, reviewed and merged into `dev`; the tokens-only step and the request-start fix (the cache counts from when a request was sent; one beat in flight at a time) are merged too (`05294d1`). Step 3c (item 10) is designed and waits on the user's answers, and step 4 is the next to build. The plan was brought in line with the decisions of 2026-11-14 that day: items 2, 4 and 5 changed, and the open dollar question was settled the same day: dollars left everything users and Claude see (the tokens-only step, built on `step-tokens`). The mark **[$?]** stays only in items 5 and 7, for steps 6 and 7 to redo their mock-ups. Step 1 ships alone as **0.9.3** ([PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green, waiting on the live sleep check alone: the plugin directory is dropped, so nothing waits on its portal). It was planned as 0.9.2, but a cloud session had already released 0.9.2 on 2026-10-13 (the `h` rename), so read "0.9.2" below as 0.9.3. Where to start: notes/handoff.md. The user answered the plan's questions the same day ("Decisions" at the end). Items 5 and 7 (the Status and CacheTax pages) are still **provisional**, but no longer for the screenshots, which arrived ("Decided from it"): they wait on a look pass against the screenshots (item 5, "What steps 6 and 7 wait on").
+Status (2026-11-14): steps 0, 1, 2, 2b, 3 and 3b are built, reviewed and merged into `dev`; the tokens-only step and the request-start fix (the cache counts from when a request was sent; one beat in flight at a time) are merged too (`05294d1`). Step 3c (item 10) is designed and waits on the user's answers, and step 4 is the next to build. The plan was brought in line with the decisions of 2026-11-14 that day: items 2, 4 and 5 changed, and the open dollar question was settled the same day: dollars left everything users and Claude see (the tokens-only step, built on `step-tokens`). The mark **[$?]** stays only in items 5 and 7, for steps 6 and 7 to redo their mock-ups. Step 1 ships alone as **0.9.3** ([PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green, waiting on the live sleep check alone: the plugin directory is dropped, so nothing waits on its portal). It was planned as 0.9.2, but a cloud session had already released 0.9.2 on 2026-10-13 (the `h` rename), so read "0.9.2" below as 0.9.3. Where to start: notes/handoff.md. The user answered the plan's questions the same day ("Decisions" at the end). Items 5 and 7 (the Status and Stats pages) are still **provisional**, but no longer for the screenshots, which arrived ("Decided from it"): they wait on a look pass against the screenshots (item 5, "What steps 6 and 7 wait on").
 
 **Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 and P8 are still pending.
 
@@ -16,7 +16,7 @@ The user asked for eight things:
 4. **Cold guard:** a message sent to a session whose cache has gone cold is held once. A second send goes through, with a warning saying how long the cache has been cold. There's a setting for this session and one for all sessions. (As first asked. Since 2026-11-14 the guard asks `Send` / `Don't send` instead: item 4.)
 5. **Bare `/cachebeat`** shows a summary, like `/usage`: warm or cold, TTL, last active, and so on.
 6. **Dollar figures** in cachebeat.
-7. **A CacheTax page,** like `/stats`: what beats cost, what they saved, cold sends.
+7. **A Stats page,** like `/stats`: what beats cost, what they saved, cold sends.
 8. **Redo the demo GIF,** last.
 
 ## What's definitive and what's inferred
@@ -262,7 +262,7 @@ Built in step 2 (2026-11-09), and removed on 2026-11-14: the user said tokens ar
   - every dollar figure users and Claude read: `≈$` in the beat log, `state.cache.recacheUsd` and `state.session.lastBeatUsd`, the dollar sentences of `STATE`'s description, and the README's dollar bullet
   - the machinery that only priced things: the session-cost rise around a fork and its bound (`RISE_BOUND`), the rates learned from `classic.PostModelSwitch`'s estimate (`learnRate`, `Learned`), `priceOf`, `writeRate`, `money()`, `CacheFacts.writeUsdPerToken`, `CacheView.recacheUsd` and `Saved.lastUsd`
   - their tests
-- **Kept: the price table, as ratios.** `hooks/prices.ts` holds the same per-model rows (the pricing page, checked 2026-11-09) and answers `ratiosOf(model)`: a cache read, a five-minute write and a one-hour write against input (`{ read, write5m, write1h, isListed }`). A model the table lacks gets the common ratios (0.1, 1.25, 2) and `isListed: false`, so CacheTax can say its figure uses them. Haiku 5.5's long-prompt tier multiplies every kind, so no ratio depends on the prompt's size. Nothing in the plugin calls `ratiosOf` yet: the CacheTax page (step 7) weights tokens by it, in input-token equivalents.
+- **Kept: the price table, as ratios.** `hooks/prices.ts` holds the same per-model rows (the pricing page, checked 2026-11-09) and answers `ratiosOf(model)`: a cache read, a five-minute write and a one-hour write against input (`{ read, write5m, write1h, isListed }`). A model the table lacks gets the common ratios (0.1, 1.25, 2) and `isListed: false`, so Stats can say its figure uses them. Haiku 5.5's long-prompt tier multiplies every kind, so no ratio depends on the prompt's size. Nothing in the plugin calls `ratiosOf` yet: the Stats page (step 7) weights tokens by it, in input-token equivalents.
 - **A saved state from step 2** carries `lastUsd`. `restored()` keeps only the keys `fresh` has, so it loads and loses it; a test pins that.
 - **What replaced a dollar figure:** the token count that stood beside it. `♥ cache renewed (184,212 read, 12 written)`; the `cache` paragraph of `STATE` names the conversation's size in tokens.
 - **Not touched:** `estimated_cache_write_usd` and `pricing` on `classic.PostModelSwitch` are the engine's inputs, and the hook still receives them. `classic.SessionStart`'s resume estimate is still unread (item 2).
@@ -458,7 +458,7 @@ Rewritten 2026-11-14 around "Decided from it": the guard **asks** (`Send` / `Don
 | `channel`, `slack-ping` | No | A person sent it, but from Slack or Telegram, where the dialog doesn't draw. |
 | `task-notification`, `scheduled-trigger`, `peer`, `peer-send-message`, `projects-relay`, `coordinator`, `observer`, `observer-activity`, `auto-continuation`, `plugin` | No | Nobody is at a dialog for these. |
 
-An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and counted as a cold send, so CacheTax still shows what it cost. **Provisional:** `channel`, `slack-ping` and `unclassified` passing. With a numeric **if unanswered** they could be asked safely, since the message goes anyway after the wait; that's a later choice.
+An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and counted as a cold send, so Stats still shows what it cost. **Provisional:** `channel`, `slack-ping` and `unclassified` passing. With a numeric **if unanswered** they could be asked safely, since the message goes anyway after the wait; that's a later choice.
 
 **Probes, before the hook is built:**
 
@@ -506,9 +506,9 @@ An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and cou
 
 **Current behavior:** one line of text (register.tsx:834–843).
 
-**The design:** Claude Code's `/status`, `/config`, `/usage` and `/stats` are tabs of one dialog. Mirror that: the settings pane gains two read-only tabs, **Status** and **CacheTax**, ahead of the five settings tabs.
-- **Their ids are `summary` and `cachetax`** (chosen 2026-11-14). Not `status`: `hooks/settings.ts` already gives that id to the **Turn line** tab, `register.tsx` keys the preview's speed off it, and the pane test asserts `tab:status`. The titles the user sees stay **Status** and **CacheTax**.
-- Bare `/cachebeat` opens it on **Status**, `/cachebeat stats` on **CacheTax**, and `/cachebeat settings` on **Beating**, as today.
+**The design:** Claude Code's `/status`, `/config`, `/usage` and `/stats` are tabs of one dialog. Mirror that: the settings pane gains two read-only tabs, **Status** and **Stats**, ahead of the five settings tabs.
+- **Their ids are `summary` and `stats`** (chosen 2026-11-14; `stats` and the title **Stats** replaced `cachetax` and **CacheTax** on 2026-11-23). Not `status`: `hooks/settings.ts` already gives that id to the **Turn line** tab, `register.tsx` keys the preview's speed off it, and the pane test asserts `tab:status`. The titles the user sees stay **Status** and **Stats**.
+- Bare `/cachebeat` opens it on **Status**, `/cachebeat stats` on **Stats**, and `/cachebeat settings` on **Beating**, as today.
 - The command still answers its one line as `text`, so the transcript keeps a record, and Claude sees it in `-p`, where nothing draws.
 
 **Status** draws from `cacheNow($)` and the session. **[$?]** Tokens only: decided 2026-11-14. The `≈$` figures on the Size and This session rows go; the mock-up below still shows them until step 6 redoes it in tokens.
@@ -526,7 +526,7 @@ Last message 12m ago
 
 - **Pane mechanics** (pane.tsx `settingsPane`, and the pane's hooks in register.tsx):
   - **`TABS` stays settings-only,** so `rowOf`, `accept` and the tool schema never see the read-only tabs.
-  - **A second list, `PAGES`, is what the pane walks** (chosen 2026-11-14): `export const PAGES = [{ id: 'summary', title: 'Status' }, { id: 'cachetax', title: 'CacheTax' }, ...TABS]` in settings.ts, beside `TABS`. Everything that moves between tabs reads it in place of `TABS`:
+  - **A second list, `PAGES`, is what the pane walks** (chosen 2026-11-14): `export const PAGES = [{ id: 'summary', title: 'Status' }, { id: 'stats', title: 'Stats' }, ...TABS]` in settings.ts, beside `TABS`. Everything that moves between tabs reads it in place of `TABS`:
     - the tab bar's buttons and the hotkey hint in pane.tsx (`TABS.map`, `` `1-${TABS.length}` ``), so the hotkeys become 1–7
     - the `ui.focus` hook's wrap off either end of the tab bar (`TABS.findIndex`, `TABS[0]`, `TABS.at(-1)`)
     - the `ui.scroll` hook's step along the tab bar (the modulo over `TABS.length`)
@@ -544,18 +544,18 @@ Last message 12m ago
 - The tab hotkeys reach all seven, and the arrows walk all seven and wrap from `tab:alerts` to `tab:summary` and back.
 - **For whoever edits the pane tests next:** the existing test is named "the settings pane: six tabs, …" and asserts five (`tab:beating` … `tab:alerts`). It becomes seven here; fix the name with it.
 
-**README:** the Commands table: `/cachebeat` opens the status page, `/cachebeat stats` opens CacheTax. A short "Status" paragraph under "What you'll see".
+**README:** the Commands table: `/cachebeat` opens the status page, `/cachebeat stats` opens Stats. A short "Status" paragraph under "What you'll see".
 
 **What steps 6 and 7 wait on** (2026-11-14). The screenshots arrived (`/usage` and `/stats`; "Decided from it" says what's in them), so nothing waits on them any more. Both pages are still provisional, for two things:
-- **Tokens only** (decided 2026-11-14, built). Both mock-ups still carry `≈$`: redo them in tokens, and CacheTax's Net in input-token equivalents.
+- **Tokens only** (decided 2026-11-14, built). Both mock-ups still carry `≈$`: redo them in tokens, and the Stats page's Net in input-token equivalents.
 - **A look pass against the screenshots, for the user to approve,** before either page is built. What it has to settle:
   - Status's Cache row against `/usage`'s own line (`… · warm (1h TTL, last activity 32s ago)`)
-  - CacheTax's three columns against `/stats`' range switch (`All time · Last 7 days · Last 30 days`)
-  - whether CacheTax gets `/stats`' heatmap by day
+  - the Stats page's three columns against `/stats`' range switch (`All time · Last 7 days · Last 30 days`)
+  - whether Stats gets `/stats`' heatmap by day
 
   No API gives either built-in page's figures, so both pages draw from cachebeat's own counts whatever the look.
 
-### Item 7: CacheTax (step 7, provisional)
+### Item 7: Stats (step 7, provisional)
 
 **[$?]** Tokens only: decided 2026-11-14. The `usd`, `keptUsd` and `coldUsd` counters and the page's dollar rows go; the Net is in input-token equivalents (tokens weighted by each model's read and write ratios, from `ratiosOf` in `hooks/prices.ts`). The record and the mock-up below still show dollars until step 7 redoes them.
 
@@ -574,10 +574,10 @@ stats: {
 
 - **"Saved" is counted when it happens:**
   - A turn after an idle stretch with at least one beat whose first `turn.step` reads the cache (`got + MISSED >= cached`) adds `kept += 1` and `keptUsd += (cached × (writeRate − readRate))`.
-  - **Net = `keptUsd − usd`,** and it can be negative. That's the honest number, and why the page is called CacheTax.
+  - **Net = `keptUsd − usd`,** and it can be negative. That's the honest number.
 - **A cold send** is a turn whose first step wrote more than it read after more than a TTL idle.
 - **Writes:** the record is written at most once per beat or turn end, through the same changed-only write as step 4. Retention is the same 30 days, by the record's `at`.
-- **The page** (the CacheTax tab) aggregates with `$.store.keys()` and reads every `session:*`. That's a few hundred small JSON values at most. It shows today, 7 days and 30 days, and this session:
+- **The page** (the Stats tab) aggregates with `$.store.keys()` and reads every `session:*`. That's a few hundred small JSON values at most. It shows today, 7 days and 30 days, and this session:
 
 ```
                 Today    7 days   30 days
@@ -602,7 +602,7 @@ Held by guard      1        4        11
 - A record older than 30 days is pruned, and isn't counted.
 - The page renders with no records (all zeros, no `NaN`).
 
-**README:** **[$?]** (tokens only: decided 2026-11-14, so no dollar figure in it) the Privacy section gains "and, for each session, counts of beats, tokens and cold sends by day, kept on your machine for 30 days to show on the CacheTax page. Nothing of it is sent anywhere." A short CacheTax paragraph under "What you'll see".
+**README:** **[$?]** (tokens only: decided 2026-11-14, so no dollar figure in it) the Privacy section gains "and, for each session, counts of beats, tokens and cold sends by day, kept on your machine for 30 days to show on the Stats page. Nothing of it is sent anywhere." A short Stats paragraph under "What you'll see".
 
 ### Item 8: the demo GIF (step 8)
 
@@ -843,7 +843,7 @@ What a skill *would* add is the one thing this design doesn't: a line always in 
 1. **"The whole state before a settings change"** is met here by making the read unnecessary (`set`'s answer, with `shadowed`), not by forcing it. If you want it literal, the cheap form is `set` answering the whole state on a loop's first call (≈360 tokens, once); the strict form is a refusal, which I'd not build.
 2. **The first read whole even for a pure context check?** It's your rule, and it's one rule. It costs ≈360 tokens once per conversation and per compaction, mostly settings Claude may never need. The alternative is no first-read rule at all, since `set` no longer depends on one.
 3. **Should Claude check its context unasked?** Not with the tools deferred. The README tip leaves it to each user's `CLAUDE.md`; a fixed system-prompt line or a skill would reach everyone and cost everyone.
-4. **A weighted re-cache figure in `state`?** `cache.contextTokens` is raw tokens. CacheTax's net is in input-token equivalents; `cache.recacheInputTokens` (tokens × the model's write ratio) would match it. Left out until you say the tool should speak that unit.
+4. **A weighted re-cache figure in `state`?** `cache.contextTokens` is raw tokens. Stats' net is in input-token equivalents; `cache.recacheInputTokens` (tokens × the model's write ratio) would match it. Left out until you say the tool should speak that unit.
 5. **Usage limits in `state`?** The Status page shows them and `state` doesn't. If wanted, `session.usageLimits` joins in step 6.
 6. **Printing answers compact** changes nothing Claude reads but the whitespace. Say if you'd rather keep them indented.
 
@@ -967,9 +967,9 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Delivers:** the pane's Status tab, and bare `/cachebeat` opening it.
 - **Depends on:** steps 1–5 (everything it shows), and the look pass (item 5, "What steps 6 and 7 wait on"). The screenshots arrived.
 
-### Step 7: CacheTax (item 7, provisional)
+### Step 7: Stats (item 7, provisional)
 
-- **Delivers:** the counters in the session record, the CacheTax tab, `/cachebeat stats`, and README and Privacy.
+- **Delivers:** the counters in the session record, the Stats tab, `/cachebeat stats`, and README and Privacy.
 - **Depends on:** step 2 (`ratiosOf`, for the Net), step 4 (the record), step 5 (asked and cold sends), step 6 (the tabbed pane), and the look pass. The screenshots arrived.
 - **Bundles:** collection with display, since neither is testable without the other.
 
@@ -1003,7 +1003,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **A cold guard that drops the message and lets a second send through:** at any time until the cache is warm again (the first proposal), then within a window (**send again within**, the design until 2026-11-14). The user chose a question instead: one keypress, no resend, no window setting.
 - **The cold guard's question in our own pane (`$.ui.open`)** instead of the engine's dialog. More to build and to get right on each surface. It's the fallback if G1 finds the engine's dialog can't be closed (item 4).
 - **One shared `sessions` or `stats` store key.** Open sessions writing it lose each other's updates, even reading fresh first. It was the fallback had the directory flagged computed keys; with the directory dropped it isn't needed.
-- **Separate panes for Status and CacheTax.** They would duplicate the pane's focus, desktop and Esc handling, which took 0.7.x to get right.
+- **Separate panes for Status and Stats.** They would duplicate the pane's focus, desktop and Esc handling, which took 0.7.x to get right.
 - **"Expired" for the cold state.** "Cold" is shorter, pairs with "warm", and names the guard. The user chose "cold" for all visible text.
 
 ## Decisions
@@ -1029,13 +1029,13 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 - **Warm status:** nothing live exists to read. The plan says "likely warm" and shows the time left.
 - **Dollars: none** (the user, 2026-11-14: tokens are the currency, and dollars are everywhere or nowhere; built in the tokens-only step):
   - no `≈$`, no `usd` field and no dollar wording in anything a user or Claude reads: the beat log, the turn line, the pane, the commands' answers, the tools, the README
-  - the price table stays in `hooks/prices.ts` as `ratiosOf(model)`, for CacheTax's Net in input-token equivalents
-- **CacheTax:** a tab beside Status in the `/cachebeat` page, opened by `/cachebeat stats`, kept 30 days.
+  - the price table stays in `hooks/prices.ts` as `ratiosOf(model)`, for the Stats page's Net in input-token equivalents
+- **Stats:** a tab beside Status in the `/cachebeat` page, opened by `/cachebeat stats`, kept 30 days.
 - **Step 1 ships early,** as 0.9.3 (0.9.2 was taken).
 
 ## From cache-tax
 
-[karanb192/cache-tax](https://github.com/karanb192/cache-tax) (MIT, 2.4.2, read 2026-11-14) is the mod the CacheTax page is named after. It warms on a window you arm (`/keepwarm 90m`, 50-minute pings) and asks before a cold send. What was proposed to the user from it; what they decided is under "Decided from it":
+[karanb192/cache-tax](https://github.com/karanb192/cache-tax) (MIT, 2.4.2, read 2026-11-14) is a mod the Stats page draws ideas from; the page is not named after it (the user, 2026-11-23). It warms on a window you arm (`/keepwarm 90m`, 50-minute pings) and asks before a cold send. What was proposed to the user from it; what they decided is under "Decided from it":
 
 - **Ask, don't drop.** Its guard opens `$.ui.ask` with `Send anyway ($4.01)` and `Don't send`, and falls back to drop-once-then-resend only when the question is dismissed or nobody can answer (`-p`). One keypress instead of a resend, and no window setting. **Decided: item 4 now asks.** It may also be the answer for Remote Control, if a remote client can answer an ask (G4).
 - **Who gets guarded.** It holds every origin a person may have sent (`bridge`, `sdk`, `channel`, `slack-ping`, `unclassified`) and lets through, with the price logged, the ones nobody could resend: `task-notification`, `scheduled-trigger`, `peer`, `peer-send-message`, `projects-relay`, `coordinator`, `observer`, `observer-activity`. Item 4 now asks about `composer`, and `bridge` if the live check passes; its table says what each other origin gets, and why it differs from this list (a question needs someone at the dialog; a drop-and-resend doesn't).
@@ -1043,7 +1043,7 @@ The user's answers to the questions this plan first asked, 2026-11-09:
 - **The message compares:** "re-writes up to 200,502 tokens = $4.01 (a warm turn would have cost $0.05)". "Up to", because after a resume the engine's context figure includes the last response's output.
 - **A resend from a new process goes through:** after a hold it stores the last response's time under the session id, so `claude -p` (one process per turn) isn't held forever.
 - **`guard test`:** asks once on the next prompt as if the cache were cold, so a user can see the guard without waiting an hour.
-- **A break-even figure** on its card: how many pings one re-cache pays for (80 on Fable 5.1). A natural line for our CacheTax page.
+- **A break-even figure** on its card: how many pings one re-cache pays for (80 on Fable 5.1). A natural line for our Stats page.
 - **Both installed:** it checks `$.command.list` at session start for its hook version and says so once. We should check for `keepwarm`/`cache-tax` the same way: with both mods on, a session gets two sets of beats and two guards.
 - **Team and Enterprise:** a managed plugin seated above a mod swallows the classic events and compaction. It falls back to `session.end` for `/clear` and to a message-count drop for compaction. Worth a check of what cachebeat relies on.
 - **`$.cacheTax.status()`** for other mods' status bands. We could offer `$.cachebeat.state()`.
@@ -1073,7 +1073,7 @@ Folded into item 4, and the directory and screenshot lines through the plan, on 
     - The beat due when a long request ends fires at once, mid-turn, while that request's tool starts. If the tool is quick, the turn's next request would have read the cache anyway.
 - **The cold guard's provisional points** (item 4), for the user: the default of **if unanswered** (`drop`); whether `drop` should also close the question after a while; the 1–15 minute range; and `channel`, `slack-ping` and `unclassified` messages passing unasked.
 - **Item 10's six questions** ("Open, for the user" there).
-- **The look pass for Status and CacheTax** against the screenshots (item 5, "What steps 6 and 7 wait on"). The screenshots themselves arrived.
+- **The look pass for Status and Stats** against the screenshots (item 5, "What steps 6 and 7 wait on"). The screenshots themselves arrived.
 - **Holding a Remote Control message,** pending a live check in step 5. The user wants `bridge` prompts held like the composer's. What the docs say (the 2.1.319 declarations and code.claude.com/docs/en/plugins/mods/events, read 2026-11-14): `origin.kind === 'bridge'` is "the user's message through the Remote Control bridge (a phone or web client)"; `{ drop: reason }` is allowed for any origin and "the text is shown to the user as the reason". Nothing says where a remote client shows that reason, or whether the phone keeps the text to send again. `$.ui.ask` "rejects when dismissed, and in a `-p` run"; whether a remote client can answer one is not stated either. The check (G4 in item 4), now that the guard asks: from a phone, send to a cold session over `coldGuardTokens`, and note whether the question shows there, whether it can be answered there, and what `Don't send` leaves on the phone. If the question never reaches the phone, skip `bridge` and put a README line suggesting `/cachebeat` before sending from a remote session (check first that `/cachebeat` answers over Remote Control).
 - **P1 and P8,** pending: P1 needs the machine suspended. P2–P7 are answered. Also not checked in step 0: a live `prompt_cache_likely_expired: true`, any origin but `composer`, and the desktop app.
   - **P8 is narrower than it was.** The declarations 2.1.287 writes (generated 2026-11-14 from the local 2.1.287 binary) carry `prompt.submit`, `$.ui.ask`, `$.session.id`, the origin kinds, and resume's four fields. All are optional in the types and nothing has *run* there: each step's tests on CI's 2.1.287 leg answer the rest.

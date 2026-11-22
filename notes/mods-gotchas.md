@@ -273,7 +273,7 @@ Anthropic's docs say the cache's lifetime "is measured from the start of the req
 
 ## Dollars (built in step 2 of 0.10.0)
 
-**Removed on 2026-11-14 (the tokens-only step):** no dollar figure reaches a user or Claude any more, because the user said tokens are cachebeat's currency and dollars are either everywhere or nowhere. This section stays as the record of how they were worked out. `hooks/prices.ts` keeps the table as `ratiosOf(model)` (read, 5-minute write and 1-hour write against input), for CacheTax's input-token equivalents; the cost-delta around a fork, `RISE_BOUND`, the learned rates, `money()`, `lastUsd`, `recacheUsd` and `lastBeatUsd` are gone.
+**Removed on 2026-11-14 (the tokens-only step):** no dollar figure reaches a user or Claude any more, because the user said tokens are cachebeat's currency and dollars are either everywhere or nowhere. This section stays as the record of how they were worked out. `hooks/prices.ts` keeps the table as `ratiosOf(model)` (read, 5-minute write and 1-hour write against input), for the Stats page's input-token equivalents; the cost-delta around a fork, `RISE_BOUND`, the learned rates, `money()`, `lastUsd`, `recacheUsd` and `lastBeatUsd` are gone.
 
 How `hooks/prices.ts` and the beat's cost came out. "Observed" is a probe's or a test's result; "inferred" is a reading of it.
 
@@ -296,7 +296,7 @@ How `hooks/prices.ts` and the beat's cost came out. "Observed" is a probe's or a
   - **Whether the switch's estimate follows `cache_ttl`** (the 1-hour rate when it says `1h`) is inferred from the resume sample, not seen on a switch.
   - The learned rates live in a module variable and are relearned after a reload at the next switch; they aren't stored.
 - **Display:** `money()` gives `≈$0.02` from a cent up, four decimals below it (a Haiku beat is about $0.0005), and `<$0.0001` below that. A figure in `state` is rounded to six decimals.
-- **No `$` in the turn line, and the plan's "dim line on a subscription" isn't drawn yet:** neither the beat log nor `state` is a page. The Status and CacheTax pages (steps 6 and 7) draw it. The `state` tool's text and the README carry the same words.
+- **No `$` in the turn line, and the plan's "dim line on a subscription" isn't drawn yet:** neither the beat log nor `state` is a page. The Status and Stats pages (steps 6 and 7) draw it. The `state` tool's text and the README carry the same words.
 - **The test kit:**
   - `expect` has no `toBeCloseTo` (the tests have a `near` helper).
   - `setup()` can be called once per test: a second call throws on `on("clock.*")`.
