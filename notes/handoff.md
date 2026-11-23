@@ -87,6 +87,7 @@ One step at a time: build, check on both versions, review, fix, merge, then the 
   - **if unanswered** stays a setting, with the recommended default: `'drop'`, the question stays open, and nothing is ever sent unanswered.
   - Only terminal messages are asked about, plus Remote Control if G4 passes; otherwise `bridge` passes and the README suggests running `/cachebeat` first. Channels, Slack pings and unclassified messages pass, logged and counted.
   - A question that can't be shown drops the message.
+- The look pass for Status and Stats (steps 6 and 7) was delegated to the orchestrator: "approve whatever you find best, we can tweak later" (2026-11-23). The mock-ups redrawn in tokens are approved as drawn, so steps 6 and 7 no longer wait on the user.
 - Opus 5.5's saved default effort (medium since the retune): "doesn't matter", so it was left as is.
 
 Asked on 2026-11-14 and not answered unless marked. Each has a recommendation.
