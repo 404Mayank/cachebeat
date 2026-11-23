@@ -32,6 +32,7 @@ The next agent raises these with the user before anything else. The user said on
 - **Step 4 changed one behaviour (accepted by the orchestrator and the reviewer):** `/resume` into a conversation with no record follows **New sessions start**. Before, it kept the on/off of the conversation left behind. When that turns beating off, a line says so.
 - **Owed live check (step 4):** that a resumed conversation's first turn reads a cache that beats kept warm. It needs a wait of over an hour. Both the resume line's "likely warm" and Claude Code's own `prompt_cache_likely_expired` assume it does.
 - **The beat race** (a timer beat and `/cachebeat now` both sending) is fixed on `dev` (2026-11-23) and ships with 0.10.0. 0.9.3 still has it; it's rare and costs one extra beat. No 0.9.4 was cut for it.
+- **After `/model`, the cold guard reads the cache as warm** (step 5 review), though the new model's cache is empty. The first message after a switch re-caches the whole conversation without asking. Left as is: `state` judges it the same way, and the user just chose the switch. Say if the guard should ask there too.
 - **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
 
 ## Where things are
