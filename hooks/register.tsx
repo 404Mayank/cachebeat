@@ -839,6 +839,8 @@ async function markWarm($: EngineInterface, sentAt: number) {
 /** After /clear or /resume: another conversation, its count from zero, this session's switch and keep-alive time kept. */
 async function anotherConversation($: EngineInterface) {
   convs++
+  asking?.close?.(LEFT_BEHIND) // a question about the conversation left behind: its message is dropped
+  asking = null
   s = { ...fresh, enabled: s.enabled, keepUntil: s.keepUntil, isCacheShort: s.isCacheShort, guard: s.guard }
   fullReads.clear() // Claude's copy of the state went with the conversation
   cached = 0 // nothing of it cached yet
@@ -1086,37 +1088,62 @@ async function guardCommand($: EngineInterface, word: string | undefined) {
 /** Origins the cold guard asks about: a person at this terminal. Every other is sent, logged and counted. */
 const ASKED_ORIGINS: readonly string[] = ['composer']
 
-/** The cold guard's question while it's open: its text, which the AskUserQuestion hook knows it by, and how to close it unanswered. */
-let asking: { text: string; close: (() => void) | null; isTimedOut: boolean } | null = null
+/**
+ * The cold guard's question while it's open: its text, which the AskUserQuestion hook knows it by, and how to close it
+ * unanswered, with the reason the ask then rejects with.
+ */
+let asking: { text: string; close: ((reason: string) => void) | null } | null = null
 
-/** A message sent on a cold cache: counted, and said in the transcript before it goes. */
-async function noteColdSend($: EngineInterface, how: string, coldFor: string, size: number) {
+// why the guard closed its own question: the ask's rejection carries it, so neither is taken for the user's Esc
+const TIMED_OUT = 'unanswered: cachebeat sent the message'
+const LEFT_BEHIND = 'the conversation changed: cachebeat dropped the message'
+
+/**
+ * What the cold guard does with its question's outcome: any answer decides (Send sends, anything else drops), and with
+ * none, only the guard's own timer sends; a dismissal drops.
+ */
+export const coldOutcome = (answer: string | null, isTimedOut: boolean): 'send' | 'send-unanswered' | 'drop' =>
+  answer === 'Send' ? 'send' : answer === null && isTimedOut ? 'send-unanswered' : 'drop'
+
+/** Why the guard dropped a message, and the way to send it. */
+const dropped = (why: string) => `cachebeat: not sent. ${why} Send it again to be asked, or /cachebeat guard off.`
+
+/**
+ * A message about to go to the cache the guard asked about, read again: a turn or a beat may have warmed it while the
+ * question was open, and then it goes as any message does. Still cold, it is counted and said before it goes.
+ */
+async function noteColdSend($: EngineInterface, how: string) {
+  const view = await cacheNow($)
+  if (view.state !== 'cold' || view.contextTokens === null) return
   s.cold++
-  s.coldTokens += size
+  s.coldTokens += view.contextTokens
   await save($)
-  $.ui.log(`sent on a cold cache${how}: cold for ${coldFor}, ${tokens(size)} tokens cached again`)
+  $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
 }
 
 /** Asks the cold guard's question; resolves the answer, or null when it was dismissed, closed unanswered, or couldn't be asked. */
 async function askCold($: EngineInterface, text: string, wait: 'drop' | number) {
-  const open = { text, close: null as (() => void) | null, isTimedOut: false }
+  const open: NonNullable<typeof asking> = { text, close: null }
   asking = open
-  s.held++
-  await save($)
-  // past the wait, the AskUserQuestion hook closes the dialog: the ask rejects, and the flag says it was the timer
-  const timer = wait === 'drop' ? undefined : $.clock.after(wait * MIN, () => {
-    open.isTimedOut = true
-    open.close?.()
-  })
-  let answer: string | null = null
+  let timer: { cancel: () => void } | undefined
   try {
-    answer = await $.ui.ask(text, ['Send', "Don't send"])
-  } catch {
-    // dismissed (Esc), closed by the timer, or nowhere to ask: the caller tells them apart by the flag
+    s.held++
+    await save($)
+    // past the wait, the AskUserQuestion hook closes the dialog, and the ask rejects with the timer's own reason
+    timer = wait === 'drop' ? undefined : $.clock.after(wait * MIN, () => open.close?.(TIMED_OUT))
+    let answer: string | null = null
+    let isTimedOut = false
+    try {
+      answer = await $.ui.ask(text, ['Send', "Don't send"])
+    } catch (err) {
+      // dismissed (Esc), closed by the timer or a change of conversation, or nowhere to ask: only the timer's reason sends
+      isTimedOut = String(err).includes(TIMED_OUT)
+    }
+    return { answer, isTimedOut }
+  } finally {
+    timer?.cancel()
+    if (asking === open) asking = null
   }
-  timer?.cancel()
-  asking = null
-  return { answer, isTimedOut: open.isTimedOut }
 }
 
 const OPENED = 'settings opened'
@@ -1215,24 +1242,18 @@ export const register: Register = on => {
     const coldFor = fmt(view.coldFor!)
     const size = view.contextTokens
     if (!ASKED_ORIGINS.includes(e.origin.kind)) {
-      await noteColdSend($, '', coldFor, size)
+      await noteColdSend($, '')
       return next(e)
     }
     // a second message can't wait on the open question: a hook waiting with no question of its own is cut at 10s and sent
-    if (asking) return { drop: 'cachebeat: not sent. A question about the cold cache is open: answer it first.' }
+    if (asking) return { drop: dropped('A question about the cold cache is open: answer it first.') }
     const wait = cfg.coldGuardUnanswered
     const said = `The cache has been cold for ${coldFor}, so this message caches ${tokens(size)} tokens again. Send it?`
     const { answer, isTimedOut } = await askCold($, said, wait)
-    if (answer === 'Send') {
-      await noteColdSend($, '', coldFor, size)
-      return next(e)
-    }
-    // only no answer at all is the timeout's: a label or free text that landed as the timer fired still decides
-    if (answer === null && isTimedOut) {
-      await noteColdSend($, ` after ${wait}m unanswered`, coldFor, size)
-      return next(e)
-    }
-    return { drop: `cachebeat: not sent. The cache has been cold for ${coldFor}, and sending caches ${tokens(size)} tokens again.` }
+    const then = coldOutcome(answer, isTimedOut)
+    if (then === 'drop') return { drop: dropped(`The cache has been cold for ${coldFor}, and sending caches ${tokens(size)} tokens again.`) }
+    await noteColdSend($, then === 'send' ? '' : ` after ${wait}m unanswered`)
+    return next(e)
   })
 
   // the cold guard's own question: closed unanswered when its wait is up. Every other question, the model's own among them, passes
@@ -1240,7 +1261,7 @@ export const register: Register = on => {
     const open = asking
     if (!open || e.questions[0]?.question !== open.text) return next(e)
     const closed = new Promise<{ deny: string }>(resolve => {
-      open.close = () => resolve({ deny: 'unanswered: cachebeat sent the message' })
+      open.close = reason => resolve({ deny: reason })
     })
     return Promise.race([next(e), closed])
   })
@@ -1276,7 +1297,10 @@ export const register: Register = on => {
       return { text: `this session: ${await turnOn($, undefined, keep)}` }
     }
     if (words.length) return { text: USAGE }
-    if (!s.enabled) return { text: 'off' }
+    // the cache as it stands, on or off: what a message sent now would find
+    const view = await cacheNow($)
+    const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
+    if (!s.enabled) return { text: `off${cache}` }
     const now = await $.clock.now()
     const at = s.nextAt
     const ms = at === null ? undefined : Math.max(0, at - now)
@@ -1284,7 +1308,7 @@ export const register: Register = on => {
     const source = from === 'all folders' ? '' : ` (this ${from}'s)`
     const left = s.keepUntil === null ? '' : ` · ${keepLeft(s.keepUntil, now)}`
     const upcoming = s.keepUntil !== null && s.keepUntil <= now ? '' : ` · ${when(ms)}` // past the time, no beat is coming
-    return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'}${upcoming}` }
+    return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'}${upcoming}${cache}` }
   })
 
   // a loop's first read is answered whole whatever it names: Claude holds nothing of cachebeat's state until it has read it

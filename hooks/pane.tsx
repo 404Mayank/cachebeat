@@ -201,7 +201,8 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
   }
 
   const tab = TABS.find(t => t.id === v.page.tab) ?? TABS[0]!
-  const rows = tab.rows.filter(r => !r.show || r.show(s))
+  // the cold guard's own rows follow the guard in effect: this session's own while it has one
+  const rows = tab.rows.filter(r => !r.show || r.show(v.guard === null ? s : { ...s, coldGuard: v.guard }))
   // the tab's own ring: the tab bar above it is a level of its own, reached by Esc
   if (tab.id === 'beating') ring.push('session')
   ring.push('folder')
@@ -234,7 +235,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
   // a row's value, and where it comes from when not the settings on show: this folder's
   const valueOf = (r: Row) => {
     // this session's own Cold guard is what applies here: the row shows it, and the setting's value once it's dropped
-    if (r.key === 'coldGuard' && v.guard !== null) return `${shown(r, v.guard, s)} · this session`
+    if (r.key === 'coldGuard' && v.guard !== null) return `${shown(r, v.guard, s)} · this session (settings: ${shown(r, s.coldGuard, s)})`
     const mark = !isOwn(r) ? '' : v.editsFolder ? ' · this folder' : ` · here: ${shown(r, v.own[r.key]!, s)}`
     return shown(r, s[r.key], s) + (r.key === 'interval' ? intervalTail(s, v) : '') + mark
   }
