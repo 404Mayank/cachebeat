@@ -1094,16 +1094,26 @@ const ASKED_ORIGINS: readonly string[] = ['composer']
  */
 let asking: { text: string; close: ((reason: string) => void) | null } | null = null
 
-// why the guard closed its own question: the ask's rejection carries it, so neither is taken for the user's Esc
+// why the guard closed its own question: the ask's rejection carries it, so none is taken for the user's Esc
 const TIMED_OUT = 'unanswered: cachebeat sent the message'
+const LEFT_OPEN = 'unanswered too long: cachebeat dropped the message'
 const LEFT_BEHIND = 'the conversation changed: cachebeat dropped the message'
 
 /**
- * What the cold guard does with its question's outcome: any answer decides (Send sends, anything else drops), and with
- * none, only the guard's own timer sends; a dismissal drops.
+ * How long a question under `don't send` stays open. Claude Code runs incoming messages through `prompt.submit` one at a
+ * time, so while it is open every queued message, other sessions' among them, waits behind it.
  */
-export const coldOutcome = (answer: string | null, isTimedOut: boolean): 'send' | 'send-unanswered' | 'drop' =>
-  answer === 'Send' ? 'send' : answer === null && isTimedOut ? 'send-unanswered' : 'drop'
+const DROP_AFTER = 5 * MIN
+
+/** How the guard's own timer closed its question: the wait under `send after`, or the ceiling under `don't send`. */
+export type Closed = 'wait' | 'ceiling' | null
+
+/**
+ * What the cold guard does with its question's outcome: any answer decides (Send sends, anything else drops). With none,
+ * the timer of `send after` sends; the ceiling of `don't send` drops, saying so; a dismissal drops.
+ */
+export const coldOutcome = (answer: string | null, closed: Closed): 'send' | 'send-unanswered' | 'drop' | 'drop-unanswered' =>
+  answer === 'Send' ? 'send' : answer !== null ? 'drop' : closed === 'wait' ? 'send-unanswered' : closed === 'ceiling' ? 'drop-unanswered' : 'drop'
 
 /** Why the guard dropped a message, and the way to send it. */
 const dropped = (why: string) => `cachebeat: not sent. ${why} Send it again to be asked, or /cachebeat guard off.`
@@ -1130,16 +1140,18 @@ async function askCold($: EngineInterface, text: string, wait: 'drop' | number) 
     s.held++
     await save($)
     // past the wait, the AskUserQuestion hook closes the dialog, and the ask rejects with the timer's own reason
-    timer = wait === 'drop' ? undefined : $.clock.after(wait * MIN, () => open.close?.(TIMED_OUT))
+    // under don't send, a ceiling: the question closes and the message is dropped, so the messages queued behind it go on
+    timer = $.clock.after(wait === 'drop' ? DROP_AFTER : wait * MIN, () => open.close?.(wait === 'drop' ? LEFT_OPEN : TIMED_OUT))
     let answer: string | null = null
-    let isTimedOut = false
+    let closed: Closed = null
     try {
       answer = await $.ui.ask(text, ['Send', "Don't send"])
     } catch (err) {
       // dismissed (Esc), closed by the timer or a change of conversation, or nowhere to ask: only the timer's reason sends
-      isTimedOut = String(err).includes(TIMED_OUT)
+      const why = String(err)
+      closed = why.includes(TIMED_OUT) ? 'wait' : why.includes(LEFT_OPEN) ? 'ceiling' : null
     }
-    return { answer, isTimedOut }
+    return { answer, closed }
   } finally {
     timer?.cancel()
     if (asking === open) asking = null
@@ -1249,8 +1261,9 @@ export const register: Register = on => {
     if (asking) return { drop: dropped('A question about the cold cache is open: answer it first.') }
     const wait = cfg.coldGuardUnanswered
     const said = `The cache has been cold for ${coldFor}, so this message caches ${tokens(size)} tokens again. Send it?`
-    const { answer, isTimedOut } = await askCold($, said, wait)
-    const then = coldOutcome(answer, isTimedOut)
+    const { answer, closed } = await askCold($, said, wait)
+    const then = coldOutcome(answer, closed)
+    if (then === 'drop-unanswered') return { drop: dropped(`The question went unanswered for ${fmt(DROP_AFTER)}.`) }
     if (then === 'drop') return { drop: dropped(`The cache has been cold for ${coldFor}, and sending caches ${tokens(size)} tokens again.`) }
     await noteColdSend($, then === 'send' ? '' : ` after ${wait}m unanswered`)
     return next(e)

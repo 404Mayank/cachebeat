@@ -335,8 +335,8 @@ export const TABS: readonly Tab[] = [
       },
       {
         key: 'coldGuardUnanswered', label: '  if unanswered', values: ['drop', 2, 5, 10], show: s => s.coldGuard,
-        fmt: v => (v === 'drop' ? "don't send" : `send after ${v}m`),
-        help: "What happens to a held message when the question isn't answered: it isn't sent, or it's sent after this long.",
+        fmt: v => (v === 'drop' ? "don't send (closes after 5m)" : `send after ${v}m`),
+        help: "What happens to a held message when the question isn't answered: it isn't sent (the question closes after 5m, so other incoming messages don't wait on it), or it's sent after this long.",
         custom: { placeholder: 'e.g. 3m', parse: parseWait },
       },
       {

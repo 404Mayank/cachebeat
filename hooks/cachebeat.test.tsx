@@ -3289,15 +3289,19 @@ test('a message sent while the question is open is dropped at once, with one dia
   expect(sent).toEqual(['go on'])
 })
 
-test("unanswered, under the default (don't send), it is never sent", async ($: Engine, on: On) => {
-  const { clock, sent, nextQuestion, reply } = await coldSetup($, on)
+test("unanswered, under the default (don't send), it is never sent, and the question closes at 5m so queued messages go on", async ($: Engine, on: On) => {
+  const { clock, sent, questions, answers, nextQuestion } = await coldSetup($, on)
   const shown = nextQuestion()
   const first = submit($)
   await shown
-  await clock.advance(60 * M)
+  await clock.advance(5 * M - 1)
   expect(sent).toEqual([])
-  reply("Don't send")
-  expect((await first).drop).toBe(NOT_SENT)
+  await clock.advance(1)
+  expect((await first).drop).toBe('cachebeat: not sent. The question went unanswered for 5m. Send it again to be asked, or /cachebeat guard off.')
+  expect(sent).toEqual([])
+  answers.push('Send') // the question is closed: the next message is asked anew
+  await submit($)
+  expect([questions.length, sent]).toEqual([2, ['go on']])
 })
 
 test('unanswered, with if unanswered at 5m, it is sent at 5m and not before, saying so', async ($: Engine, on: On) => {
@@ -3492,11 +3496,12 @@ test('Cold guard turned off in another session applies to the next message here'
 
 // the review of step 5
 
-test('the cold guard decides by the answer first: any answer wins over the timer; with none, only the timer sends', () => {
-  expect([coldOutcome('Send', false), coldOutcome('Send', true)]).toEqual(['send', 'send'])
-  expect([coldOutcome('Sure', false), coldOutcome('Send it', false)]).toEqual(['drop', 'drop']) // free text: only the label sends
-  expect([coldOutcome("Don't send", true), coldOutcome('later', true)]).toEqual(['drop', 'drop']) // answered as the wait ran out
-  expect([coldOutcome(null, true), coldOutcome(null, false)]).toEqual(['send-unanswered', 'drop'])
+test('the cold guard decides by the answer first: any answer wins over its timer; with none, send after sends and don\'t send\'s ceiling drops', () => {
+  expect([coldOutcome('Send', null), coldOutcome('Send', 'wait'), coldOutcome('Send', 'ceiling')]).toEqual(['send', 'send', 'send'])
+  expect([coldOutcome('Sure', null), coldOutcome('Send it', null)]).toEqual(['drop', 'drop']) // free text: only the label sends
+  expect([coldOutcome("Don't send", 'wait'), coldOutcome('later', 'wait')]).toEqual(['drop', 'drop']) // answered as the wait ran out
+  expect([coldOutcome(null, 'wait'), coldOutcome(null, null)]).toEqual(['send-unanswered', 'drop'])
+  expect(coldOutcome(null, 'ceiling')).toBe('drop-unanswered') // don't send's question closed at its ceiling
 })
 
 test('setting off, session on: the row shows both, its sub-rows show, and Enter visibly flips the setting', async ($: Engine, on: On) => {

@@ -201,7 +201,7 @@ A folder is where the session started, or where `/cd` or a worktree move took it
 | --- | --- | --- |
 | Stop after idle | Stops beating after this long without a message from you. A session with a keep-alive time (`/cachebeat 2h`) keeps to that instead | 8 hours |
 | Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop | start on your next message |
-| Cold guard | Asks before sending a message to a session whose cache has gone cold, saying how long it's been cold and how many tokens sending it caches again. It asks about chats from a minimum size. A question left unanswered doesn't send the message, or sends it after a few minutes if you choose | on, from 20k tokens, don't send |
+| Cold guard | Asks before sending a message to a session whose cache has gone cold, saying how long it's been cold and how many tokens sending it caches again. It asks about chats from a minimum size. A question left unanswered doesn't send the message and closes after 5 minutes, or sends it after a few minutes if you choose. While it's open, other incoming messages (from other sessions, say) wait for it | on, from 20k tokens, don't send (closes after 5m) |
 | Stop at usage | Stops once any of your usage limits reaches this percentage | 90% |
 | Skip small chats | Skips beating chats under a minimum size | off, 20k tokens |
 

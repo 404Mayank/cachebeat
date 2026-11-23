@@ -18,7 +18,7 @@ const ABOUT: Record<keyof BeatSettings, string> = {
   skipSmallTokens: "The smallest chat kept warm while skipSmall is on; setting it doesn't turn skipSmall on.",
   coldGuard: "Asks the user before their message is sent to a session whose cache has gone cold, saying how long it's been cold and the tokens sending caches again. Only messages typed at the terminal are asked about; a session can override it (session.coldGuard).",
   coldGuardTokens: 'The smallest chat the cold guard asks about, in tokens.',
-  coldGuardUnanswered: "A cold guard question left unanswered: drop, the message isn't sent (the question stays open), or minutes after which it is sent.",
+  coldGuardUnanswered: "A cold guard question left unanswered: drop, the message isn't sent (the question closes after 5 minutes), or minutes after which it is sent. While it is open, other incoming messages wait for it.",
   heartPlacement: 'The prompt heart: tail, at the end of the hint line, always dim; line, on its own line, in color. Terminal only.',
   variant: "The prompt heart's animation. Terminal only.",
   showCount: 'Shows the beat count beside the prompt heart. Terminal only.',
