@@ -38,7 +38,7 @@ The next agent raises these with the user before anything else. The user said on
   - **G5:** does `$.ui.ask` draw in the desktop app? Two outcomes would matter. If it rejects at once, every cold send there drops until the guard is turned off. If its ask doesn't go through the AskUserQuestion `tool.call`, the 5m close can't close it, and queued messages wait until it's answered.
   - **P6:** does dropping a skill's prompt undo its `command.run`?
 - **After `/model`, the cold guard reads the cache as warm** (step 5 review), though the new model's cache is empty. The first message after a switch re-caches the whole conversation without asking. Left as is: `state` judges it the same way, and the user just chose the switch. Say if the guard should ask there too.
-- **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
+- **Fable 5.2 and Mythos 5.2 have rows in hooks/prices.ts** (step 7, 2026-11-23): input $8, cache read $0.20, writes $10 and $16 per million tokens, from the pricing and model overview pages in Claude Platform Docs, found through a search that summarised them; the pages themselves weren't read. Check them against the pricing page if the Stats figures matter.
 
 ## Paused for usage (2026-11-23 09:48)
 

@@ -1,6 +1,6 @@
 # 0.10.0: cache state, keep-alive time, resume, cold guard, Status and Stats
 
-Status (2026-11-23): steps 0–5 are built, reviewed and merged into `dev`: 0, 1, 2, 2b, 3, 3b, tokens-only, the request-start fix, the retry fix, compat, midturn, 3c, 4 and 5. 0.9.3 (step 1 with the request-start, compat and retry fixes) shipped on 2026-11-23. The Status and Stats mock-ups (items 5 and 7) are redrawn in tokens and approved by the orchestrator. The guard's choices (item 4) were answered by the user on 2026-11-23 (handoff, "Answered on 2026-11-23"), and G1–G3 ran (mods-gotchas). Step 5 (the cold guard) was checked live (mods-gotchas, "Step 5 live"). Step 6 (the Status page) is built on `step-status` and waits for review; it was looked at live on 2.1.329 (mods-gotchas, "The Status tab"). Where to start: notes/handoff.md.
+Status (2026-11-23): steps 0–5 are built, reviewed and merged into `dev`: 0, 1, 2, 2b, 3, 3b, tokens-only, the request-start fix, the retry fix, compat, midturn, 3c, 4 and 5. 0.9.3 (step 1 with the request-start, compat and retry fixes) shipped on 2026-11-23. The Status and Stats mock-ups (items 5 and 7) are redrawn in tokens and approved by the orchestrator. The guard's choices (item 4) were answered by the user on 2026-11-23 (handoff, "Answered on 2026-11-23"), and G1–G3 ran (mods-gotchas). Step 5 (the cold guard) was checked live (mods-gotchas, "Step 5 live"). Step 6 (the Status page) is reviewed, with its fixes on `step-status`; step 7 (Stats) is built on `step-stats` (on top of it) and waits for review; it was looked at live on 2.1.329 (mods-gotchas, "The Status tab"). Where to start: notes/handoff.md.
 
 **Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 passed on 2026-11-23, and P8 ran in step 4 the same day.
 
@@ -517,7 +517,7 @@ An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and cou
 - **Styling:** labels pad to `LABEL` (22), as the settings rows do. Status is drawn bright and the other tabs dim. The focus stays on the tab bar, so the footer is the tab bar's.
 
 ```
-Status Stats Beating Limits Prompt heart Turn line Alerts
+Status Stats Beating Limits Heart Turn line Alerts
 ────────────────────────────────────────────────────────────────────────────
 Cache                 warm (1h TTL, last read 12m ago) · 48m left
 Beating               on · every 50m idle (auto) · next in 38m · 1h 52m left
@@ -631,26 +631,19 @@ stats: {
 - **The page** (the Stats tab) aggregates with `$.store.keys()` and reads every `session:*`. That's a few hundred small JSON values at most. It shows today, 7 days, 30 days and this session, at the same 76 cells as Status. It takes 19 of the pane's 24 rows:
 
 ```
-Status Stats Beating Limits Prompt heart Turn line Alerts
+Status Stats Beating Limits Heart Turn line Alerts
 ────────────────────────────────────────────────────────────────────────────
-                           Today    7 days   30 days  This session
-Beats                         12        84       311             3
-Beat cost                   120k      852k      3.1M           30k
-Kept warm                      4        29       102             0
-Re-cache avoided            1.3M      9.0M     30.8M             0
-Net                        +1.2M     +8.2M    +27.7M          −30k
-Cold sends                     1         6        20             0
-  cached again              184k      910k      3.1M             0
-Guard asked                    1         4        11             0
-
-Beats by day          ··▂▃▅▂··▁▆█▅▃▂·▁▃▅▇▆▃·▂▄▅▃▂▆▃▅
-                      30 days ago → today
-────────────────────────────────────────────────────────────────────────────
-Cost, avoided and net are in input tokens, each request weighed by its
-model's cache rates: on Opus 5.5 a read counts 0.05 of one, a one-hour
-write 2. Kept warm: turns that came back to a cache only beats kept warm.
+                       Today      7 days     30 days This session
+Beats · cost        12 · 120k   84 · 852k   311 · 3.1M      3 · 30k
+Kept warm · avoided  4 · 1.3M   29 · 9.0M  102 · 30.8M            0
+Net                    +1.2M       +8.2M       +27.7M         −30k
+Cold sends · re-cached 1 · 184k   6 · 910k   20 · 3.1M            0
+Guard asked                  1           4          11            0
+Beats by day           ··▂▃▅▂··▁▆█▅▃▂·▁▃▅▇▆▃·▂▄▅▃▂▆▃▅ 30 days ago → today
+Input-token equivalents: each request weighed by its model's cache rates.
 ↑↓ tabs · enter or 1-7 opens · esc closes
 ```
+
 
   - **The figures are worked on Opus 5.5** with a one-hour cache (read 0.05, write 2), so they can be checked:
     - Today's 12 beats read 1.92M and wrote 12k: 96k + 24k = 120k.
@@ -674,6 +667,18 @@ write 2. Kept warm: turns that came back to a cache only beats kept warm.
 - The page renders with no records (all zeros, no `NaN`).
 
 **README:** in tokens only, with no dollar figure. The Privacy section gains "and, for each session, counts of beats, tokens and cold sends by day, kept on your machine for 30 days to show on the Stats page. Nothing of it is sent anywhere." A short Stats paragraph under "What you'll see".
+
+**Built in step 7 (2026-11-23, `step-stats`):** drawn at 11 rows to fit 80×40, as Status is (cachebeat-cf): the page above is what's drawn. Departures from the mock-up and the text above:
+- **Five rows, two figures a cell.** The eight rows and the blank line don't fit 40 rows with the tab bar, the rule, the header, the strip, the note and the footer. `Beats · cost`, `Kept warm · avoided`, `Cold sends · re-cached` carry a count and a figure (`12 · 120k`); `Net` and `Guard asked` one. The strip's label and its `30 days ago → today` share one line. One rule; the note is one line: `Input-token equivalents: each request weighed by its model's cache rates.` (the worked rates are in the README), or, when a figure used the common rates, `A model missing from the price table was weighed at the common rates.`
+- **The tab bar needed `Heart` for `Prompt heart`:** seven tabs at 78 cells wrapped to two lines at the pane's 76, which pushed the footer off at 40 rows. A test pins the bar under 76.
+- **The counters live in `Saved.stats`** (by local day, at most 30), not beside it: the module's variables don't survive a reload, the saved atom does. `held`, `cold` and `coldTokens` are gone from `Saved`; `state`'s `coldGuardAsked`, `coldSends`, `coldSendTokens` sum them over the conversation's days, so after a resume they carry on (they started again before), and a `/clear` starts them again. The tool text says so.
+- **The record** (`session:<id>`) gains `stats`, written with the rest when it changes (`keyOf` includes it).
+- **Kept** counts a conversation's first request of a turn that follows at least one beat since its last request, read what that cached, and came later than a lifetime from the previous turn's end (choice 8; counted from the turn's end, which can only miss a kept turn, never invent one). It counts `got` (the tokens read) at `write − read`.
+- **A beat that paid for a write without counting as one** (a first beat on a new model; a beat that found the cache gone, "not served") adds its read, write and cost to the day, and no beat.
+- **`cold`** is what step 5's guard counts (`Send`, a timeout, an origin nobody is asked): a cold send with the guard off isn't counted. The plan's "turn whose first step wrote more than it read" wasn't built.
+- **The page reads other sessions' records once a step** (`others`, kept in a module variable; the Stats tab's own ticker is the Status tab's, at `STEP`), through `$.store.keys()` and one `get` each. This session's own days are live, from `Saved`. The whole store is capped at 4 MiB; a record with 30 days is about 6 KB.
+- **`/cachebeat stats`** opens the pane for the composer only, when idle, as bare `/cachebeat` does, and answers a line (`30 days: 2 beats cost 10k, 0 turns kept warm avoided 0, net −10k input tokens · this session −5k`).
+- **Fable 5.2 and Mythos 5.2** are in `prices.ts`: input $8, cache read $0.20, writes $10 (5m) and $16 (1h), from Claude Platform Docs' pricing page and the model's overview page (a search's summary of them, 2026-11-23: the page itself wasn't read).
 
 ### Item 8: the demo GIF (step 8)
 
@@ -1094,6 +1099,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **Delivers:** the counters in the session record, the Stats tab, `/cachebeat stats`, and README and Privacy.
 - **Depends on:** step 2 (`ratiosOf`, for the Net), step 4 (the record), step 5 (asked and cold sends), step 6 (the tabbed pane), and the look pass. The screenshots arrived.
 - **Bundles:** collection with display, since neither is testable without the other.
+- **Built 2026-11-23** on `step-stats`: the departures are under item 7, "Built in step 7". The functions are `countDay`, `countKept` and `statsFacts` in register.tsx, and the pure parts (`addTo`, `beatAdd`, `keptAdd`, `factsFrom`, `statsLines`) in `hooks/stats.ts`.
 
 ### Step 8: the demo GIF (item 8)
 

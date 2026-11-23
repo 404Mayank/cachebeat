@@ -359,6 +359,14 @@ Claude Code 2.1.329, `--model haiku`, tmux, `step-guard`'s tree loaded from an a
 - **The kit's `$.ui.scroll` is the plugin's call** (`to`, `in`), and doesn't raise a person's scroll to the hook, so the arrows' walk along the tab bar can't be driven there; `$.ui.focus` with `origin: { kind: 'person' }` can.
 - **Bare `/cachebeat` mid-turn opens no pane,** because the pane holds toasts: the toast of its line (what the user sees mid-turn) would draw only when the pane closed.
 
+### The Stats tab (step 7, 2026-11-23)
+
+- **The tab bar's width:** the engine draws each hotkey as `N: ` before a tab's title, so seven tabs, `Prompt heart` included, came to 78 cells and wrapped in the pane's 76 (the pane's `bodyColumns` at an 80-column terminal). The wrap added a row and pushed the footer off at 40 rows. `Prompt heart` became `Heart`; a test keeps the bar within 76.
+- **The kit's "the file ran to its end: a rejection nothing handled: no implementation for command.run"** came from a test that does `void cmd($, 'now')` while a beat is parked forever; the engine's teardown rejects that floating promise. It was latent, and showed only when 16 more tests ran after it. A `.catch(() => {})` on the floating call ends it.
+- **Module variables don't survive a reload, `Saved` does:** the counts are kept in `Saved.stats`, not in a variable beside it.
+- **Live check records stay in the real store.** A look at the page on 2.1.329 with `--plugin-dir` writes `session:<id>` records, with their `stats`, into the user's own plugin store, where the next Stats page adds them in (it showed two beats, one this session's). They are pruned 30 days after their last write.
+- **`$.store.get` reads the whole file each time**, so the page keeps the other sessions' days for a step and re-reads only then.
+
 ## The lifetime counts from a request's start (found live, 2026-11-14)
 
 Anthropic's docs say the cache's lifetime "is measured from the start of the request that writes or reads the cache entry, not from the end of its response". Observed, one trial and one control, Claude Code 2.1.322, Haiku, `claude -p --resume`, the five-minute cache forced with `FORCE_PROMPT_CACHING_5M=1` (the writes came back as `ephemeral_5m_input_tokens`), cachebeat disabled, a 52k-token unique filler as the first message:
