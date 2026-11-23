@@ -364,6 +364,17 @@ Anthropic's docs say the cache's lifetime "is measured from the start of the req
   - **A turn whose requests weren't seen and that ran past the cache's lifetime reads cold (found in review, accepted for now).** After a reload mid-turn, `busy` is lost, `turn.step` ignores the turn's steps, and `turn.complete` stamps the turn's start. A turn longer than the lifetime is then judged cold, though its last request was probably seconds ago. On the five-minute cache with **Cache gone cold** set to stop, cachebeat switches off. A later fix could let `turn.step` adopt a main-loop step seen while `!busy && !beating`, and stamp it as a request of a turn under way.
   - **`turn`'s `durationMs` is 0 now:** a turn with no stamped step counts from its start, and these test turns have no steps.
 
+## A beat's claim (found 2026-11-23, `step-race`)
+
+- **`beating` is set when the fork starts, so it can't be the guard.** `beat()` awaits the time, `cacheTtl`, `session.usage`, `smallContext`, `isRewound`, `session.model` and the time again before the fork. A timer's beat and `/cachebeat now` entering inside that window both passed `if (beating)`.
+- **The claim is its own flag, `beatClaimed`,** taken before the first await and released by a closure that ignores a second call. `beating` keeps meaning "a fork is on its way", which `turn.start` (a fork's own turn), `turn.complete` (a fork's end) and the two `!beating` checks before `schedule()` read. Setting it at entry would have widened all of those to the whole checking window.
+- **Release points:** the fork's answer (before the answered branches' `schedule()` and the retry fix's `armStep`, as a beat that comes due in that stretch must not be dropped) and a `finally` for every earlier exit. **The release is guarded by ownership:** after the fork's answer a newer beat may hold the claim, and the older beat's `finally` must not clear it.
+- **Testing the claim:**
+  - Park the beat's first `clock.now` with `holdNow`, start `/cachebeat now` unawaited, `settle()`, then advance to the timer's step: that beat enters beside it. Two forks without the claim.
+  - **A throw test can't use `session.usage`:** the `/cachebeat` command reads it (through `cacheTtl`) before it reaches `beat()`, so the claim was never taken and the test passed with the `finally` removed. `session.model` is read only by the beat, so `modelError` in the test world throws there.
+  - **A hook that throws surfaces as a rejection of the command** (`no implementation for command.run`), whatever the error's text.
+  - **The ownership test:** `holdNow` set while beat 1's fork is on its way parks beat 1's first read of the time after its answer (its `schedule()`); a second `/cachebeat now` then holds the claim, parked in its own fork; releasing beat 1 and sending a third must answer "a beat is on its way".
+
 ## Dollars (built in step 2 of 0.10.0)
 
 **Removed on 2026-11-14 (the tokens-only step):** no dollar figure reaches a user or Claude any more, because the user said tokens are cachebeat's currency and dollars are either everywhere or nowhere. This section stays as the record of how they were worked out. `hooks/prices.ts` keeps the table as `ratiosOf(model)` (read, 5-minute write and 1-hour write against input), for the Stats page's input-token equivalents; the cost-delta around a fork, `RISE_BOUND`, the learned rates, `money()`, `lastUsd`, `recacheUsd` and `lastBeatUsd` are gone.

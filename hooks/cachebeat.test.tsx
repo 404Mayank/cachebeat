@@ -38,6 +38,7 @@ type World = {
   stored?: Record<string, unknown> // more of the store as the session starts: conversations' records, by key
   isStartLeft?: boolean // the test raises session.start itself, through `start()`
   during?: (n: number) => Promise<void> // runs while beat n (from 1) is on its way: turn events can arrive meanwhile
+  modelError?: string // `session.model` throws this while it is set: a beat fails after its checks begin, before its fork
 }
 
 const setup = async ($: Engine, on: On, world: World = {}) => {
@@ -102,7 +103,10 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     },
   }) as never)
   let model: string = OPUS
-  on('session.model', () => ({ value: model }) as never)
+  on('session.model', () => {
+    if (world.modelError) throw new Error(world.modelError)
+    return { value: model } as never
+  })
   let root = HOME
   on('session.root', () => ({ value: root }) as never)
   // the conversation as a turn leaves it; /rewind takes it back, and a turn adds to it
@@ -3206,6 +3210,64 @@ test('/cachebeat now while a beat is on its way sends no second one', async ($: 
   await clock.advance(3 * M)
   expect(forks).toEqual([3 * M])
   expect(said).toBe('a beat is on its way; the next counts from it')
+})
+
+test('a timer beat and /cachebeat now that both enter while the first is parked in its checks send one fork', async ($: Engine, on: On) => {
+  const { clock, forks, holdNow } = await setup($, on, { settings: { interval: 3 } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(2 * M)
+  let release!: () => void
+  holdNow(new Promise<void>(r => (release = r)))
+  const manual = cmd($, 'now') // enters beat() and waits on the time: no fork yet, and `beating` not yet set
+  await clock.settle()
+  await clock.advance(M) // the timer's beat comes due and enters beat() beside it
+  expect(forks).toEqual([])
+  release()
+  expect(await manual).toBe('♥ cache renewed (90,000 read, 0 written)')
+  await clock.settle()
+  expect(forks.length).toBe(1) // both passing the guard would have forked twice
+  await clock.advance(3 * M)
+  expect(forks.length).toBe(2) // and the next beat counts from the one that went
+})
+
+test('a beat that fails before its fork leaves the next one free to go', async ($: Engine, on: On) => {
+  const world: World = { settings: { interval: 3 } }
+  const { clock, forks } = await setup($, on, world)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(M)
+  world.modelError = 'no model'
+  await expect(cmd($, 'now')).rejects.toThrow() // the command's hook is skipped for it
+  world.modelError = undefined
+  expect(await cmd($, 'now')).toBe('♥ cache renewed (90,000 read, 0 written)') // a claim left behind would answer "a beat is on its way"
+  expect(forks.length).toBe(1)
+})
+
+test("a beat finishing after a newer one has entered leaves that one's claim alone", async ($: Engine, on: On) => {
+  let t!: Awaited<ReturnType<typeof setup>>
+  let release!: () => void
+  let parked!: () => void
+  const isParked = new Promise<void>(r => (parked = r))
+  const world: World = {
+    settings: { interval: 3 },
+    during: async n => {
+      if (n === 1) t.holdNow(new Promise<void>(r => (release = r))) // beat 1's next read of the time, once it is answered, waits
+      if (n === 2) { parked(); await new Promise<void>(() => {}) } // beat 2 is on its way, and stays so
+    },
+  }
+  t = await setup($, on, world)
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await t.clock.advance(2 * M)
+  const first = cmd($, 'now') // answered; its schedule() waits on the time, the claim already let go
+  await t.clock.settle()
+  void cmd($, 'now') // a newer beat holds the claim, on its way
+  await isParked
+  release() // beat 1 ends while beat 2 holds the claim
+  await first
+  expect(await cmd($, 'now')).toBe('a beat is on its way; the next counts from it') // letting go of beat 2's claim would send a third
+  expect(t.forks.length).toBe(2)
 })
 
 test('a turn whose end was skipped leaves the next turn its own start, if none of its requests are seen', async ($: Engine, on: On) => {

@@ -60,6 +60,7 @@ let isTurnWarmed = false // a request of that turn read the cache, and stamped w
 let cached = 0 // tokens the main conversation's last request read from the cache or wrote to it
 let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
 let beating = false
+let beatClaimed = false // a beat has entered and not yet been answered: the guard's claim, made before its first await
 let isResumeUnsaid = false // a /resume paused beats, to be said once the resumed conversation is in place
 let conv: string | null = null // the conversation this session's record is kept under; none while /clear or /resume hands over
 let lastKept = '' // the record as last written or read, so a save writes only what changed
@@ -665,8 +666,29 @@ const ASK_MID_TURN = '[cachebeat] Automated prompt cache keep-alive, not a messa
 /** One beat: checks it is worth it, forks, and resolves what happened, in words. */
 async function beat($: EngineInterface): Promise<string> {
   if (stepping) return 'a request is on its way; the beat waits for it'
-  // one on its way sets the next when it's answered: a turn ending meanwhile, or /cachebeat now, would send a second
-  if (beating) return 'a beat is on its way; the next counts from it'
+  // one on its way sets the next when it's answered: a turn ending meanwhile, or /cachebeat now, would send a second.
+  // Claimed here, before any await: a timer's beat and /cachebeat now that both entered while the first's checks were
+  // parked would otherwise both pass, as `beating` is set only when the fork starts
+  if (beatClaimed) return 'a beat is on its way; the next counts from it'
+  beatClaimed = true
+  let isHeld = true
+  // the claim ends when the fork is answered, before the answered branches schedule the next beat (a request sent
+  // meanwhile whose timer came due must not be dropped by it), or at any earlier exit, a throw included. Once
+  // released, a newer beat may hold it: this one's end must not release that
+  const release = () => {
+    if (!isHeld) return
+    isHeld = false
+    beatClaimed = false
+  }
+  try {
+    return await beatChecked($, release)
+  } finally {
+    release()
+  }
+}
+
+/** A beat that holds the claim: `release` ends it. */
+async function beatChecked($: EngineInterface, release: () => void): Promise<string> {
   const now = await $.clock.now()
   const since = now - (s.lastWarm ?? now)
   const warmedAt = s.lastWarm
@@ -723,7 +745,10 @@ async function beat($: EngineInterface): Promise<string> {
   beating = true
   // tagged, so a request log or a proxy tells a beat from the user's own messages, and the model too
   const forking = $.model.fork({ prompt: busy ? ASK_MID_TURN : ASK })
-  const r = await forking.finally(() => (beating = false))
+  const r = await forking.finally(() => {
+    beating = false
+    release()
+  })
   // /clear or /resume while it was on its way: what it read was the conversation left behind's, none of this one's
   if (era !== convs) return 'the conversation changed while the beat was on its way; its answer is set aside'
   if (!r.isAnswered && r.reason !== 'empty-reply') {
