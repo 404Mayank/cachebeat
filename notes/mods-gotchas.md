@@ -226,6 +226,14 @@ How it was done: a scratch mod (hooks on `session.start`, `session.end`, `classi
   - **Order under `claude -p`:** `classic.SessionStart` entered 13–31ms *before* `session.start` (startup and resume, both engines); interactively on 2.1.329 they entered in the same millisecond. Either way the order isn't fixed (P3): step 4 applies the hint from whichever comes second.
   - **A `$.ui.log` from `session.start` on an interactive `--resume` is drawn**, as `● <plugin>: <text>` below the restored transcript (2.1.329). The engine's prefix is why the resume line doesn't start with `cachebeat`.
   - Not checked: `prompt_cache_likely_expired: true`, `source: 'fork'` live, and the desktop app.
+- **Step 4 live (2026-11-23): `/resume` restores, so `session.end` (reason `resume`) is done before `classic.SessionStart` enters.** The kit can't show that order, and the restore on `/resume` depends on it (`isResumeUnsaid`). Observed on 2.1.329, `step-resume` (`b27aae9`) loaded from an archive copy, the installed cachebeat disabled, the folder's New sessions start off, commands only (no model turn):
+  - `--resume` A (no record): off, no line. `/cachebeat on`.
+  - `/resume` B (no record): `/cachebeat` read `off`, though A was on: New sessions start, not the conversation left behind.
+  - `/resume` A: `● cachebeat: beats resume after your next message · cache cold for 37m` about a second later, and `/cachebeat` read `on, every 50m idle · 0 beats · starts after your next turn`.
+  - `/exit`, then `claude --resume` A in a new process: the same line, still on, the heart `♡ ×0` under the prompt.
+  - Not seen: the warm wording live (A's last response was over an hour old), a keep-alive time across a resume, a fork.
+  - The records went into the real plugin store (the copy loads as `cachebeat`): `session:2c1f9e0c…` and none for B, which never changed. Harmless; they age out in 30 days.
+- **Type-checked against the declarations 2.1.287 and 2.1.330 write** (mods-gotchas "Types": `ANTHROPIC_API_KEY=unused <binary> -p /plugin-authoring` with `HOME` and `TMPDIR` in scratch, then `tsc` over that file with `hooks/` and `types/`): clean on both, and a planted error fails the same check. So `$.store.keys`, `$.store.delete`, `e.session_id` and `e.seconds_since_last_response` on `classic.SessionStart`, and the tests' `session.id` and `store.*` stubs are all in 2.1.287's API.
 - **Process gotchas** (not about the engine):
   - **Use a private tmux socket (`tmux -L probe …`), never `tmux kill-server`:** that kills every tmux server of every session on the machine, and the auto-mode classifier refused the command.
   - **A new working directory asks "Do you trust this folder?"** before the prompt appears: `Down`, `Enter` accepts.
