@@ -973,6 +973,14 @@ Each step is finished, tested and merged into `dev` before the next starts.
   - **The hint applies on `source: 'fork'` too** (`--fork-session` carries the same fields and the same prefix). Not checked live.
   - **`stop()` awaits its `schedule()`** (it was `void`), so the record of turning off lands before a command answers, and the test kit doesn't fail the file on a write left running.
   - `isCacheShort` carries over a `/resume`, as `anotherConversation` already kept it.
+  - **After the review (2026-11-23):**
+    - The record also keeps `warm`, when the cache was last read, optional so v1 still reads: the hint counts from the last response, which a beat doesn't move, so a conversation beats kept warm read cold on resume. The restore takes the later of the two.
+    - A beat on its way across `/clear` or `/resume` is set aside (`convs`, bumped by `anotherConversation`, read at the beat's start): it read the conversation left behind's cache, and gave the resumed one a beat and a false "warm".
+    - A resumed conversation that comes back off says one line when its keep-alive time ran out while it was closed, or when it has no record and the one left behind was on.
+    - Pruning runs at most once a day (`prunedAt`) and after the command and tools are registered: each `$.store.get` reads the whole store file (about 160ms for 500 records, 2.6s for 2000, the review's measure). A record past 30 days isn't restored, pruned or not.
+    - A resume or fork hint naming another conversation than the one kept is a hand-over (`takeHint`), as `/clear` is. Not seen live: a fork's ids agree (mods-gotchas.md, "Step 4's review probes").
+    - The review's probes (rate limits at a resume's start, the hook order on `/clear`) found nothing to guard.
+    - Not pinned by a test: reading `convs` before the beat's clock read rather than after it (the window is a few milliseconds, and the kit can't aim a held clock read at that one).
 
 ### Step 5: the cold guard (item 4)
 
