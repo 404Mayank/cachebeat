@@ -18,7 +18,18 @@ Start here. The design and every decision are in [plan-0.10.0.md](plan-0.10.0.md
 The next agent raises these with the user before anything else. The user said on 2026-11-23: build everything up to the release, but **don't ship**; and the orchestrator decides as it understands, recording here what the user should know, look at, or weigh in on.
 
 - **Ship 0.10.0?** The user's call.
-- The Status and Stats look pass was delegated to the orchestrator; the mock-ups were approved as redrawn in tokens. The user may want to tweak them.
+- **The Status and Stats mock-ups** (plan items 5 and 7, redrawn in tokens on 2026-11-23) were approved by the orchestrator, which took the recommended option on all eight choices under "What steps 6 and 7 wait on":
+  1. the Cache row in `/usage`'s form
+  2. the weighted size kept
+  3. the Usage row hidden when no limits are reported
+  4. the last beat's figures on Status
+  5. columns, not a range switch
+  6. a This session column
+  7. a one-row strip of beats by day
+  8. "kept warm" counting only a turn after the cache would have lapsed without beats
+
+  The user may want to tweak any of them. The mock-ups are in the plan.
+- **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
 
 ## Where things are
 
