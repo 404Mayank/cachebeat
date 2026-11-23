@@ -9,7 +9,7 @@ type Rates = { input: number; output: number; read: number }
 
 const TABLE: Record<string, Rates> = {
   // Fable 5.2 and Mythos 5.2 share their pricing: input $8, output $40, cache read $0.20, five-minute write $10, one-hour write $16
-  // (Fable 5.2's overview and https://platform.claude.com/docs/en/about-claude/pricing, found by search 2026-11-23); the writes are the usual 1.25× and 2×
+  // (https://platform.claude.com/docs/en/about-claude/pricing, 2026-11-23); the writes are the usual 1.25× and 2×
   'claude-fable-5-2': { input: 8, output: 40, read: 0.2 },
   'claude-mythos-5-2': { input: 8, output: 40, read: 0.2 },
   'claude-fable-5-1': { input: 10, output: 50, read: 0.25 },

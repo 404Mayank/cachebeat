@@ -63,9 +63,10 @@ let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let turnId = '' // that turn's id: its end is told from a fork's by it
 let stepping = false // a request of that turn is on its way, which keeps the cache warm itself
+let isStoreFull = false // a write of the conversation's record was refused: said once in this session
 let beatsSince = 0 // beats since the main conversation's last request: a turn coming back after them may have been kept warm by them
 let isFirstStep = false // the running turn's first request has not yet answered
-let others: { at: number; days: Days[] } | null = null // the other sessions' recorded days, read at most once a step
+let others: { at: number; days: Days[] } | null = null // the other sessions' recorded days: read when the pane or `/cachebeat stats` opens, then every ten minutes
 let isTurnWarmed = false // a request of that turn read the cache, and stamped when it was sent
 let cached = 0 // tokens the main conversation's last request read from the cache or wrote to it
 let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
@@ -146,6 +147,7 @@ type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beat
 type ResumeHint = { id: string | undefined; secondsSince: number | undefined; at: number }
 
 const DAY = 24 * 60 * MIN
+const OTHERS_EVERY = 10 * MIN // how long the Stats page keeps what it read of the other sessions' records
 const KEEP_DAYS = 30 // a record not written for this long is dropped
 const keyOf = () => JSON.stringify([conv, s.enabled, s.keepUntil, s.beats, s.guard, s.stats])
 
@@ -174,7 +176,13 @@ async function keepRecord($: EngineInterface) {
   // in order: two saves close together would otherwise race, and the earlier could land last
   const writing = keeping.then(async () => $.store.set(key, { v: 1, at: await $.clock.now(), ...record }))
   keeping = writing.catch(() => undefined)
-  await writing
+  // a store that can't take the record (it is over its size limit) costs the record and Stats, and no more: beating goes on
+  try {
+    await writing
+  } catch {
+    if (!isStoreFull) $.ui.log("cachebeat: its store can't be written (it may be full), so records and Stats aren't kept")
+    isStoreFull = true
+  }
 }
 
 /** Drops the records of conversations not written for 30 days, at most once a day: each read goes through the store's whole file. */
@@ -1014,12 +1022,12 @@ async function contextOf($: EngineInterface, now: number, isSubagent: boolean) {
 }
 
 /**
- * What the Stats tab draws: the other sessions' recorded days, read at most once a step (each read of the store goes through
- * its whole file), and this conversation's own, live.
+ * What the Stats tab draws: the other sessions' recorded days, read when the pane or the command opens and then every ten
+ * minutes (each read of the store goes through its whole file), and this conversation's own, live.
  */
 async function statsFacts($: EngineInterface): Promise<StatsFacts> {
   const now = await $.clock.now()
-  if (!others || now - others.at >= STEP) {
+  if (!others || now - others.at >= OTHERS_EVERY) {
     const days: Days[] = []
     for (const key of await $.store.keys()) {
       if (!key.startsWith('session:') || key === `session:${conv}`) continue
@@ -1223,14 +1231,15 @@ async function countDay($: EngineInterface, add: Parameters<typeof addTo>[2]) {
 
 /**
  * A message about to go to the cache the guard asked about, read again: a turn or a beat may have warmed it while the
- * question was open, and then it goes as any message does. Still cold, it is counted and said before it goes.
+ * question was open, and then it goes as any message does. Still cold, it is counted and said before it goes: said
+ * unless `isSaid` is off, for a send the guard never asked about (it is off, or the chat is under its size), which Stats counts all the same.
  */
-async function noteColdSend($: EngineInterface, how: string) {
+async function noteColdSend($: EngineInterface, how: string, isSaid = true) {
   const view = await cacheNow($)
   if (view.state !== 'cold' || view.contextTokens === null) return
   await countDay($, { cold: 1, coldTokens: view.contextTokens })
   await save($)
-  $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
+  if (isSaid) $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
 }
 
 /** Asks the cold guard's question; resolves the answer, or null when it was dismissed, closed unanswered, or couldn't be asked. */
@@ -1271,6 +1280,7 @@ export const register: Register = on => {
     stopPaneTicker() // a pane left up by the module before a reload has no ticker of this load's
     isPaneOpen = false
     others = null
+    isStoreFull = false
     await load($)
     await publish($)
     const prev = await read($, saved)
@@ -1352,10 +1362,14 @@ export const register: Register = on => {
     // mid-turn, the turn's own requests read the cache anyway
     if (e.turnId !== undefined || busy) return next(e)
     await syncSettings($)
-    if (!(s.guard ?? cfg.coldGuard)) return next(e)
     ttl = await cacheTtl($) // the lifetime the cache is judged by, as it is now
     const view = await cacheNow($)
-    if (view.state !== 'cold' || view.contextTokens === null || view.contextTokens < cfg.coldGuardTokens) return next(e)
+    if (view.state !== 'cold' || view.contextTokens === null) return next(e)
+    // a cold send the guard doesn't ask about still re-caches the chat, and Stats counts it: quietly, as it isn't the guard's to say
+    if (!(s.guard ?? cfg.coldGuard) || view.contextTokens < cfg.coldGuardTokens) {
+      await noteColdSend($, '', false)
+      return next(e)
+    }
     const coldFor = fmt(view.coldFor!)
     const size = view.contextTokens
     if (!ASKED_ORIGINS.includes(e.origin.kind)) {
@@ -1401,6 +1415,7 @@ export const register: Register = on => {
       return { text: OPENED }
     }
     if (words[0] === 'stats') {
+      others = null // read afresh
       if (!busy && e.origin.kind === 'composer') await openSettings($, 'stats')
       return { text: statsText(await statsFacts($)) }
     }

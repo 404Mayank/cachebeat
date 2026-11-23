@@ -46,13 +46,13 @@ export function weighOf(model: string, ttl: Ttl) {
 /** What a beat adds: the tokens it read and wrote, and their weight. */
 export function beatAdd(model: string, ttl: Ttl, read: number, wrote: number, isBeat: boolean) {
   const w = weighOf(model, ttl)
-  return { beats: isBeat ? 1 : 0, read, wrote, beatCost: read * w.read + wrote * w.write, common: !w.isListed }
+  return { beats: isBeat ? 1 : 0, read, wrote, beatCost: Math.round(read * w.read + wrote * w.write), common: !w.isListed }
 }
 
 /** What a turn that came back to a cache only beats kept warm adds: it read what it would otherwise have written. */
 export function keptAdd(model: string, ttl: Ttl, read: number) {
   const w = weighOf(model, ttl)
-  return { kept: 1, avoided: read * (w.write - w.read), common: !w.isListed }
+  return { kept: 1, avoided: Math.round(read * (w.write - w.read)), common: !w.isListed }
 }
 
 /** A stored `stats` value as days: the numbers it holds, and nothing it can't use. */

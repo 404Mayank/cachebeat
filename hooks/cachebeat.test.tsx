@@ -7,7 +7,7 @@ import { PANE, cut } from './pane'
 import { TTL_MS, viewOf } from './cache'
 import { ratiosOf } from './prices'
 import { DEADLINE, IDLE, RETRY, STEP, clockText, coldOutcome, fmt, restored } from './register'
-import { statsText, addTo, dayAgo, dayKey, emptyDay, stripOf, signed, statsLines, keptAdd, factsFrom } from './stats'
+import { beatAdd, statsText, addTo, dayAgo, dayKey, emptyDay, stripOf, signed, statsLines, keptAdd, factsFrom } from './stats'
 import type { StatusFacts } from './status'
 import { STATUS_NOTE, statusRows } from './status'
 import { DEFAULTS, EPISODE, SESSION_HELP, accept, glyphs, lookOf, minutesText, mixedMode, normalize, parseDuration, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans, tabBeside, PAGES } from './settings'
@@ -80,7 +80,11 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('store.keys', () => ({ value: [...store.keys()] }) as never)
   on('store.delete', (_$, e) => (store.delete(e.key), { value: undefined }) as never)
   on('session.id', () => ({ value: world.id ?? 's1' }) as never)
-  on('store.set', (_$, e) => (store.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never)
+  let isFull = false // the store refuses a conversation's record, as one over its size limit does
+  on('store.set', (_$, e) => {
+    if (isFull && e.key.startsWith('session:')) throw new Error('the store is full')
+    return (store.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never
+  })
   const forks: number[] = []
   const logs: string[] = []
   const toasts: string[] = []
@@ -178,7 +182,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     nextQuestion: () => new Promise<void>(r => (isAsked = r)), breakUsage: () => (isUsageBroken = true),
     // resolves once the read is parked
     holdGet: (key: string, until: Promise<void>, nth = 1) => new Promise<void>(parked => getsHeld.set(key, { nth, until, parked })),
-    clock, forks, prompts, logs, toasts, tails, opened, gets, store, specs, reads, lengths, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    clock, forks, prompts, logs, toasts, tails, opened, gets, fillStore: () => (isFull = true), store, specs, reads, lengths, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
     add: (role: 'user' | 'assistant', text: string) => (chat = [...chat, said(role, text)]),
   }
@@ -4026,16 +4030,70 @@ test('/cachebeat stats opens Stats and answers a line; mid-turn, or from a remot
   expect(opened).toEqual([PANE]) // neither opened another
 })
 
-test('the Stats page reads the other sessions\' records once a step, and the Status tab none', async ($: Engine, on: On) => {
+test('the Stats page reads the other sessions\' records when it opens, and then every ten minutes', async ($: Engine, on: On) => {
   const { clock, gets } = await setup($, on, { stored: { 'session:other': { ...on2, stats: {} }, 'session:more': { ...on2, stats: {} } } })
+  const read = () => gets.filter(k => k.startsWith('session:')).length
   await cmd($, 'stats')
   const ui = await $.ui.mount(STATS_PANE)
-  const read = () => gets.filter(k => k.startsWith('session:')).length
   const first = read()
+  expect(first).toBeGreaterThanOrEqual(2) // each other session, once
   await ui.redraw()
-  await ui.redraw()
-  expect(read()).toBe(first) // redraws within the step read nothing more
-  await clock.advance(STEP) // the page's own ticker redraws it
+  await clock.advance(5 * STEP) // the page's own ticker redraws it each minute, from what it holds
+  expect(read()).toBe(first)
+  await clock.advance(6 * STEP) // ten minutes since it read them
   expect(read()).toBe(first + 2)
+  await cmd($, 'stats') // asked again: read afresh
+  await ui.redraw()
+  expect(read()).toBe(first + 4)
   await ui.unmount()
+})
+
+test('/cachebeat stats reads the other sessions\' records afresh where no pane opens', async ($: Engine, on: On) => {
+  const { gets } = await setup($, on, { stored: { 'session:other': { ...on2, stats: {} } } })
+  const read = () => gets.filter(k => k === 'session:other').length
+  const ask = () => $.command.run({ command: 'cachebeat', args: 'stats', origin: { kind: 'bridge' }, presentation: { isFullscreen: false, columns: 80 } })
+  await ask()
+  const first = read()
+  await ask()
+  expect(read()).toBe(first + 1)
+})
+
+test('a send on a cold cache is counted with the guard off, and under its size, and not said', async ($: Engine, on: On) => {
+  const off = await coldSetup($, on, { settings: { coldGuard: false } })
+  expect((await submit($)).drop).toBe(undefined)
+  expect(off.questions).toEqual([])
+  expect(off.store.get('session:s1')).toMatchObject({ stats: { [dayKey(off.clock.now())]: { cold: 1, coldTokens: 184_000, held: 0 } } })
+  expect(off.logs.some(l => l.startsWith('sent on a cold cache'))).toBe(false)
+})
+
+test('a send on a cold cache under the guard\'s size is counted, not asked about, and not said', async ($: Engine, on: On) => {
+  const small = await coldSetup($, on, { contextTokens: 15_000 })
+  expect((await submit($)).drop).toBe(undefined)
+  expect(small.questions).toEqual([])
+  expect(small.store.get('session:s1')).toMatchObject({ stats: { [dayKey(small.clock.now())]: { cold: 1, coldTokens: 15_000, held: 0 } } })
+  expect(small.logs.some(l => l.startsWith('sent on a cold cache'))).toBe(false)
+})
+
+test('a send on a warm cache is not a cold send, guard on or off', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { contextTokens: 184_000, settings: { coldGuard: false } })
+  await $.turn.complete(turn)
+  await submit($)
+  expect((store.get('session:s1') as { stats?: unknown } | undefined)?.stats ?? {}).toEqual({})
+})
+
+test('a store that refuses the record costs the record and Stats, and no beat; it says so once', async ($: Engine, on: On) => {
+  const { clock, forks, logs, fillStore } = await setup($, on, { settings: { interval: 3 } })
+  fillStore()
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(7 * M) // beats at 3m and 6m
+  expect(forks).toHaveLength(2)
+  expect(logs.filter(l => l.includes("its store can't be written"))).toHaveLength(1)
+  const { session } = await stateNow($)
+  expect(session.beats).toBe(2)
+})
+
+test('a beat\'s cost and a kept turn\'s re-cache avoided are whole tokens', () => {
+  expect(beatAdd('claude-opus-5-5', '5m', 90_001, 1, true).beatCost).toBe(4_501) // 4500.05 + 1.25
+  expect(keptAdd('claude-opus-5-5', '1h', 3).avoided).toBe(6) // 3 × 1.95
 })
