@@ -207,6 +207,9 @@ export const parseMinutes = reader('minutes', { '': 1, m: 1, min: 1 }, 1, 55, tr
 /** A beat interval or a keep-alive time in words: 5m, 2h, 1h 30m. */
 export const minutesText = (m: number) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`)
 
+/** A time still to come, in words, rounded up to the minute and never under one: 1m, 38m, 1h 52m. */
+export const fmt = (ms: number) => minutesText(Math.max(1, Math.ceil(ms / 60_000)))
+
 const DURATION_PART = '(\\d+(?:\\.\\d+)?)\\s*'
 const DURATION = new RegExp(`^(?:${DURATION_PART}(?:h|hr|hrs|hour|hours))?\\s*(?:${DURATION_PART}(?:m|min|mins|minute|minutes))?$`)
 
@@ -394,6 +397,18 @@ export const TABS: readonly Tab[] = [
     ],
   },
 ]
+
+/** A tab of the pane with no settings, only a page drawn from the session's figures. */
+export type ReadOnlyPage = { id: string; title: string }
+
+/** The read-only tabs, ahead of the settings tabs: a new one is one entry here and a page for it in the pane. */
+export const READ_ONLY: readonly ReadOnlyPage[] = [{ id: 'summary', title: 'Status' }]
+
+/** Every tab the pane walks: the tab bar, the hotkeys and the arrows. `TABS` stays settings alone, which is what `rowOf`, `accept` and the tool read. */
+export const PAGES: readonly ReadOnlyPage[] = [...READ_ONLY, ...TABS]
+
+/** The tab an arrow on the tab bar reaches from the one holding the focus (`tab:<id>`): `by` along the tabs, round at either end. */
+export const tabBeside = (focus: string, by: number) => PAGES[(PAGES.findIndex(p => `tab:${p.id}` === focus) + by + PAGES.length) % PAGES.length]!
 
 export const rowOf = (key: keyof BeatSettings) => {
   for (const tab of TABS) for (const row of tab.rows) if (row.key === key) return { tab, row }

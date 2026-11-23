@@ -5,9 +5,11 @@ import { TTL_MS, viewOf } from './cache'
 import type { CacheFacts, CacheView } from './cache'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
-import { AUTO, DEFAULTS, TABS, changed, frameMs, glyphs, isLit, isObject, lookOf, minutesText, normalize, normalizeOwn, parseDuration, rowOf, spans, tokens } from './settings'
+import { AUTO, DEFAULTS, PAGES, READ_ONLY, TABS, changed, fmt, frameMs, glyphs, isLit, isObject, lookOf, minutesText, normalize, normalizeOwn, parseDuration, rowOf, spans, tabBeside, tokens } from './settings'
 import type { Span, Value } from './settings'
 import { ratiosOf } from './prices'
+import { usageName } from './status'
+import type { StatusFacts } from './status'
 import { SET, STATE, label, parseOnly, parseSet, readSummary, summary } from './tools'
 import type { Section, SetChange } from './tools'
 
@@ -48,6 +50,8 @@ let ticker: { cancel: () => void } | undefined // the prompt heart's animation c
 let lineTicker: { cancel: () => void } | undefined // the turn line's, at its own speed
 let paneTicker: { cancel: () => void } | undefined
 let paneTick = 0
+let paneEvery = 0 // the pane's ticker redraws at this many ms; 0 while none runs
+let isPaneOpen = false // the pane is up: a render still reading its figures when it closes arms no ticker
 let ring: string[] = [] // the pane's focusable keys as last drawn, in order
 let notice = '' // the pane's footer line
 let isResetArmed = false
@@ -79,7 +83,7 @@ let isCovered = false // the keep-alive time is set and the cache outlives it, s
 const fullReads = new Set<string>() // the loops (`main`, or a subagent's id) whose copy of `state` is whole: a narrow read of any other is widened
 const rowsSeen = new Set<string>()
 
-export const fmt = (ms: number) => minutesText(Math.max(1, Math.ceil(ms / MIN)))
+export { fmt }
 
 /** A time of day, with the weekday when it isn't `now`'s day: `4:30 PM`, `Thu 4:30 PM`. */
 export const clockText = (at: number, now: number) => {
@@ -717,7 +721,7 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
   const { rateLimits } = await $.session.usage()
   const full = rateLimits.find(l => l.percentUsed >= cfg.stopAtUsage)
   if (full) {
-    const kind = full.kind.replace('_', '-')
+    const kind = usageName(full.kind)
     return stop($, cfg.stopAtUsage >= 100 ? `${kind} usage limit reached` : `${kind} usage at ${full.percentUsed}%, past ${cfg.stopAtUsage}%`)
   }
   if (await smallContext($)) {
@@ -968,8 +972,8 @@ async function sessionOf($: EngineInterface, now: number) {
 }
 
 /** The prompt cache as it is judged now, and what writing the conversation to it again would come to. */
-async function cacheOf($: EngineInterface) {
-  const view = await cacheNow($)
+async function cacheOf($: EngineInterface, view?: CacheView) {
+  view ??= await cacheNow($)
   const write = ratiosOf(await $.session.model())[view.ttl === '1h' ? 'write1h' : 'write5m']
   return {
     state: view.state, ttl: view.ttl,
@@ -1013,6 +1017,24 @@ async function stateOf($: EngineInterface, only: readonly Section[] = [], isSuba
   }
 }
 
+/** What the Status tab draws: the figures `state` reports, read the same way. */
+async function factsOf($: EngineInterface): Promise<StatusFacts> {
+  ttl = await cacheTtl($) // usage can cross into credits between turns
+  const now = await $.clock.now()
+  const { rateLimits } = await $.session.usage()
+  const { lastMessageMinutesAgo } = await contextOf($, now, false)
+  const view = await cacheNow($)
+  // the time left is drawn as the turn line draws it, rounded up (`fmt`): the page and the line must read alike
+  return {
+    cache: { ...await cacheOf($, view), leftMs: view.state === 'warm' ? view.expiresAt! - view.at : null },
+    session: {
+      ...await sessionOf($, now), keepAliveLeftMs: s.keepUntil === null ? null : Math.max(0, s.keepUntil - now),
+      usageLimits: rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed })),
+    },
+    lastMessageMinutesAgo, coldGuardTokens: cfg.coldGuardTokens, stopAtUsage: cfg.stopAtUsage,
+  }
+}
+
 type Before = { enabled: boolean; keepUntil: number | null; guard: boolean | null; settings: BeatSettings; own: Partial<BeatSettings> }
 
 /**
@@ -1042,7 +1064,8 @@ async function answerSet($: EngineInterface, before: Before, change: SetChange) 
 
 const json = (x: unknown) => JSON.stringify(x)
 
-async function openSettings($: EngineInterface) {
+/** Opens the pane on `tab`: the Beating tab for the settings, Status for a bare /cachebeat. */
+async function openSettings($: EngineInterface, tab = 'beating') {
   await syncSettings($)
   const stored = await $.store.get('customs')
   customs = (stored as typeof customs | undefined) ?? {}
@@ -1050,9 +1073,10 @@ async function openSettings($: EngineInterface) {
   notice = ''
   isResetArmed = false
   editsFolder = Object.keys(own).length > 0 // a folder with settings of its own opens on them
-  await update($, pageAtom, () => ({ tab: 'beating', picker: null }))
+  isPaneOpen = true
+  await update($, pageAtom, () => ({ tab, picker: null }))
   await $.ui.open({ id: PANE, title: 'cachebeat', focus: true, closeOnEscape: true, holdToasts: true, rows: 24 })
-  await focusOn($, 'tab:beating', true)
+  await focusOn($, `tab:${tab}`, true)
 }
 
 /**
@@ -1078,6 +1102,7 @@ async function focusOn($: EngineInterface, key: string, isLanding = false) {
 function stopPaneTicker() {
   paneTicker?.cancel()
   paneTicker = undefined
+  paneEvery = 0
 }
 
 /** Shows a page of the pane and puts the focus on `key` there; `isLanding` as `focusOn` takes it. */
@@ -1088,9 +1113,9 @@ async function goTo($: EngineInterface, page: PanePage, key: string, isLanding =
   await focusOn($, key, isLanding)
 }
 
-/** The first element of a tab's settings, where going into it lands. */
+/** The first element of a tab's settings, where going into it lands; a read-only tab has none, so the focus stays on the tab bar. */
 const firstOf = (id: string, c: BeatSettings) =>
-  id === 'beating' ? 'session' : `row:${TABS.find(t => t.id === id)!.rows.find(r => !r.show || r.show(c))!.key}`
+  READ_ONLY.some(p => p.id === id) ? `tab:${id}` : id === 'beating' ? 'session' : `row:${TABS.find(t => t.id === id)!.rows.find(r => !r.show || r.show(c))!.key}`
 
 /** Puts a line in the pane's footer. */
 function say($: EngineInterface, text: string) {
@@ -1337,6 +1362,10 @@ export const register: Register = on => {
       return { text: `this session: ${await turnOn($, undefined, keep)}` }
     }
     if (words.length) return { text: USAGE }
+    // the pane opens on Status, and the line is the answer all the same: the transcript keeps it, and so do a remote client, a -p
+    // run and the toast of a command typed mid-turn. Mid-turn the pane stays shut: it holds toasts, and the line is the feedback.
+    // Nor does one open for a command that isn't the person's at this terminal (a Remote Control client, a -p run): no one is at its keys
+    if (!busy && e.origin.kind === 'composer') await openSettings($, 'summary')
     // the cache as it stands, on or off: what a message sent now would find
     const view = await cacheNow($)
     const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
@@ -1628,24 +1657,31 @@ export const register: Register = on => {
     const isMoving = picked ? picked.row.key === 'variant' || !!picked.tab.preview : !!TABS.find(t => t.id === page.tab)?.preview
     // at the speed of the part on show: the turn line's on its tab, the heart's elsewhere
     const part = (picked?.tab.id ?? page.tab) === 'status' ? 'line' : 'heart'
-    if (!isMoving) stopPaneTicker()
-    else if (!paneTicker) paneTicker = $.clock.every(frameMs(lookOf(c, part)), () => void update($, tickAtom, () => ++paneTick))
+    // the Status tab reads the session as it is now, and nothing else redraws it while beats wait or are off: one redraw a step
+    const status = page.tab === 'summary' ? await factsOf($) : null
+    const wanted = !isPaneOpen ? 0 : isMoving ? frameMs(lookOf(c, part)) : status ? STEP : 0
+    if (wanted !== paneEvery) {
+      stopPaneTicker()
+      if (wanted) paneTicker = $.clock.every(wanted, () => void update($, tickAtom, () => ++paneTick))
+      paneEvery = wanted
+    }
     const els = $.ui.resolve(e)
     paneSurface = e.surface
     const { Text } = els // every surface has it: taken before the check, which may narrow `els` to never
-    if (!('Input' in els)) return <Text>Open cachebeat's settings in the terminal.</Text>
+    // a read-only page needs no input: Status draws where the settings can't be changed
+    if (!('Input' in els) && !READ_ONLY.some(p => p.id === page.tab)) return <Text>Open cachebeat's settings in the terminal.</Text>
     // the menu shows the settings it saves to: this folder's own over all folders', or all folders'
     const shownSettings = editsFolder ? c : global
     const to: Target = editsFolder ? 'folder' : 'global'
     const where = cut(place.root, PATH)
     const view = {
-      page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, keepUntil: s.keepUntil === null ? null : clockText(s.keepUntil, now), guard: s.guard,
+      page, tick, focus, columns: e.props.bodyColumns, status, isOn: s.enabled, keepUntil: s.keepUntil === null ? null : clockText(s.keepUntil, now), guard: s.guard,
       autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal', customs,
       own: place.own, path: where, editsFolder, allFolders: global,
     }
-    const { tree, ring: walk } = settingsPane(els, shownSettings, view, {
+    const { tree, ring: walk } = settingsPane(els as never, shownSettings, view, {
       set: patch => void setSettings($, patch, to),
-      // a press on a tab (Enter, 1-5, a click) shows it and goes into its settings
+      // a press on a tab (Enter, 1-6, a click) shows it and goes into its settings
       tab: id => void goTo($, { tab: id, picker: null }, firstOf(id, shownSettings)),
       at: key => void focusOn($, key),
       open: key => {
@@ -1704,8 +1740,8 @@ export const register: Register = on => {
       // with nothing focused yet, the first move goes anywhere
       if (from && from.startsWith('tab:') !== isToTab) {
         // off either end of the tab bar, round to the other end; between the levels, Enter and Esc
-        const at = TABS.findIndex(t => `tab:${t.id}` === from)
-        const end = !isToTab && at === TABS.length - 1 ? TABS[0] : !isToTab && at === 0 ? TABS.at(-1) : undefined
+        const at = PAGES.findIndex(t => `tab:${t.id}` === from)
+        const end = !isToTab && at === PAGES.length - 1 ? PAGES[0] : !isToTab && at === 0 ? PAGES.at(-1) : undefined
         if (!end) return { deny: 'Enter goes into a tab, Esc back out' }
         to = `tab:${end.id}`
       }
@@ -1722,7 +1758,7 @@ export const register: Register = on => {
     if (paneSurface !== 'terminal' || e.origin.kind !== 'person' || e.pointer || Math.abs(e.by) !== 1) return next(e)
     const focus = await read($, focusAtom)
     if (focus.startsWith('tab:')) {
-      const t = TABS[(TABS.findIndex(x => `tab:${x.id}` === focus) + e.by + TABS.length) % TABS.length]!
+      const t = tabBeside(focus, e.by)
       await goTo($, { tab: t.id, picker: null }, `tab:${t.id}`)
       return {}
     }
@@ -1745,6 +1781,7 @@ export const register: Register = on => {
       await goTo($, { ...page, picker: null }, page.picker ? `row:${page.picker}` : `tab:${page.tab}`, true)
       return { value: undefined }
     }
+    isPaneOpen = false
     stopPaneTicker()
     return next(e)
   })

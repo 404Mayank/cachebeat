@@ -124,7 +124,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 | Command | What it does |
 | --- | --- |
-| `/cachebeat` | Shows the status: on or off, the interval, the time left on a keep-alive time, beats so far, the next beat, and whether the cache is warm or cold |
+| `/cachebeat` | Opens the [Status page](#what-youll-see), and answers with a line: on or off, the interval, the time left on a keep-alive time, beats so far, the next beat, and whether the cache is warm or cold. Typed while Claude is working, or from a remote session, it gives the line alone |
 | `/cachebeat on` | Turns it on for this session, with no time limit |
 | `/cachebeat off` | Turns it off for this session |
 | `/cachebeat <time>` | Keeps the cache warm for that long from now, then turns this session off: `/cachebeat 2h`, `45m`, `1h30m` (5 minutes to 48 hours; the unit is required) |
@@ -134,7 +134,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 | `/cachebeat global <minutes>` | Sets the interval for all folders, and turns it on here |
 | `/cachebeat local on` / `off` / `<minutes>` | The same, for sessions in this folder only |
 | `/cachebeat local reset` | Drops this folder's own settings: it follows all folders again |
-| `/cachebeat settings` | Opens the settings menu |
+| `/cachebeat settings` | Opens the settings menu, on its Beating tab |
 
 A command typed while Claude is working takes effect at once. Claude Code shows the command and its reply in the transcript only when the turn ends, so cachebeat shows the reply in a toast right away.
 
@@ -153,11 +153,13 @@ A command typed while Claude is working takes effect at once. Claude Code shows 
   ⏸ manual mode on · ⠀(♥)⠀ ×3
 ```
 
+**The Status page** is the first tab of the menu, and `/cachebeat` opens it. It is read-only, and it shows this session as it stands: whether the cache is warm or cold, with its lifetime, when it was last read and how long it has left, or how long it has been cold; the conversation's size in tokens, and what caching it again would cost in input tokens; whether this session beats, at what interval, and when the next beat is due; the beats so far and what the last one read and wrote; the cold guard; your usage limits and where beats stop; and when you last sent a message. It updates each minute while it is open. Warm or cold is judged by the time since the cache was last read; only the next request confirms it.
+
 ## Settings
 
 Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings apply in all folders, unless you give a folder its own (see [Where settings apply](#where-settings-apply)).
 
-- On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–5 jump straight into a tab.
+- On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–6 jump straight into a tab, Status first.
 - Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
 - **r** puts the focused setting back to its default. On a folder's own setting, it goes back to the one for all folders. On **This session** with a keep-alive time, it drops the time, and the session keeps beating with no limit.
 - In a list, ↑↓ preview each choice and Enter picks it.
