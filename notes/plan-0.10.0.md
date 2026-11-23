@@ -1086,6 +1086,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
   - **The hotkeys are 1–6,** not 1–7: Stats isn't built. The footer is the tab bar's, as drawn, though Enter on Status goes nowhere.
   - **The width is the pane's `bodyColumns`.** Live on 2.1.329 in an 80-column terminal it was 76, as the mock-up inferred.
   - **Test 633** ("six tabs" asserting five) is now six tabs and asserts six.
+  - **After the review:** a time still to come (`left`) is drawn through `fmt`, rounded up as the turn line and the answer line round it, and an age (`last read … ago`, `cold for`) stays floored; `StatusFacts` carries `leftMs` and `keepAliveLeftMs` for it, and `fmt` moved to `settings.ts` (re-exported from `register.tsx`). The pane's ticker is armed only while `isPaneOpen`, set in `openSettings` and cleared when the pane closes, so a render still inside `factsOf` as Esc closes it arms nothing (not testable: the kit has no `ui.close`). A read-only page is drawn before the `Input` check, so Status draws on a surface without `Input` (unverified: no such surface was at hand).
   - Not pinned by a test: the `ui.scroll` hook's use of `tabBeside` (the kit can't raise a person's scroll; `$.ui.scroll` is the plugin's call). `tabBeside` itself is unit-tested.
 
 ### Step 7: Stats (item 7, provisional)
