@@ -23,7 +23,7 @@
 The next agent raises these with the user before anything else. The user said on 2026-11-23: build everything up to the release, but **don't ship**; and the orchestrator decides as it understands, recording here what the user should know, look at, or weigh in on.
 
 - **Ship 0.10.0?** It's the user's call. Everything up to it is done:
-  - [PR #14](https://github.com/404Mayank/cachebeat/pull/14) (`v0.10.0` into `main`) is open, with CI on it.
+  - [PR #14](https://github.com/404Mayank/cachebeat/pull/14) (`v0.10.0` into `main`) is open, and CI is green: the floor job, 2.1.287 and latest. This is dev's `ci.yml`'s first run on GitHub.
   - The release branch passes 326/0 and `validate --strict` on 2.1.287, 2.1.322, 2.1.329 and 2.1.330.
 
   To ship, follow notes/README.md, "Releasing, step by step", from step 5:
