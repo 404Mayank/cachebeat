@@ -40,6 +40,16 @@ The next agent raises these with the user before anything else. The user said on
 - **After `/model`, the cold guard reads the cache as warm** (step 5 review), though the new model's cache is empty. The first message after a switch re-caches the whole conversation without asking. Left as is: `state` judges it the same way, and the user just chose the switch. Say if the guard should ask there too.
 - **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
 
+## Paused for usage (2026-11-23 09:48)
+
+The account's 5-hour usage reached 87%, resetting around 12:10. Step 6 (Status) is paused in `cachebeatSonnetHigh01`, after reading only: no worktree or edits yet. A one-shot cron in the orchestrator's session (`cachebeat-cf`) resumes the work at 12:14. If that session is gone, the next agent resumes from "What's left" below.
+
+**What's left:**
+1. Step 6 (Status): build, review, merge.
+2. Step 7 (Stats).
+3. Step 8 (the GIF: Opus plans, Sonnet times it, then a review).
+4. Step 9: the README sweep, `version` 0.10.0, the release branch, PR and CI. **Don't push `main`**: shipping is the user's call.
+
 ## Where things are
 
 | | State |
