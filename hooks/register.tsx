@@ -944,7 +944,7 @@ function say($: EngineInterface, text: string) {
 }
 
 const OPENED = 'settings opened'
-const USAGE = 'usage: /cachebeat [on|off|<time, like 2h>|now|settings] · global [on|off|<minutes>] · local [on|off|<minutes>|reset]'
+const USAGE = 'usage: on, off, a time like 2h, now, settings · global or local: on, off, minutes · local reset'
 
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
@@ -1024,7 +1024,7 @@ export const register: Register = on => {
     const asked = rest.join('')
     if (/^\d/.test(asked)) {
       // a number alone was the interval of this session, before the interval became a setting: it changes nothing now
-      if (isWhole(asked)) return { text: `nothing changed: a time needs its unit now. /cachebeat 2h keeps the cache warm for 2 hours, then turns off. The beat interval is a setting: /cachebeat global ${minutesOf(asked)}, or /cachebeat settings.` }
+      if (isWhole(asked)) return { text: `nothing changed: add a unit, like 30m · interval: /cachebeat global ${minutesOf(asked)}` }
       const keep = parseDuration(asked)
       if (keep === undefined) return { text: `nothing changed: /cachebeat takes a time from 5m to 48h with its unit, like 30m, 2h or 1h30m, not "${rest.join(' ')}".` }
       return { text: `this session: ${await turnOn($, undefined, keep)}` }
