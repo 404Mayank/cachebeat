@@ -352,7 +352,7 @@ Claude Code 2.1.329, `--model haiku`, tmux, `step-guard`'s tree loaded from an a
 
 ### The Status tab (step 6, 2026-11-23)
 
-- **The pane's height follows the terminal.** At 80×40 on 2.1.329 an inline pane showed 11 body rows, so Status (13 rows with its note and footer) lost its note's second line and the footer; at 80×60 it showed whole. Status has nothing to focus, so the focus can't scroll it; PageDown scrolls the window. The Beating tab (10 rows) fits at 40.
+- **The pane's height follows the terminal.** At 80×40 on 2.1.329 an inline pane showed 11 body rows, so Status (13 rows with its note and footer) lost its note's second line and the footer; at 80×60 it showed whole. Status has nothing to focus, so the focus can't scroll it; PageDown scrolls the window. The Beating tab (10 rows) fits at 40. At 80×24 the window showed 6 body rows (tab bar, rule, Cache to This session). The arrows were checked live: Up from Status lands on Alerts and Down from Alerts on Status, which on `TABS` they would not.
 - **Its width was 76 at an 80-column terminal** (`bodyColumns`), the figure the mock-up inferred.
 - **`tickAtom` is bumped only by `say`, `restartClocks` and the pane's ticker,** not by the step timers, though the plan said so. The Status tab needs its own: nothing redraws a pane while beating is off or paused.
 - **A mounted pane in the kit re-renders on an atom change, not on `find`:** the ticker test fails without the ticker.
