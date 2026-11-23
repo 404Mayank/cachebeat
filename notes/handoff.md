@@ -1,23 +1,37 @@
-# Handoff: 0.9.3 waits on one test, 0.10.0 is built through the request-start fix (2026-11-14)
+# Handoff: 0.10.0 is built and waits on the user to ship (2026-11-23)
 
-> Temporary handoff for the next agent: what's in progress and how to continue. Not project documentation; delete when the work lands.
+> Temporary handoff for the next agent: what's in progress and how to continue. Not project documentation. Delete it when 0.10.0 ships, or rewrite it at the next wrap-up.
 
-Start here. The design and every decision are in [plan-0.10.0.md](plan-0.10.0.md); what took time to find out is in [mods-gotchas.md](mods-gotchas.md); branches and releases are in [README.md](README.md). This file says where things stand, what to do next, what the user still has to answer, and how the work is run.
+**Start here.** The next agent raises the "For the user" list below with the user before anything else.
+- [plan-0.10.0.md](plan-0.10.0.md) holds the design and every decision.
+- [mods-gotchas.md](mods-gotchas.md) holds what took time to find out.
+- [README.md](README.md) covers branches and releases.
 
-**Why it paused:** the orchestrating session (`cachebeatOrch`) was asked to wrap up after the request-start fix merged. Nothing is half done: no worktree, no unmerged branch, no session mid-task.
+**Why it stopped:** on 2026-11-23 the user asked the orchestrator (`cachebeat-cf`) to finish everything that didn't need them, write this file, and have `clear` close every session. Nothing is half done: no worktree, no session mid-task, and no unmerged branch except the release branch.
 
-## Update 2026-11-23 (session `cachebeat-cf`)
+## Where things are
 
-- **0.9.3 shipped on 2026-11-23** (`740ae82`, PR #13 merged, tag and release out, release notes edited). It carries the request-start, compat and retry fixes. P1 passed live (mods-gotchas, "0.10.0 probes"). `main` is merged into `dev` (`3cde69f`, `version` 0.9.3). The `cachebeat-rel` worktree and the `v0.9.3` and `tmp-093` branches are gone. Item 2 of "What to do next" is done; open question 1 and P1 are answered.
-- **dev is at the merges `bbd8c4c` (retry) and `6033664` (compat)** and passes 212/0 on all four engines.
-- **2.1.329 changed the band above the prompt to one row per plugin.** Only the tests broke (mods-gotchas, "From 2.1.329…"). Still unchecked: what the desktop draws for core's node in cachebeat's row.
-- **The fleet was spawned fresh on 2026-11-23 by `clear`:** `cachebeatOpusHigh01` (review and plan from now on), `cachebeatSonnetHigh01` (easier builds) and `cachebeatOpusXhigh01` (only when stuck; retune it to medium and rename it for the harder builds). The base/fork scheme below is retired, and the old sessions are offline.
+| | State |
+| --- | --- |
+| `main` / `origin/main` | 0.9.3 (`740ae82`), released 2026-11-23. |
+| `v0.10.0` | The release branch, pushed, [PR #14](https://github.com/404Mayank/cachebeat/pull/14). It holds only the plugin files and the new GIF, taken from `dev` at `dbfeb15`, plus `version` 0.10.0. **Not merged: shipping is the user's call.** |
+| `dev` | Pushed and clean. 0.10.0's steps 0–9 are all merged: tokens only, request start, retry, compat, midturn, 3c, 4 (resume), the race fix, 5 (the cold guard), 6 (Status), 7 (Stats), 8 (the GIF) and 9 (the README). `version` is 0.10.0. 326/0 on all four engines. |
+| `long-turn`, `v0.8.2`, `worktree-agent-…` | Older branches, not from this work. Leave them. |
 
 ## For the user: decisions taken, and what to raise (keep this list current)
 
 The next agent raises these with the user before anything else. The user said on 2026-11-23: build everything up to the release, but **don't ship**; and the orchestrator decides as it understands, recording here what the user should know, look at, or weigh in on.
 
-- **Ship 0.10.0?** The user's call.
+- **Ship 0.10.0?** It's the user's call. Everything up to it is done:
+  - [PR #14](https://github.com/404Mayank/cachebeat/pull/14) (`v0.10.0` into `main`) is open, with CI on it.
+  - The release branch passes 326/0 and `validate --strict` on 2.1.287, 2.1.322, 2.1.329 and 2.1.330.
+
+  To ship, follow notes/README.md, "Releasing, step by step", from step 5:
+  1. Fast-forward `main` (`git push origin v0.10.0:main`). CI then tags and releases.
+  2. Put the draft below on top of the release notes (`gh release edit v0.10.0`).
+  3. Merge `main` into `dev`.
+  4. Delete the local `v0.10.0` branch.
+  5. Delete this file, or rewrite it.
 - **The Status and Stats mock-ups** (plan items 5 and 7, redrawn in tokens on 2026-11-23) were approved by the orchestrator, which took the recommended option on all eight choices under "What steps 6 and 7 wait on":
   1. the Cache row in `/usage`'s form
   2. the weighted size kept
@@ -46,10 +60,15 @@ The next agent raises these with the user before anything else. The user said on
   - takes recorded with `--model sonnet`
   - the old demo session as the source, refreshed
 
-  **Look at the GIF before shipping:** it is public once on `main`. It shows the source session's last screenful, and Status's Usage row shows the account's real percentages.
+  **Look at the GIF before shipping** (`assets/demo.gif`, 26.6s, on `dev` and the release branch). It becomes public once it's on `main`.
+  - It opens on the guard's question, with a hidden `/cachebeat` line above it. That hides the "Remote Control disconnected" notice, which would otherwise be in frame.
+  - Status shows four rows (Cache, Beating, Size, Cold guard), so no usage percentage appears.
+  - A Claude Code spinner tip shows for about 2s during the answer.
 - **The GIF shows two things the old one didn't:** `← 2 agents` in the footer, and "1 agent type / 1 skill available" under the first message. Both are probably from this machine's setup rather than the plugin (inferred). The orchestrator kept them, because the fleet can't be closed for the take. Look at them in the GIF before shipping.
-- **Leftover fork session files from the GIF takes** are under ~/.claude/projects/-home-zyrus-Desktop-Projects/: `5fae1024-…`, `6d96bcd6-…`, `6bae1637-…`, `eae6b2e8-…` and `896b9994-…` (all .jsonl, 2026-11-23 12:31–12:43), plus the final take's fork. They were left in place; delete them if you like. The demo source `adb66a7d-…` was refreshed with one Sonnet turn at 12:51 ("ok, thanks").
-- **Your Remote Control session disconnected: "Trusted devices now required — run /remote-control to start a new session".** It showed while the demo source was being refreshed, 2026-11-23 12:51. It's an account change, not cachebeat's. It is now in the demo source's transcript, so the GIF's opening screenful may show it. The final take checks scene 0.
+- **Leftover fork session files from the GIF work** are under ~/.claude/projects/-home-zyrus-Desktop-Projects/, all .jsonl from 2026-11-23:
+  - 12:31–12:43: `5fae1024-…`, `6d96bcd6-…`, `6bae1637-…`, `eae6b2e8-…`, `896b9994-…`
+  - 14:55–15:16 (previews and the final take, `adfad2a7-…`): `ad2bd4af-…`, `9fa1d4c3-…`, `9b494cdf-…`, `b9c9936f-…`, `7d30cd56-…`, `d3c854dc-…`, `3c65696e-…`, `d3894c45-…`, `adfad2a7-…` They were left in place; delete them if you like. The demo source `adb66a7d-…` was refreshed with one Sonnet turn at 12:51 ("ok, thanks").
+- **Your Remote Control session disconnected: "Trusted devices now required — run /remote-control to start a new session".** It showed while the demo source was being refreshed, 2026-11-23 12:51. It's an account change, not cachebeat's. It is now in the demo source's transcript, so the GIF's opening screenful may show it. The final take kept it out of frame.
 - **Unverified on a real surface (step 6):** Status draws before the pane's `Input` check, so a surface without Input still shows it. It assumes such a surface has `Button`, and nothing at hand could check it. The desktop app hasn't been looked at for Status either.
 - **Step 7 decisions:**
   - The "Prompt heart" tab is renamed **Heart**, so seven tabs fit 76 cells. The settings keep their full names.
@@ -64,7 +83,8 @@ The next agent raises these with the user before anything else. The user said on
   - The GIF has its new alt text.
   - "Beat after idle" was left as it is, because the Good to know bullet on the request start reads true against the code.
   - No shipped text was wrong. Every field `state` returns (`sessionOf`, `cacheOf`, `contextOf`, `whole`) is described in `STATE`, and every field described is returned.
-- **The README's GIF alt text describes the new GIF, which isn't on `dev` yet.** `assets/demo.gif` there is still the 2026-10-09 one. The new GIF waits on step 8's final take (`step-gif`), so the alt text and the GIF must land together on the release branch.
+- **A wording mismatch, seen in the GIF:** with a keep-alive time that the cache outlasts, bare `/cachebeat` says `no more beats needed`, while Status's Beating row says `no beat needed`. It's small; one wording could be picked in 0.10.1.
+- **The tsc check:** every engine's type-check ran through `validate --strict`. `tsc -p .` ran against the main checkout's types.
 
 ## 0.10.0 release notes (draft)
 
@@ -93,43 +113,6 @@ Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. 
 - **Claude can read its context:** ask it how full the context window is, when it will compact, and whether the cache is still warm.
 - **A command typed while Claude is working** answers at once in a toast.
 
-## Paused for usage (2026-11-23 09:48)
-
-The account's 5-hour usage reached 87%, resetting around 12:10. Step 6 (Status) is paused in `cachebeatSonnetHigh01`, after reading only: no worktree or edits yet. A one-shot cron in the orchestrator's session (`cachebeat-cf`) resumes the work at 12:14. If that session is gone, the next agent resumes from "What's left" below.
-
-**What's left:**
-1. Step 6 (Status): build, review, merge.
-2. Step 7 (Stats).
-3. Step 8 (the GIF: Opus plans, Sonnet times it, then a review).
-4. Step 9: the README sweep, `version` 0.10.0, the release branch, PR and CI. **Don't push `main`**: shipping is the user's call.
-
-## Where things are
-
-| | State |
-| --- | --- |
-| `main` / `origin/main` | 0.9.2 (`c84ac68`). Local `main` is 8 commits behind `origin/main`: fast-forward it before using it. |
-| `v0.9.3` | The 0.9.3 release branch (`efa2be6`, pushed), [PR #13](https://github.com/404Mayank/cachebeat/pull/13), CI green on 2.1.287 and latest. Checked out in the worktree `/home/zyrus/Desktop/Projects/cachebeat-rel`. Waits only on the user's live sleep check, and on one decision: whether the request-start fix goes into it (below). |
-| `dev` | `05294d1`, pushed, clean. Steps 0, 1, 2, 2b, 3, 3b of 0.10.0, the tokens-only step and the request-start fix are merged. `version` in `.claude-plugin/plugin.json` still reads 0.9.2; 0.10.0's release step bumps it. |
-| Checks on `dev` | Run 2026-11-14 at `05294d1`: `claude plugin test .` 209 pass, 0 fail on 2.1.322 and on the 2.1.287 binary; `tsc` clean. |
-| CI on `dev`'s `ci.yml` | Type-checks on both legs; a `floor` job reads the minimum version from the README badge. **It has never run on GitHub**: PR #13 ran `main`'s old file, so the 0.10.0 release PR is its first run. |
-| `tmp-093` | Local scratch branch the 0.9.3 release took its files from. Delete after 0.9.3 is out. |
-| `long-turn`, `v0.8.2`, `worktree-agent-…` | Older branches, not from this work. Leave them. |
-| The plugin directory | Dropped (2026-11-14): it lists verified organizations only. No portal check is a release step, and "the directory will flag it" is not a design risk. [directory.md](directory.md) is kept as a record. |
-
-**What 0.9.3 is:** step 1 alone: beats timed by the wall clock (the sleep fix), the **Cache gone cold** setting, the "due now" wording, and `state.cache`. It was planned as 0.9.2, a number a cloud session had already used, so read "0.9.2" in step 1's commit messages and plan text as 0.9.3.
-
-## Built on 2026-11-14
-
-Each was built in its own worktree, checked on both engine versions, reviewed, and merged with `--no-ff`.
-
-| Step | Merge | What it does | Checked live? |
-| --- | --- | --- | --- |
-| 3b | `32ec2f8` | The prompt heart shows through a turn while cachebeat is on (still while a request is on its way, beating on a quiet turn's countdown); the desktop band keeps its line through a turn; a `/cachebeat` command typed mid-turn gets a toast with its reply. | The heart and the toast, in a terminal on 2.1.322. The desktop band was not. |
-| Tokens only | `bb5ef82` | No dollar figure in anything users or Claude read. `hooks/prices.ts` keeps the table and `ratiosOf(model)` (read, 5m-write and 1h-write ratios to input, `isListed`) for step 7; nothing in the plugin imports it yet. | Tests only. |
-| Request start | `05294d1` | `s.lastWarm` is when the last request that touched the cache was **sent**, not when its answer ended. One beat in flight at a time (`beat()` returns while `beating`), which also stops `/cachebeat now` from sending a second fork beside a scheduled one. | Tests only. The rule itself was confirmed live (below). |
-
-Also done: the README's Important note that `/cachebeat <time>` changed in 0.10.0 (above Features; repeat it on top of the 0.10.0 release notes, and take it out a release or two later); item 10 designed; the plan brought in line with the day's decisions.
-
 ## Findings worth knowing before you touch anything
 
 All are recorded in full in mods-gotchas.md or the plan; this is the index.
@@ -148,117 +131,36 @@ All are recorded in full in mods-gotchas.md or the plan; this is the index.
 - **cache-tax** ([karanb192/cache-tax](https://github.com/karanb192/cache-tax), MIT, read at 2.4.2) is a mod the Stats page draws ideas from; the page is not named after it (the user, 2026-11-23). What it does that cachebeat could borrow, and what was taken, is in the plan, "From cache-tax" and "Decided from it". Credit it in the README only if what's taken is substantial (the user).
 - **The idle cost rise** (+$0.002 with nothing running, step 2's live check) touches no figure now. Leave it unless testing shows it again (the user).
 
-## What to do next, in order
-
-One step at a time: build, check on both versions, review, fix, merge, then the next. Line numbers are `dev` at `05294d1`; each names its symbol so it can be found after edits.
-
-1. **Ask the user the open questions** (next section). Step 3c and step 5 are designed around recommendations the user hasn't confirmed.
-2. **0.9.3**, when the user has run the sleep check (P1):
-   - The retest: `claude --plugin-dir /home/zyrus/Desktop/Projects/cachebeat-rel --settings '{"enabledPlugins":{"cachebeat@cachebeat":false}}' --model haiku --debug`; send two messages; `/cachebeat 3`; wait for one beat (`kept warm ×1`); suspend about 10 minutes; wake. Expected: a beat within about a minute (`×2`), the line reading `next in 3m`, not a stuck `next in 1m`. Record the result under "0.10.0 probes" (P1) in mods-gotchas.md from `~/.claude/debug/<session>.txt`.
-   - **If the user wants the request-start fix in 0.9.3** (recommended): carry `c67d76a` and `9ec1e50` onto `v0.9.3`. A scratch cherry-pick of `c67d76a` applied its logic cleanly with four small conflicts: two in `hooks/register.tsx` (a comment near `schedule()`, and the `when()` string, both on lines 0.10.0 changed), one in `hooks/tools.ts`, one in the tests. Rerun the three checks on the branch, push it, let CI run on the PR, and have the user run the sleep check on the new branch, so one test covers both.
-   - Ship: notes/README.md, "Releasing, step by step", from step 5 (`git push origin v0.9.3:main`, a fast-forward; CI tags and releases). Then `gh release edit v0.9.3` and put on top: "Changed default: a cache gone cold now waits for your next message instead of switching cachebeat off; set Cache gone cold to stop for the old behavior."
-   - Merge `main` into `dev`. **It conflicts** in `plugin.json`, `README.md`, `register.tsx`, `pane.tsx`, `tools.ts` and the tests, because the release was cut from step 1 and `dev` rewrote those lines. First `git log dev..origin/main` (it should list only the release commit). Then resolve every plugin file to `dev`'s side (`git checkout --ours -- <files>`), set `plugin.json` to `0.9.3`, rerun the checks, commit.
-   - Remove the `cachebeat-rel` worktree and the `tmp-093` and `v0.9.3` local branches. Add a line to notes/README.md, "How 0.7.0 went out, as a pattern": 0.9.3 was step 1 cut from its own merge commit, because `dev` already held later work.
-3. **Done 2026-11-23 (merged): Step 3c: Claude reads what it needs** (plan, item 10; a Sonnet fork can build it). `state` gains `only: ['context'|'cache'|'session'|'settings']`; a new `context` section; a loop's first read is answered whole; `set`'s answer gains `shadowed`; the schema is trimmed and answers print compact. Targets: `STATE` and `SET` in `hooks/tools.ts` (:79, :99), `ABOUT` (:10); `stateOf` in `hooks/register.tsx` (:788); the two `tool.call` hooks (:998, :1000). Live checks C1–C4 in the item come first. The description text in the item was written before the tokens-only step: it already assumes no dollars.
-4. **Step 4: resume** (plan, item 2; an Opus fork). Targets: `classic.SessionStart` (:949), `session.start` (:906), `session.end` with `reason: 'resume'` (:940), `restored()` and the `Saved` type in `types/index.d.ts`. No write rate is learned from the resume hint; the hint's `context_tokens` seeds a size for the guard (`s.resumeTokens`, check R1 first). Hook order follows P3.
-5. **Step 5: the cold guard** (plan, item 4, rewritten 2026-11-14; an Opus fork, Fable reviews). It asks `Send` / `Don't send` through `$.ui.ask`, speaks tokens, and has a new **if unanswered** setting. Probes G1–G5 come first: G1 (can an open ask be closed when a timeout sends the message? if not, the question becomes our own pane), G4 (does the question reach a Remote Control client and can it be answered there?), G5 (the desktop app). New settings go in `DEFAULTS` (:4), `normalize` (:59) and `TABS` (:285) in `hooks/settings.ts`, with an `ABOUT` entry each.
-6. **Step 6: Status**, then **step 7: Stats** (plan, items 5 and 7). Tab ids are `summary` and `stats`; the Turn line tab keeps `status`. A `PAGES` list (the two read-only tabs, then `TABS`) is what the tab bar, hotkeys and the `ui.focus`/`ui.scroll` wrap walk. Both mock-ups still show `≈$` and are marked `[$?]`: redo them in tokens, Stats' net in input-token equivalents through `ratiosOf`. Both wait on a look pass against the user's `/usage` and `/stats` screenshots (described in the plan, "Decided from it") that the user approves. Test 633 in the pane tests is named "six tabs" and asserts five: fix the name when editing there.
-7. **Step 8: the GIF.** The tape types `/cachebeat 5`, which step 3 refuses: change it.
-8. **Step 9: the sweep and the release.** A full README pass, including a line telling users not to run another keep-warm plugin beside cachebeat (decided: a note, no detection), and whether the README's "Beat after idle" wording needs the request-start caveat. Bump `version`, cut the release branch, PR, ship.
-
-## Open with the user
-
-**Answered on 2026-11-23:**
-- Q1: the request-start fix went into 0.9.3, which has shipped. P1 passed.
-- Q2, item 10: keep the first-read rule (whole on a loop's first read). Include all four extras: compact answers, `cache.recacheInputTokens`, `session.usageLimits` in `state`, and the README CLAUDE.md tip. The user asked whether the README explains how to use the tools; it does (Quick start, "Ask Claude"), and the tip is one extra line for users who want Claude to check its context unasked.
-- Q4, the long answer: the user called it rare and asked for a web check. The platform docs (prompt-caching page, read 2026-11-23) confirm the lifetime runs from the request's start, with the example "a 4-minute streamed response means a follow-up must begin about 1 minute after it finishes". Left as is: the generic cold line, and **Cache gone cold** decides. The other two Q4 items take the recommendations: the Good to know bullet is enough, and a beat may fire mid-turn.
-- Q5, step 3b: skip the "settings opened" toast. Also **verify live on 2.1.329** that every `/cachebeat` command typed mid-turn (on, off, a time, now, settings, bare) gives feedback at once. The user's point: anyone typing and moving on needs to know it took, not wait for the turn to end. Done as the 3b follow-up (merged 2026-11-23): every form already toasted at once; only the settings toast was dropped (mods-gotchas, "Every form, live on 2.1.329").
-- Q3, the guard's choices (answered 2026-11-23):
-  - **if unanswered** stays a setting, with the recommended default: `'drop'`, the question stays open, and nothing is ever sent unanswered.
-  - Only terminal messages are asked about, plus Remote Control if G4 passes; otherwise `bridge` passes and the README suggests running `/cachebeat` first. Channels, Slack pings and unclassified messages pass, logged and counted.
-  - A question that can't be shown drops the message.
-- The look pass for Status and Stats (steps 6 and 7) was delegated to the orchestrator: "approve whatever you find best, we can tweak later" (2026-11-23). The mock-ups redrawn in tokens are approved as drawn, so steps 6 and 7 no longer wait on the user.
-- Opus 5.5's saved default effort (medium since the retune): "doesn't matter", so it was left as is.
-
-Asked on 2026-11-14 and not answered unless marked. Each has a recommendation.
-
-**Proceeded on without an explicit answer. Reversible; tell the user plainly.**
-
-- **Dollars removed everywhere.** The user said tokens are cachebeat's currency and that dollars go "everywhere or nowhere", asked what the orchestrator thought (remove), and then said to continue. To reverse: revert the merge `bb5ef82`.
-- **Pushing `dev`.** The user said "push dev" once; `dev` was pushed after each merge and notes commit since. Nothing reads `dev`.
-
-**Waiting for an answer.**
-
-1. **Does the request-start fix go into 0.9.3?** Recommended: yes. It's a correctness bug in what the plugin exists to do, it's in the released 0.9.2 too, and 0.9.3 is already the beat-timing release.
-2. **Item 10's six questions** (plan, item 10, "Open, for the user"). Recommended: keep the first-read rule; a README tip only for making Claude check its context, no system-prompt line; both a raw and a weighted re-cache figure; usage limits in `state`; compact answers.
-3. **The guard's choices** (plan, item 4, marked as choices):
-   - An unanswered question drops the message by default, or sends it after 1–15 minutes if set; a dismissal never sends. Should `drop` also close the question after a while?
-   - Only terminal messages are asked about, plus Remote Control if G4 passes; `channel`, `slack-ping` and `unclassified` pass unasked, logged and counted as cold sends. cache-tax guards those too.
-   - A dialog that can't be shown drops the message (everywhere else the guard fails open).
-   - If G4 fails: the guard skips `bridge`, and the README suggests running `/cachebeat` before sending from a remote session (check first that `/cachebeat` answers over Remote Control).
-4. **From the request-start fix:**
-   - An answer that outlasts the cache ends with the generic "the cache went cold" line, which doesn't say the long answer caused it, and under **Cache gone cold** = stop it switches cachebeat off. Its own wording, or not switching off in that case?
-   - "Beat after idle" (its help, `ABOUT.interval`, the README's settings row) now overstates the idle time by the last answer's length. A Good to know bullet was added; is that enough?
-   - A beat that falls due as a long request ends fires at once, mid-turn. If the turn's tool is quick, that beat was redundant. Recommended: accept.
-5. **From step 3b:** `/cachebeat settings` typed mid-turn toasts "settings opened" beside the pane it opens. Skip the toast there?
-6. **The live sleep check (P1)** is the user's to run.
-
-**Settled by the user on 2026-11-14** (in the plan, "Decided from it"): the directory is dropped; the guard asks and speaks tokens; Remote Control messages are held if a live check passes; no detection of other keep-warm plugins, a README note instead; credit cache-tax only for substantial borrowing; the idle cost rise is left alone; the README carries the Important note; the net on Stats is in input-token equivalents.
-
-**Other things to know about the user's setup:**
-
-- Their default model and effort were saved as Fable 5.2 and medium by `/model` and `/effort` on 2026-11-14 ("don't worry about default"). A live check must still never type `/model` or `/effort`: pass `--model` and `--settings` on the command line.
-- They are on a subscription with usage limits, and paused the fleet once on 2026-11-14 when usage ran high. Ask before starting a costly run.
-- Pasted images now arrive. Earlier in the project they didn't.
-
 ## How the work is run
 
-The user's preferences are in the orchestrator's memory (`agent-fleet`, `one-change-at-a-time`, `no-plugin-directory`, `dev-branch-notes`, `readme-user-facing`), and repeated here.
+The user's preferences are in the orchestrator's memory (`agent-fleet`, `one-change-at-a-time`, `no-plugin-directory`, `dev-branch-notes`, `readme-user-facing`).
 
-- **The main session orchestrates.** It decides what runs, when and who does it, reviews small diffs itself, merges, and keeps these notes current as the work goes (the user asked for docs updates as we go, by the `project-docs` skill).
-- **The fleet** is peer sessions named `cachebeat<Model><Effort><NN>`, reached with SendMessage. Run ListAgents first: names change.
-  - **Fable** (`cachebeatFableMedium01`): the determining moments. Designs, plan rewrites, and the review of any diff that changes core behaviour. Its request-start review found a bug the builder's nine tests missed.
-  - **Opus**: the harder builds (timing, resume, the guard).
-  - **Sonnet**: builds with a detailed plan (step 3b, tokens-only).
-  - **Haiku**: mechanical work. Unused so far.
-  - Anthropic's choosing-a-model guide (read 2026-11-14) says the same in general: Opus for complex agentic coding, Sonnet for everyday coding, Haiku for cheap subagent work, effort as a lever before switching models.
-- **Base sessions and forks.** `cachebeatOpusHigh01` (session `f08a778f-3d4b-40f1-ab32-52988cab8f57`) and `cachebeatSonnetHigh02` (`725dac1c-99d6-4a04-805e-e70783f475f1`) are bases: read-only, holding the notes and the source, never given a build. Each build runs in a fork.
-  - Ask the `clear` session: "fork `<base>` as `<name>`" (e.g. `cachebeatOpusHigh01-ttl`). It runs `claude --resume <id> --fork-session -n <name> --model … --effort …` in a new window, turns cachebeat on in it, and reports when it's up. It forks only while the base is idle, and showed twice that the base's transcript is byte-identical before and after.
-  - After a merge, ask `clear` to "close `<name>`", naming it as a fork. It never closes a base.
-  - After each merge, send both bases the merged diff to read (`git diff <old>..<new> -- hooks README.md …`), so later forks start current. Both are current to `05294d1`.
-  - **The bases read the plan before it was rewritten on 2026-11-14.** Every brief to a fork names the plan sections to re-read.
-  - A base holds about 240–290k tokens, so a fork starts near the user's 300k mark. Worth it for steps that need most of that context; for a small job, a fresh session with a tight brief is cheaper.
-  - A fork is cheap only while the base's cache is warm. The bases run cachebeat.
-- **Context.** About 300k tokens is where the user thinks about clearing a session, not a rule: a warm session that holds what the next task needs can cost less than a fresh one reading it again, and cost differs by model. Ask `clear` for "fill?" (each session's context fill) and to `/clear` a named session, only while it's idle and only once its work is in the notes.
-- **Every brief stands alone:** where to work (the worktree, and what not to touch), what to read, the user's decisions, what to build, what not to do, the checks, how to commit, and what to report. Ask for doubts and "where I was least sure": the reviewer starts there.
-- **Each step gets its own worktree:**
-  ```sh
-  git worktree add ../cachebeat-<step> -b step-<name> dev
-  cp -r .claude-plugin/types ../cachebeat-<step>/.claude-plugin/
-  ```
-  The types are gitignored, and `tsc` needs them. After the merge, remove the worktree and delete the branch.
-- **The checks**, by the builder before it reports and by the orchestrator after the merge:
-  ```sh
-  out=$(claude plugin test . 2>&1); echo "$out" | tail -5; grep -q "^ 0 fail" <<<"$out"
-  npx -p typescript tsc -p .
-  ```
-  and the suite on the 2.1.287 binary against a copy. Each change gets a test that fails without it; builders mutation-check.
-- **Reviews:** findings ranked, each with file:line, a concrete sequence of events and a fix, and what was proved (run) apart from what was read. Fixes go back to the builder's fork and are re-reviewed by diff range. Small wording fixes the orchestrator may make itself.
-- **Commits:** plugin files and notes separately; no attribution lines; "cachebeat 0.10.0 (<step>): …" and "dev notes: …".
+- **The main session orchestrates and decides.** The user said "you are orchestrating so take decisions as per your understanding". It records each decision, and anything the user should see, in "For the user" above. It doesn't ship without the user.
+- **The fleet is peer sessions** named `cachebeat<Model><Effort><NN>`, spawned by the `clear` session with `--model` and `--effort` on the command line, and reached with SendMessage. `clear` also clears, renames, retunes, closes and reports context fill and account usage.
+  - **Effort by job** (the user's experience):
+    - high: reviews and planning
+    - medium: coding
+    - low: work with a clear path
+    - xhigh: only when stuck
+  - **Model by job:**
+    - Opus medium: the harder builds
+    - Sonnet high: builds with a detailed plan, and grunt work such as GIF timing
+    - Opus high: reviews, design and storyboards
+  - **One-offs** use a fresh subagent or a self-fork, which cache for 5m. **Sessions** are for work whose context carries forward, at 1h.
+- **Context:** clear a session once its work is merged and in the notes. Clear a cold-cache session rather than re-reading it, and keep a warm one while its context is still needed. About 300k tokens is the user's rough mark.
+- **Usage:** watch the 5-hour window through `clear`. On 2026-11-23 the work paused at 87% and resumed after the reset, using a one-shot cron.
+- **Each step:**
+  1. Build in its own worktree (`git worktree add ../cachebeat-<step> -b step-<name> dev`, then copy `.claude-plugin/types` in).
+  2. Every change gets a test that fails without it, and builders mutation-check.
+  3. Run check.sh on a fresh clone. It runs the tests and `validate --strict` on 2.1.287, 2.1.322, 2.1.329 and 2.1.330; the binaries live in a session scratchpad, and mods-gotchas "Old versions" says how to get them.
+  4. Run `tsc`.
+  5. Have it reviewed: findings ranked, with file:line, a sequence of events and a fix.
+  6. Fix, re-review by diff range, then merge `--no-ff`.
+- **Commits:** plugin files and notes go in separate commits, with no attribution lines. Name them `cachebeat 0.10.0 (<step>): …` and `dev notes: …`.
 
-## Fleet state at wrap-up
+## Fleet at close (2026-11-23)
 
-| Session | State |
-| --- | --- |
-| `cachebeatOpusHigh01` | Base, idle, sent the diff up to `05294d1`. 292k tokens. |
-| `cachebeatSonnetHigh02` | Base, idle, sent the diff up to `05294d1`. 255k tokens. |
-| `cachebeatFableMedium01` | Cleared after its review; empty. |
-| `cachebeatSonnetHigh01` | Cleared after step 3b; empty. |
-| `cachebeatOpusHigh02`, `cachebeatOpusMedium01`/`02`, `cachebeatHaikuHigh01`/`02` | Never used; empty. |
-| `clear` | Idle. It closed both forks of the day (`cachebeatSonnetHigh02-tokens`, `cachebeatOpusHigh01-ttl`). |
-| `cachebeatOrch` | The orchestrator, at 269k tokens when it wrapped up. |
-
-Figures are `clear`'s report at wrap-up (2026-11-14). Check with ListAgents and "fill?" before relying on this table. The Opus base is close to the 300k mark: weigh rebuilding it (clear it, then have it read the current notes and source afresh, which also drops the pre-rewrite plan it still holds) before the next Opus fork.
+`clear` closed every session at the end, `cachebeat-cf` and itself included. A new fleet is spawned fresh through a new `clear` session. The names used were `cachebeatOpusHigh01`, `cachebeatOpusMedium01` (once `cachebeatOpusXhigh01`), `cachebeatSonnetHigh01` and `cachebeatSonnetHigh02`. ListAgents also shows old offline Remote Control rows with the same names, so use the refs.
 
 ## Traps
 
@@ -277,7 +179,7 @@ Figures are `clear`'s report at wrap-up (2026-11-14). Check with ListAgents and 
 
 ## Docs to update when things land
 
-- notes/README.md, "How 0.7.0 went out, as a pattern": a line for 0.9.3 when it ships.
-- mods-gotchas.md, "0.10.0 probes": P1's result; G1–G5 and C1–C4 as each step runs them.
-- plan-0.10.0.md: its header status line after each step; items 5 and 7's `[$?]` mock-ups when steps 6 and 7 redo them.
-- This file: delete it when 0.10.0 ships, or rewrite it at the next wrap-up.
+- notes/README.md, "How 0.7.0 went out, as a pattern": a line for 0.10.0 when it ships.
+- mods-gotchas.md, "0.10.0 probes": add G4, G5 and P6 when they're run.
+- plan-0.10.0.md: its status line when 0.10.0 ships.
+- This file: delete it when 0.10.0 ships.
