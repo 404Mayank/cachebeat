@@ -679,7 +679,104 @@ write 2. Kept warm: turns that came back to a cache only beats kept warm.
 
 ### Item 8: the demo GIF (step 8)
 
-Rerecord `assets/demo.tape` with `demo.py` once steps 1–7 have merged and the look is settled. It shows `/cachebeat 2h`, the Status tab, a beat landing, and the cold guard's question. The tape still types `/cachebeat 5`, which step 3 refuses (step 8 below). The recording steps are in the scripts. Only `assets/demo.gif` ships.
+The storyboard, written 2026-11-23 from the scripts and the code. Nothing here has been run. Checks **B0–B8** are for the builder to settle live before timing. Only `assets/demo.gif` ships.
+
+**What the GIF shows, in order** (about 33s; the 0.9 GIF runs about 30):
+1. A conversation picked up hours later.
+2. The cold guard asks before the first message goes, and it's sent.
+3. `/cachebeat 2h`.
+4. Two beats land on their own.
+5. Bare `/cachebeat` opens Status.
+
+**Why this order.** The tape forks an old session. The code seeds `lastWarm` from a fork's `seconds_since_last_response` (`classic.SessionStart`, `seedFromResume`), so a source last answered more than an hour ago should read cold for real. That's inferred: P3 saw the field, and R1 a size, only under `--resume` (B0). The guard runs with beating off, so the first message typed opens its question, with no clock trick. That first turn is also the one beats need: a resumed conversation's beats wait for a turn (`RESUMED`). Choosing `Send` is forced by this order: `Don't send` would leave no turn to beat after.
+
+**The source session** (`CACHEBEAT_DEMO_SESSION`), set up before recording:
+- **At least 20k tokens,** the guard's `chats from` default; a smaller chat isn't asked about. Aim for 100–200k, so the question's figure reads like the README's 184k.
+- **Last answered 2–6h before the recording:**
+  - Past the one-hour cache, and short enough to read well. `minutesText` has no days, so a two-day-old source reads `cold for 50h 3m`.
+  - Every take forks the same source, so its age grows between takes.
+  - To make an old source fresh again, resume it normally (not forked) and send it one message, 2–6h ahead.
+- **Its transcript goes into a public GIF:** the last screenful shows after the launch.
+- **Its cachebeat record:** made with cachebeat off, so the fork doesn't come up on. **B1:** does a fork restore the source's `session:<id>` record? `restoreConversation` keys on `$.session.id()` at `session.start`, and what that returns in a fork wasn't probed.
+
+**The settings the frames assume.** The tape changes none of them. Whether the `--plugin-dir` copy reads the installed copy's store, and so the user's real settings, is unchecked. **B2:** check them in `/cachebeat settings` before recording, in a session launched with exactly the tape's plugin flags (the scratch copy, both installed copies disabled): what that copy shows is what the frames get. The installed 0.9.3 has no Cold guard rows. If one is off, ask the user before changing it:
+- **New sessions start: off,** for all folders and for the demo folder.
+  - Why: on, the fork comes up beating, step timers start after the first turn, and the clock mod's fast stretch starts too early (below).
+  - A hidden `/cachebeat off` in the tape doesn't help: its reply stays on screen after `Show`.
+- **Beat after idle:** auto. That's 50m on a one-hour cache, which needs the subscription's limits under 100% (`cacheTtl`).
+- **Cold guard:** on, with `chats from` at or under the source's size, and `if unanswered` at `don't send`.
+- **Turn line:** shows the countdown and the tokens.
+- Status also shows the Usage row: the account's real five-hour and seven-day percentages go into the GIF.
+
+**What has to change in demo.py and the tape:**
+1. **Load `dev`, not the installed copy.**
+   - The tape runs whatever cachebeat is installed: 0.9.3, plus the synced copy.
+   - demo.py extracts `git archive HEAD` into a temporary folder and exports it as `CACHEBEAT_DEMO_PLUGIN`. Use a scratch copy, not a worktree: loading regenerates the folder's types.
+   - The tape's command adds `--plugin-dir "$CACHEBEAT_DEMO_PLUGIN"` after the clock's `--plugin-dir`. The clock mod's op hooks act only on calls from a plugin below it, and it has only run against an installed cachebeat; with both from `--plugin-dir`, the order may follow the flags'.
+   - `--settings` adds `"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false}` (handoff, "Traps").
+   - **B3:** `claude --help` accepts `--plugin-dir` twice, the debug log names one `hooks module cachebeat@`, and the countdown visibly races after `/cachebeat 2h`. If it doesn't race, swap the two `--plugin-dir` flags.
+2. **The model.** The tape adds `--model sonnet` (choice 5). Never type `/model` or `/effort`.
+3. **Rewrite the clock mod.**
+   - Its trigger, a cachebeat `clock.after` of 30 minutes or more, has never fired since step 1: `armStep` waits at most `STEP` (60s).
+   - It must not shorten every cachebeat wait either:
+     - `askCold` arms `DROP_AFTER` (5m). Shortened, it would close the guard's question at once and drop the message.
+     - `SETTLE` (1s) orders the resume line.
+   - The new rules:
+     - **Fast from** cachebeat's first `clock.after` of exactly `60_000`. That's the first step after `/cachebeat 2h`, since nothing arms a step while cachebeat is off (B2). That call is shortened too.
+     - **While fast,** cachebeat's `clock.now` runs `SPEED` (300) times as fast, and its `clock.after` waits of 60s or less are divided by `SPEED`.
+     - **Never touched:** longer waits, `clock.every` (the animations), and every other plugin's calls.
+     - **A beat's fork runs at real speed.** Hook `model.fork` where `next.origin.plugin === 'cachebeat'`: the shown clock runs at real speed until `next(e)` answers, then fast again.
+       - Why: `lastWarm` is the request's send time. At 300×, a 5s fork would pass 25 shown minutes, and the line would read `next in 25m` beside `every 50m idle`.
+     - **Real speed again** once cachebeat's second fork is answered. `ahead` keeps the shown time from there, as now.
+     - Beats are counted from those forks, not from timers: a step timer fires every shown minute.
+   - **B4:** a `model.fork` hook in another plugin sees cachebeat's forks with its origin (the same mechanism as `clock.now`, not yet run for `model.fork`), and awaiting a fork of several seconds in it isn't cut by a hook budget.
+4. **`status()`:** take the highest `kept warm ×N` among a frame's matching lines, not the first line. The `/cachebeat 2h` reply carries `next beat in`, and read first it counts 0.
+   - `plan()` and `render()` are unchanged: two beats, held at full speed, with the `~50 MIN LATER` badge before each.
+5. **The words:** demo.py's docstring (the trigger and "until two beats have landed"), the tape's comments, and the removed `/cachebeat on` and `/cachebeat 5` lines.
+
+**The tape, scene by scene.** Width, font and theme stay as they are; `TypingSpeed` drops to 70ms. A frame "on screen" is what `Wait+Screen` waits for before the next scene; the figures in it are examples.
+
+| # | Typed | Wait for, then hold | On screen | GIF s |
+| --- | --- | --- | --- | --- |
+| 0 | `Hide`, the launch command as now with the changes above, `Sleep 9s`, `Show` | (hidden) | the forked conversation's last screenful | 0 |
+| 1 | `Sleep 1s`. `in one line, what is this project?` (or a line that fits the source), `Sleep 500ms`, `Enter` | `Wait+Screen@20s /Don't send/`, `Sleep 2s` | the guard's question: `The cache has been cold for 3h 12m, so this message caches 184k tokens again. Send it?`, with `Send` and `Don't send` | 5 |
+| 1b | `Enter` (Send) | `Wait+Screen@10s /sent on a cold cache/`, then `Sleep 6s` (B5) | `● cachebeat: sent on a cold cache: cold for 3h 12m, 184k tokens cached again`, then the one-line answer | 7 |
+| 2 | Only if B6 needs it: a second one-line question, `Enter` | `Sleep 4s` (B5) | its answer | (+4) |
+| 3 | `/cachebeat 2h`, `Sleep 500ms`, `Enter` | `Wait+Screen@10s /next beat in/` | the reply `this session: on until 4:30 PM (2h), every 50m idle · next beat in 49m`, and the turn line `♡ next beat in 49m · 2h left` | 3 |
+| 3b | nothing: the clock mod runs | `Wait+Screen@90s /kept warm ×2/`, `Sleep 1500ms` | the countdown runs down, `♥ cache kept warm ×1 · 184k cached · next in 50m · 1h 10m left`, then `♥ cache kept warm ×2 · 184k cached · 20m left` (no next beat: the cache outlasts the time, item 3) | 12 |
+| 4 | `/cachebeat`, `Sleep 500ms`, `Enter` | `Wait+Screen@5s /Cache\s+warm/` (set from the built Status page), `Sleep 3s`, `Escape`, `Sleep 1s` | Status: `Cache  warm (1h TTL, last read 1m ago) · 59m left`, `Beating  on · every 50m idle (auto) · 20m left`, `This session  2 beats · …`, the tab bar with Stats | 6 |
+
+- **Seconds** are the GIF's, after demo.py's fast-forward: 33s without scene 2, 37s with it.
+- **If the GIF runs past 35s,** cut in this order:
+  1. the question's hold to 1.5s
+  2. demo.py's `HOLD` from 3.0 to 2.5
+  3. a shorter first message
+- **Scene 1b's answer** is a cold re-cache of the whole source: its first token comes slower than a warm turn's.
+
+**Checks for the builder, live:**
+- **B0, first:** fork the source with the tape's flags, without recording, and run bare `/cachebeat`. Its reply must end `· cache cold for …`. If it doesn't, the fork carries no age (or no size), the guard won't ask, and scene 1 times out: fall back to choice 1's alternative.
+- **B5:** how long scene 1b's answer takes, and scene 2's if it runs. Set each `Sleep` so the answer has finished before the next scene, and check in `demo-raw.mp4` that no spinner shows at the cut.
+- **B6:** after `/cachebeat 2h`, the line must count down. Beats may log `beats wait for your next turn: Claude Code cached this conversation anew, out of a beat's reach` instead (handoff, "Traps": a beat right after a conversation's first turn). If so, add scene 2.
+- **B7:** `Send` has the focus when the question opens, so `Enter` sends. If it doesn't, type `1`.
+- **B8:** demo.py's printed parts list shows exactly two beats, at plausible times, and no fast-forward before `/cachebeat 2h`.
+
+**Choices for the user** (the storyboard draws the recommended option):
+1. **Order:**
+   - The cold question first, on the fork's own age (recommended): no clock jump, and its turn is the one beats need.
+   - Or beats first, then a jump of a couple of hours and the question at the end. That needs a second trigger in the clock mod, a `~2 HOURS LATER` badge, and about 6s more.
+2. **The keep-alive's end:** run on to `stopped: kept warm until 4:30 PM, as asked`, or stop at the second beat (recommended).
+   - Running on adds about 3s, and Status then shows beating off.
+   - Stopping leaves Status with beating on and `20m left`, which says more.
+3. **Status alone** (recommended), or a flick to Stats after it. Stats shows the machine's real 30-day records, thin before 0.10.0 has run a while, and adds about 3s.
+4. **The animation-picker scene:** drop it (recommended).
+   - It browses the settings tabs, and the recording runs on the user's real settings.
+   - The README's Features list already names the 19 animations.
+5. **The model for the takes:** `--model sonnet` on the command line (recommended), or the user's default.
+   - Each take re-caches the whole source once and sends two beats. Nothing on screen depends on the model.
+   - **Ask before more than two takes:** each one sends real requests.
+6. **The source session:** the old demo session made fresh by one message 2–6h ahead (recommended), or a new one. Either way, its last screenful is public. Send that message with `--model sonnet` too, so the source and the fork share a model: after a model switch, the guard reads the cache as warm (handoff), and whether `--model` on a fork goes through that path is unknown.
+
+**The README** (on `main` through step 9): the GIF's alt text becomes `cachebeat asking before a message goes to a cold cache, keeping the cache warm for two hours as beats land on their own, then its Status page`.
 
 ### Item 9: a command typed mid-turn says nothing until the turn ends (step 3b)
 
@@ -1086,8 +1183,13 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 ### Step 8: the demo GIF (item 8)
 
-- **Depends on:** steps 1–7.
-- **`assets/demo.tape:31` types `/cachebeat 5`,** which step 3 refuses (a bare number needs a unit). The tape needs `/cachebeat global 5`, or whatever shows that interval now.
+- **Delivers:** demo.py's changes and the rewritten tape (item 8), and a new `assets/demo.gif`. The README's alt text goes with step 9.
+- **Depends on:**
+  - **Scenes 0–3b:** steps 1–5, all merged. Build demo.py's changes and settle B0–B8 on `dev` now.
+  - **Scene 4:** step 6, for the Status page and its `Wait+Screen` pattern.
+  - **The final take:** step 7. Its tab bar shows Stats, and the GIF should show the pane as it ships.
+- **First, the user:** item 8's choices, and B2's settings if one differs.
+- **Process:** a Sonnet session builds and times it from item 8. A review checks the GIF frame by frame against item 8's "On screen" column.
 
 ### Step 9: release 0.10.0
 
