@@ -363,9 +363,10 @@ Claude Code 2.1.329, `--model haiku`, tmux, `step-guard`'s tree loaded from an a
 
 - **The tab bar's width:** the engine draws each hotkey as `N: ` before a tab's title, so seven tabs, `Prompt heart` included, came to 78 cells and wrapped in the pane's 76 (the pane's `bodyColumns` at an 80-column terminal). The wrap added a row and pushed the footer off at 40 rows. `Prompt heart` became `Heart`; a test keeps the bar within 76.
 - **The kit's "the file ran to its end: a rejection nothing handled: no implementation for command.run"** came from a test that does `void cmd($, 'now')` while a beat is parked forever; the engine's teardown rejects that floating promise. It was latent, and showed only when 16 more tests ran after it. A `.catch(() => {})` on the floating call ends it.
+- **A full store rejects `$.store.set`** (the whole store is 4 MiB of JSON). `keepRecord` now catches it: the rejection came up through `save()` into the beat. The kit simulates it with a `store.set` that throws for `session:*` keys.
 - **Module variables don't survive a reload, `Saved` does:** the counts are kept in `Saved.stats`, not in a variable beside it.
 - **Live check records stay in the real store.** A look at the page on 2.1.329 with `--plugin-dir` writes `session:<id>` records, with their `stats`, into the user's own plugin store, where the next Stats page adds them in (it showed two beats, one this session's). They are pruned 30 days after their last write.
-- **`$.store.get` reads the whole file each time**, so the page keeps the other sessions' days for a step and re-reads only then.
+- **`$.store.get` reads the whole file each time**, so the page reads the other sessions' days when it opens and every ten minutes after, and sums this session's own live each minute.
 
 ## The lifetime counts from a request's start (found live, 2026-11-14)
 
