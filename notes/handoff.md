@@ -83,7 +83,11 @@ One step at a time: build, check on both versions, review, fix, merge, then the 
 - Q2, item 10: keep the first-read rule (whole on a loop's first read). Include all four extras: compact answers, `cache.recacheInputTokens`, `session.usageLimits` in `state`, and the README CLAUDE.md tip. The user asked whether the README explains how to use the tools; it does (Quick start, "Ask Claude"), and the tip is one extra line for users who want Claude to check its context unasked.
 - Q4, the long answer: the user called it rare and asked for a web check. The platform docs (prompt-caching page, read 2026-11-23) confirm the lifetime runs from the request's start, with the example "a 4-minute streamed response means a follow-up must begin about 1 minute after it finishes". Left as is: the generic cold line, and **Cache gone cold** decides. The other two Q4 items take the recommendations: the Good to know bullet is enough, and a beat may fire mid-turn.
 - Q5, step 3b: skip the "settings opened" toast. Also **verify live on 2.1.329** that every `/cachebeat` command typed mid-turn (on, off, a time, now, settings, bare) gives feedback at once. The user's point: anyone typing and moving on needs to know it took, not wait for the turn to end. Done as the 3b follow-up (merged 2026-11-23): every form already toasted at once; only the settings toast was dropped (mods-gotchas, "Every form, live on 2.1.329").
-- Still open: Q3, the guard's choices. Ask before step 5.
+- Q3, the guard's choices (answered 2026-11-23):
+  - **if unanswered** stays a setting, with the recommended default: `'drop'`, the question stays open, and nothing is ever sent unanswered.
+  - Only terminal messages are asked about, plus Remote Control if G4 passes; otherwise `bridge` passes and the README suggests running `/cachebeat` first. Channels, Slack pings and unclassified messages pass, logged and counted.
+  - A question that can't be shown drops the message.
+- Opus 5.5's saved default effort (medium since the retune): "doesn't matter", so it was left as is.
 
 Asked on 2026-11-14 and not answered unless marked. Each has a recommendation.
 
