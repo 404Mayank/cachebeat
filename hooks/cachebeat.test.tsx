@@ -1016,6 +1016,17 @@ for (const [name, isOn] of [['with beating off', false], ['with beating on, the 
   })
 }
 
+test('an ordinary turn, with no rewind, keeps what Claude read of the state', async ($: Engine, on: On) => {
+  const { talk } = await setup($, on)
+  talk('long question')
+  await $.turn.start({ text: 'long question', turnId: 't1' })
+  expect(keysOf(await stateNow($, { only: ['context'] }))).toContain('whole')
+  await $.turn.complete(turn)
+  talk('another question')
+  await $.turn.start({ text: 'another question', turnId: 't2' }) // the conversation only grew
+  expect(keysOf(await stateNow($, { only: ['context'] }))).toEqual(['context'])
+})
+
 test('a subagent\'s own compaction clears its own read, and no other\'s', async ($: Engine, on: On) => {
   await setup($, on)
   const narrow = async (agentId?: string) => keysOf(await stateNow($, { only: ['cache'], ...(agentId ? { agentId } : {}) }))
