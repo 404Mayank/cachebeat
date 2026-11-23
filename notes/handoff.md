@@ -13,6 +13,13 @@ Start here. The design and every decision are in [plan-0.10.0.md](plan-0.10.0.md
 - **2.1.329 changed the band above the prompt to one row per plugin.** Only the tests broke (mods-gotchas, "From 2.1.329…"). Still unchecked: what the desktop draws for core's node in cachebeat's row.
 - **The fleet was spawned fresh on 2026-11-23 by `clear`:** `cachebeatOpusHigh01` (review and plan from now on), `cachebeatSonnetHigh01` (easier builds) and `cachebeatOpusXhigh01` (only when stuck; retune it to medium and rename it for the harder builds). The base/fork scheme below is retired, and the old sessions are offline.
 
+## For the user: decisions taken, and what to raise (keep this list current)
+
+The next agent raises these with the user before anything else. The user said on 2026-11-23: build everything up to the release, but **don't ship**; and the orchestrator decides as it understands, recording here what the user should know, look at, or weigh in on.
+
+- **Ship 0.10.0?** The user's call.
+- The Status and Stats look pass was delegated to the orchestrator; the mock-ups were approved as redrawn in tokens. The user may want to tweak them.
+
 ## Where things are
 
 | | State |
