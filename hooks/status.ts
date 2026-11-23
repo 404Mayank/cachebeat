@@ -78,18 +78,19 @@ function guardRow(f: StatusFacts) {
   return coldGuard ? `on${own} · asks from ${tokens(f.coldGuardTokens)} tokens` : `off${own}`
 }
 
-/** The page's rows, label and value; Usage only where the account reports limits. */
+/** The page's rows, label and value, the most useful first: a short window cuts the last. Usage only where the account reports limits. */
 export function statusRows(f: StatusFacts): { label: string; value: string }[] {
   const limits = f.session.usageLimits
   return [
     { label: 'Cache', value: cacheRow(f.cache) },
-    { label: 'Size', value: sizeRow(f.cache) },
     { label: 'Beating', value: beatingRow(f.session) },
-    { label: 'This session', value: sessionRow(f.session) },
+    { label: 'Size', value: sizeRow(f.cache) },
     { label: 'Cold guard', value: guardRow(f) },
     ...(limits.length ? [{ label: 'Usage', value: `${limits.map(l => `${usageName(l.kind)} ${Math.round(l.percentUsed)}%`).join(' · ')} · beats stop at ${f.stopAtUsage}%` }] : []),
+    { label: 'This session', value: sessionRow(f.session) },
     { label: 'Last message', value: f.lastMessageMinutesAgo === null ? 'none yet' : `${span(f.lastMessageMinutesAgo)} ago` },
   ]
 }
 
-export const STATUS_NOTE = 'Warm or cold is judged by the time since the cache was last read, as Claude Code judges it; only the next request confirms it.'
+/** One line, under the pane's 76 cells: the page, its rows and this note, and the footer make 11 rows, which a 40-row terminal shows. */
+export const STATUS_NOTE = 'Warm or cold: judged by the last read; only the next request confirms it.'

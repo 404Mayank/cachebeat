@@ -8,7 +8,7 @@ import { TTL_MS, viewOf } from './cache'
 import { ratiosOf } from './prices'
 import { DEADLINE, IDLE, RETRY, STEP, clockText, coldOutcome, fmt, restored } from './register'
 import type { StatusFacts } from './status'
-import { statusRows } from './status'
+import { STATUS_NOTE, statusRows } from './status'
 import { DEFAULTS, EPISODE, SESSION_HELP, accept, glyphs, lookOf, minutesText, mixedMode, normalize, parseDuration, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans, tabBeside } from './settings'
 import { SET, STATE } from './tools'
 
@@ -3636,8 +3636,7 @@ test('a cache warmed while the question was open is sent as any message is: not 
 /** The Status page as drawn: its label and value pairs, between the rules. */
 const statusOf = async (ui: { findAll: (q: { type: string }) => Promise<{ text?: string }[]> }) => {
   const texts = (await ui.findAll({ type: 'Text' })).map(x => x.text ?? '')
-  const rules = texts.flatMap((x, i) => (/^─+$/.test(x) ? [i] : []))
-  const body = texts.slice(rules[0]! + 1, rules[1]!)
+  const body = texts.slice(texts.findIndex(x => /^─+$/.test(x)) + 1, texts.indexOf(STATUS_NOTE))
   return Object.fromEntries(body.flatMap((x, i) => (i % 2 === 0 ? [[x, body[i + 1]!]] : [])))
 }
 
@@ -3703,7 +3702,7 @@ test('Status hides the Usage row where no limits are reported', async ($: Engine
   await setup($, on, { isSubscription: false })
   await cmd($, '')
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect(Object.keys(await statusOf(ui))).toEqual(['Cache', 'Size', 'Beating', 'This session', 'Cold guard', 'Last message'])
+  expect(Object.keys(await statusOf(ui))).toEqual(['Cache', 'Beating', 'Size', 'Cold guard', 'This session', 'Last message'])
   await ui.unmount()
 })
 
@@ -3732,11 +3731,24 @@ test('Status rows for a cache never written, a beat or two, a session\'s own gua
   expect(rows({ ...facts, cache: { ...facts.cache, state: 'warm', minutesLeft: 0, lastReadMinutesAgo: 5, contextTokens: 9000, recacheInputTokens: null } }).Size).toBe('9k tokens')
 })
 
+test('Status fits 40 rows: eleven rows with every figure, the note one line under the pane\'s 76 cells, the likeliest to be cut last', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, '')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  const texts = (await ui.findAll({ type: 'Text' })).map(x => x.text ?? '')
+  // the tab bar, the rule, seven rows of a label and a value, the note, the footer
+  expect(1 + 1 + (texts.length - 3) / 2 + 1 + 1).toBe(11)
+  expect(texts.filter(x => /^─+$/.test(x))).toHaveLength(1)
+  expect(STATUS_NOTE.length).toBeLessThan(76)
+  expect(Object.keys(await statusOf(ui))).toEqual(['Cache', 'Beating', 'Size', 'Cold guard', 'Usage', 'This session', 'Last message'])
+  await ui.unmount()
+})
+
 test('Status takes the pane\'s real width, and has no rows to focus or press', async ($: Engine, on: On) => {
   await setup($, on)
   await cmd($, '')
   const ui = await $.ui.mount({ ...SETTINGS_PANE, props: { ...SETTINGS_PANE.props, bodyColumns: 60 } })
-  expect((await ui.findAll({ type: 'Text' })).filter(x => /^─+$/.test(x.text ?? '')).map(x => x.text?.length)).toEqual([60, 60])
+  expect((await ui.findAll({ type: 'Text' })).filter(x => /^─+$/.test(x.text ?? '')).map(x => x.text?.length)).toEqual([60])
   for (const key of ['session', 'folder', 'beatNow', 'reset', 'resetRow']) expect(await ui.find({ key })).toBeUndefined()
   expect((await buttons(ui, 'row:')).length + (await buttons(ui, 'opt:')).length).toBe(0)
   await ui.unmount()

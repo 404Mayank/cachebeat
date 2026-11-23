@@ -235,7 +235,6 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
             <Box flexShrink={1}><Text>{r.value}</Text></Box>
           </Box>
         ))}
-        {rule}
         <Text dimColor>{STATUS_NOTE}</Text>
         <Text dimColor>{v.isTerminal ? `↑↓ tabs · enter or ${keys} opens · esc closes` : `tab moves · ${keys} tabs · esc closes`}</Text>
       </Box>
