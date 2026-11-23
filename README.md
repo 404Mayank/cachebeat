@@ -26,7 +26,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 - **A live heart** under the prompt, with 19 animations to choose from
 - **A turn line** under your latest turn shows the beats so far and the time until the next one
 - **A settings menu** with live previews, driven by keyboard or mouse
-- **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words
+- **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words, or ask it how full its context is and whether the cache is still warm
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
 - **This session, this folder or all folders**: turn it on for one session, or have new sessions start with it in one folder or everywhere
 
@@ -98,13 +98,15 @@ To keep the cache warm for a set time, such as through a long meeting, and have 
 
 Or ask Claude: "keep the cache warm in this session", "keep it warm for the next 2 hours", "always start it in this repo", "make 30 minutes the default beat time".
 
+To have Claude watch its own context, add a line to your `CLAUDE.md`, such as: "Before a long task, read your context with mcp__cachebeat__state (only: ["context"])."
+
 Beats fit your cache by themselves: every 50 minutes on a Claude subscription's one-hour cache, and every 4 on the five-minute cache of an API key, a cloud provider or usage credits. To pick your own interval, use `/cachebeat global 30` or set **Beat after idle** in `/cachebeat settings`.
 
 ## What it sends, and what it costs
 
 Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript. The request's last line is cachebeat's own: it starts with `[cachebeat]` and says it isn't from you, so a request log or a proxy can tell beats from your own messages.
 
-- A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would. Ask Claude, and it can tell you how much the last beat read and wrote, whether the cache is likely still warm, and how big the conversation is.
+- A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would. Ask Claude, and it can tell you how much the last beat read and wrote, whether the cache is likely still warm, how big the conversation is, how full the context window is and when it will compact.
 - Beats happen only while nothing else keeps the cache warm: while the session is idle, or while a turn sits waiting on a long tool run or a permission prompt. They come at most once per interval.
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
 - To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
