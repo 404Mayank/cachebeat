@@ -29,6 +29,8 @@ The next agent raises these with the user before anything else. The user said on
   8. "kept warm" counting only a turn after the cache would have lapsed without beats
 
   The user may want to tweak any of them. The mock-ups are in the plan.
+- **Step 4 changed one behaviour (accepted by the orchestrator and the reviewer):** `/resume` into a conversation with no record follows **New sessions start**. Before, it kept the on/off of the conversation left behind. When that turns beating off, a line says so.
+- **Owed live check (step 4):** that a resumed conversation's first turn reads a cache that beats kept warm. It needs a wait of over an hour. Both the resume line's "likely warm" and Claude Code's own `prompt_cache_likely_expired` assume it does.
 - **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
 
 ## Where things are
