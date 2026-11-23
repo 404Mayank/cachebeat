@@ -190,6 +190,7 @@ Figures are `clear`'s report at wrap-up (2026-11-14). Check with ListAgents and 
 
 ## Traps
 
+- **Unconfirmed: `--settings '{"enabledPlugins":{"cachebeat@cachebeat":false}}'` may not keep the installed cachebeat out of a probe session.** On 2026-11-23 the G1–G3 probe's Haiku answered with cachebeat's settings options. The sleep test's debug log, though, showed the installed copy "disabled; will NOT register" when `--plugin-dir` shadowed it. Check the debug log of the next probe that loads no cachebeat copy.
 - **Retuning a session with `/effort` also saves that effort as the user's default for its model** (`modelSettings` in ~/.claude/settings.json). Found 2026-11-23, when `claude-opus-5-5` was saved as medium. Spawn sessions with `--effort` on the command line, and tell the user when a retune changes their default.
 - **Chain a merge's follow-ups only after it succeeds.** On 2026-11-14 a `git merge` that conflicted in the plan was followed in the same command by tests, a push, and a worktree removal, which all ran. Nothing was lost (the branch still held the commits), but the suite's result was for the wrong tree. Merge first, look, then run the rest.
 - **Two sessions editing the same notes file conflict at merge.** The orchestrator and a builder both edited the plan's "Still open". While a builder's branch is open, leave the files it was told to edit, or expect to resolve by hand.
