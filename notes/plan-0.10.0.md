@@ -513,22 +513,20 @@ An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and cou
 
 **Status** draws from what `state` already reports (`cacheOf`, `sessionOf`, `contextOf` and the usage limits in register.tsx), in tokens only, and uses the same words as `state`'s descriptions in tools.ts. Redone in tokens on 2026-11-23 for the look pass.
 - **Width:** drawn at 76 cells, inside an 80-column terminal's inline frame. That's inferred: the test kit passes `bodyColumns: 80`, and the frame's own cells aren't stated in the declarations. Step 6 reads the real `bodyColumns` live.
-- **Height:** 13 of the pane's 24 rows.
+- **Height:** 11 rows. The pane's window follows the terminal's height (live on 2.1.329: 11 body rows at 80×40, 6 at 80×24), so the page is built to fit 40 rows, with its rows in order of use (a short window cuts the last), one rule, and a one-line note. PageDown scrolls what a shorter terminal cuts, as on the settings tabs (cachebeat-cf, 2026-11-23).
 - **Styling:** labels pad to `LABEL` (22), as the settings rows do. Status is drawn bright and the other tabs dim. The focus stays on the tab bar, so the footer is the tab bar's.
 
 ```
 Status Stats Beating Limits Prompt heart Turn line Alerts
 ────────────────────────────────────────────────────────────────────────────
 Cache                 warm (1h TTL, last read 12m ago) · 48m left
-Size                  184k tokens · as 368k input tokens to cache again
 Beating               on · every 50m idle (auto) · next in 38m · 1h 52m left
-This session          3 beats · the last read 184k, wrote 412
+Size                  184k tokens · as 368k input tokens to cache again
 Cold guard            on · asks from 20k tokens
 Usage                 five-hour 42% · seven-day 18% · beats stop at 90%
+This session          3 beats · the last read 184k, wrote 412
 Last message          1h 2m ago
-────────────────────────────────────────────────────────────────────────────
-Warm or cold is judged by the time since the cache was last read, as Claude
-Code judges it; only the next request confirms it.
+Warm or cold: judged by the last read; only the next request confirms it.
 ↑↓ tabs · enter or 1-7 opens · esc closes
 ```
 
@@ -1084,6 +1082,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
   - **The rows are pure** (`hooks/status.ts`, `statusRows(facts)`), over the same figures `state` reports: `factsOf($)` (register.tsx) calls `cacheOf`, `sessionOf` and `contextOf`, plus `$.session.usage()` for the limits. The render hook does not call `stateOf`: its `syncSettings` can publish, restart the clocks and reschedule from inside a render.
   - **Wording the mock-up didn't draw:** a cache under a minute old reads `last read under 1m ago`; Beating says `beats skip · <why>`, `beats wait for your next message · <why>` or `no beat needed`, and the other `nextBeat` forms follow `next beat …`; a session's own guard reads `on · this session · asks from 20k tokens`; no figure reads `not counted yet` (Size) and `none yet` (Last message).
   - **The Usage row keeps `beats stop at N%` always:** `stopAtUsage` has no off value (80, 90 or 100).
+  - **Fits 40 rows (cachebeat-cf's ruling after the live look):** the rows run Cache, Beating, Size, Cold guard, Usage, This session, Last message; the rule above the note is gone and the note is one line, `Warm or cold: judged by the last read; only the next request confirms it.` (73 cells). Eleven rows in all; the mock-up above is redrawn to match.
   - **The hotkeys are 1–6,** not 1–7: Stats isn't built. The footer is the tab bar's, as drawn, though Enter on Status goes nowhere.
   - **The width is the pane's `bodyColumns`.** Live on 2.1.329 in an 80-column terminal it was 76, as the mock-up inferred.
   - **Test 633** ("six tabs" asserting five) is now six tabs and asserts six.
