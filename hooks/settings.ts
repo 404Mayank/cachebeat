@@ -207,6 +207,9 @@ export const parseMinutes = reader('minutes', { '': 1, m: 1, min: 1 }, 1, 55, tr
 /** A beat interval or a keep-alive time in words: 5m, 2h, 1h 30m. */
 export const minutesText = (m: number) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`)
 
+/** A time still to come, in words, rounded up to the minute and never under one: 1m, 38m, 1h 52m. */
+export const fmt = (ms: number) => minutesText(Math.max(1, Math.ceil(ms / 60_000)))
+
 const DURATION_PART = '(\\d+(?:\\.\\d+)?)\\s*'
 const DURATION = new RegExp(`^(?:${DURATION_PART}(?:h|hr|hrs|hour|hours))?\\s*(?:${DURATION_PART}(?:m|min|mins|minute|minutes))?$`)
 

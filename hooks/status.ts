@@ -1,5 +1,5 @@
 // The Status page's rows: pure, from the figures `state` reports. No `$`, no imports but the formatters.
-import { minutesText, tokens } from './settings'
+import { fmt, minutesText, tokens } from './settings'
 
 /** The figures the page draws: what `state`'s `cache`, `session` and `context` sections and its settings report. */
 export type StatusFacts = {
@@ -7,7 +7,7 @@ export type StatusFacts = {
     state: 'warm' | 'cold' | 'unknown'
     ttl: '5m' | '1h'
     lastReadMinutesAgo: number | null
-    minutesLeft: number | null
+    leftMs: number | null // while warm, rounded up as the turn line does
     coldForMinutes: number | null
     contextTokens: number | null
     recacheInputTokens: number | null
@@ -16,7 +16,7 @@ export type StatusFacts = {
     enabled: boolean
     intervalMinutes: number
     intervalFrom: string
-    keepAliveMinutesLeft: number | null
+    keepAliveLeftMs: number | null
     beats: number
     lastBeatReadTokens: number | null
     lastBeatWrittenTokens: number | null
@@ -35,7 +35,7 @@ export type StatusFacts = {
 /** A usage window as `stop()` names it in its message: five_hour is five-hour. */
 export const usageName = (kind: string) => kind.replace('_', '-')
 
-/** Whole minutes as words; under a minute says so, since the figures are floored. */
+/** Whole minutes as words (an age, floored); under a minute says so. A time still to come is `fmt`'s, rounded up. */
 const span = (m: number) => (m < 1 ? 'under 1m' : minutesText(m))
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -45,7 +45,7 @@ function cacheRow(c: StatusFacts['cache']) {
   if (c.state === 'unknown') return `nothing cached yet (${life})`
   const read = `last read ${span(c.lastReadMinutesAgo ?? 0)} ago`
   if (c.state === 'cold') return `cold for ${span(c.coldForMinutes ?? 0)} (${life}, ${read})`
-  return `warm (${life}, ${read}) · ${span(c.minutesLeft ?? 0)} left`
+  return `warm (${life}, ${read}) · ${fmt(c.leftMs ?? 0)} left`
 }
 
 function sizeRow(c: StatusFacts['cache']) {
@@ -62,7 +62,7 @@ function beatingRow(s: StatusFacts['session']) {
   else if (s.paused) parts.push(`beats wait for your next message · ${s.paused}`)
   else if (s.nextBeat === 'none needed') parts.push('no beat needed')
   else if (s.nextBeat) parts.push(s.nextBeat.startsWith('in ') ? `next ${s.nextBeat}` : `next beat ${s.nextBeat}`)
-  if (s.keepAliveMinutesLeft !== null) parts.push(`${span(s.keepAliveMinutesLeft)} left`)
+  if (s.keepAliveLeftMs !== null) parts.push(s.keepAliveLeftMs <= 0 ? "time's up" : `${fmt(s.keepAliveLeftMs)} left`)
   return parts.join(' · ')
 }
 

@@ -3698,6 +3698,20 @@ test('Status draws warm with the time left, and the beating row with its interva
   await ui.unmount()
 })
 
+test('Status rounds a time left up, as the turn line does, and an age down', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { contextTokens: 184_000 })
+  await cmd($, '2h')
+  await $.turn.complete(turn)
+  await clock.advance(12 * M + 30_000) // the cache has 47m30s left, the keep-alive time 1h 47m 30s
+  const line = await cmd($, '')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  const rows = await statusOf(ui)
+  expect(rows.Cache).toBe('warm (1h TTL, last read 12m ago) · 48m left')
+  expect(rows.Beating).toBe('on · every 50m idle (auto) · next in 38m · 1h 48m left')
+  expect(line).toContain('1h 48m left') // the answer line says the same
+  await ui.unmount()
+})
+
 test('Status hides the Usage row where no limits are reported', async ($: Engine, on: On) => {
   await setup($, on, { isSubscription: false })
   await cmd($, '')
@@ -3708,9 +3722,9 @@ test('Status hides the Usage row where no limits are reported', async ($: Engine
 
 test('Status rows for a cache never written, a beat or two, a session\'s own guard, and a pause', () => {
   const facts: StatusFacts = {
-    cache: { state: 'unknown', ttl: '5m', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null },
+    cache: { state: 'unknown', ttl: '5m', lastReadMinutesAgo: null, leftMs: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null },
     session: {
-      enabled: true, intervalMinutes: 4, intervalFrom: 'folder', keepAliveMinutesLeft: null, beats: 1, lastBeatReadTokens: 184_212, lastBeatWrittenTokens: 412,
+      enabled: true, intervalMinutes: 4, intervalFrom: 'folder', keepAliveLeftMs: null, beats: 1, lastBeatReadTokens: 184_212, lastBeatWrittenTokens: 412,
       nextBeat: 'after the next turn', skipping: null, paused: null, coldGuard: false, coldGuardFrom: 'session', usageLimits: [],
     },
     lastMessageMinutesAgo: null, coldGuardTokens: 20_000, stopAtUsage: 90,
@@ -3724,11 +3738,11 @@ test('Status rows for a cache never written, a beat or two, a session\'s own gua
   const later = (session: Partial<StatusFacts['session']>) => rows({ ...facts, session: { ...facts.session, ...session } }).Beating
   expect(later({ paused: 'the cache went cold' })).toBe("on · every 4m idle (this folder's) · beats wait for your next message · the cache went cold")
   expect(later({ skipping: 'chat under 20k tokens' })).toBe("on · every 4m idle (this folder's) · beats skip · chat under 20k tokens")
-  expect(later({ nextBeat: 'none needed', keepAliveMinutesLeft: 0 })).toBe("on · every 4m idle (this folder's) · no beat needed · under 1m left")
+  expect(later({ nextBeat: 'none needed', keepAliveLeftMs: 0 })).toBe("on · every 4m idle (this folder's) · no beat needed · time's up")
   expect(later({ nextBeat: 'due now', intervalFrom: 'auto' })).toBe('on · every 4m idle (auto) · next beat due now')
   expect(rows({ ...facts, session: { ...facts.session, usageLimits: [{ kind: 'five_hour', percentUsed: 42 }, { kind: 'seven_day', percentUsed: 18 }] } }).Usage)
     .toBe('five-hour 42% · seven-day 18% · beats stop at 90%')
-  expect(rows({ ...facts, cache: { ...facts.cache, state: 'warm', minutesLeft: 0, lastReadMinutesAgo: 5, contextTokens: 9000, recacheInputTokens: null } }).Size).toBe('9k tokens')
+  expect(rows({ ...facts, cache: { ...facts.cache, state: 'warm', leftMs: 0, lastReadMinutesAgo: 5, contextTokens: 9000, recacheInputTokens: null } }).Size).toBe('9k tokens')
 })
 
 test('Status fits 40 rows: eleven rows with every figure, the note one line under the pane\'s 76 cells, the likeliest to be cut last', async ($: Engine, on: On) => {
