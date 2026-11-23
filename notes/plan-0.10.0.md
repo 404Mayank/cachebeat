@@ -511,18 +511,42 @@ An origin that isn't asked is sent, logged (`sent on a cold cache: …`) and cou
 - Bare `/cachebeat` opens it on **Status**, `/cachebeat stats` on **Stats**, and `/cachebeat settings` on **Beating**, as today.
 - The command still answers its one line as `text`, so the transcript keeps a record, and Claude sees it in `-p`, where nothing draws.
 
-**Status** draws from `cacheNow($)` and the session. **[$?]** Tokens only: decided 2026-11-14. The `≈$` figures on the Size and This session rows go; the mock-up below still shows them until step 6 redoes it in tokens.
+**Status** draws from what `state` already reports (`cacheOf`, `sessionOf`, `contextOf` and the usage limits in register.tsx), in tokens only, and uses the same words as `state`'s descriptions in tools.ts. Redone in tokens on 2026-11-23 for the look pass.
+- **Width:** drawn at 76 cells, inside an 80-column terminal's inline frame. That's inferred: the test kit passes `bodyColumns: 80`, and the frame's own cells aren't stated in the declarations. Step 6 reads the real `bodyColumns` live.
+- **Height:** 13 of the pane's 24 rows.
+- **Styling:** labels pad to `LABEL` (22), as the settings rows do. Status is drawn bright and the other tabs dim. The focus stays on the tab bar, so the footer is the tab bar's.
 
 ```
-Cache        warm · read 12m ago · about 48m left (1-hour cache)          | cold for 2h 14m
-Size         184k tokens · ≈$0.69 to cache again at API prices
-Beating      on · every 50m idle (auto) · next in 38m · 1h 52m left
-This session 3 beats · 552k read · ≈$0.17
-Cold guard   on
-Usage        five-hour 42% · stops at 90%
-Last message 12m ago
-             Warm or cold is judged by time since the cache was last read, as Claude Code judges it; each beat and turn confirms it.
+Status Stats Beating Limits Prompt heart Turn line Alerts
+────────────────────────────────────────────────────────────────────────────
+Cache                 warm (1h TTL, last read 12m ago) · 48m left
+Size                  184k tokens · as 368k input tokens to cache again
+Beating               on · every 50m idle (auto) · next in 38m · 1h 52m left
+This session          3 beats · the last read 184k, wrote 412
+Cold guard            on · asks from 20k tokens
+Usage                 five-hour 42% · seven-day 18% · beats stop at 90%
+Last message          1h 2m ago
+────────────────────────────────────────────────────────────────────────────
+Warm or cold is judged by the time since the cache was last read, as Claude
+Code judges it; only the next request confirms it.
+↑↓ tabs · enter or 1-7 opens · esc closes
 ```
+
+The Cache row when cold, and before anything is cached:
+
+```
+Cache                 cold for 2h 14m (1h TTL, last read 3h 14m ago)
+Cache                 nothing cached yet (1h TTL)
+```
+
+- **Where each row comes from:**
+  - **Cache:** `state`, `ttl`, `lastReadMinutesAgo`, `minutesLeft` and `coldForMinutes`.
+  - **Size:** `contextTokens`, then `recacheInputTokens`, which is the size weighed at the cache-write ratio: 2× on a one-hour cache, 1.25× on a five-minute one.
+  - **Beating:** `nextBeat`, `intervalMinutes` with `intervalFrom`, and `keepAliveMinutesLeft`.
+  - **This session:** `beats`, `lastBeatReadTokens` and `lastBeatWrittenTokens`. cachebeat keeps no running total of what a session's beats read: the old mock-up's `552k read` had no source. A total would come from step 7's record.
+  - **Cold guard:** the setting, or the session override, and `coldGuardTokens` (step 5).
+  - **Usage:** `usageLimits`, one entry per kind, named as `stop()`'s message names them (`five-hour`), then `stopAtUsage`.
+  - **Last message:** `lastMessageMinutesAgo`.
 
 - **Pane mechanics** (pane.tsx `settingsPane`, and the pane's hooks in register.tsx):
   - **`TABS` stays settings-only,** so `rowOf`, `accept` and the tool schema never see the read-only tabs.
@@ -546,55 +570,104 @@ Last message 12m ago
 
 **README:** the Commands table: `/cachebeat` opens the status page, `/cachebeat stats` opens Stats. A short "Status" paragraph under "What you'll see".
 
-**What steps 6 and 7 wait on** (2026-11-14). The screenshots arrived (`/usage` and `/stats`; "Decided from it" says what's in them), so nothing waits on them any more. Both pages are still provisional, for two things:
-- **Tokens only** (decided 2026-11-14, built). Both mock-ups still carry `≈$`: redo them in tokens, and the Stats page's Net in input-token equivalents.
-- **A look pass against the screenshots, for the user to approve,** before either page is built. What it has to settle:
-  - Status's Cache row against `/usage`'s own line (`… · warm (1h TTL, last activity 32s ago)`)
-  - the Stats page's three columns against `/stats`' range switch (`All time · Last 7 days · Last 30 days`)
-  - whether Stats gets `/stats`' heatmap by day
+**What steps 6 and 7 wait on** (2026-11-14; the mock-ups were redone in tokens on 2026-11-23). The screenshots arrived (`/usage` and `/stats`; "Decided from it" says what's in them), and both mock-ups are in tokens, with the Stats page's Net in input-token equivalents. Both pages are still provisional until the user approves the look pass below. No API gives either built-in page's figures, so both pages draw from cachebeat's own counts whatever the look.
 
-  No API gives either built-in page's figures, so both pages draw from cachebeat's own counts whatever the look.
+**The look pass, section by section:**
+- **The tab bar:**
+  - Mirrors: Claude Code's `/status`, `/usage` and `/stats` are tabs of one dialog, and Status and Stats sit ahead of the settings tabs the same way.
+  - Departs: nowhere.
+- **Status, the Cache row:**
+  - Mirrors `/usage`'s `warm (1h TTL, last activity 32s ago)`: the state first, then the lifetime and the age in parentheses.
+  - Departs in three ways:
+    - `last read` in place of `last activity`. cachebeat times the cache from the last request that read it, a beat's included, and that's the moment it means.
+    - It adds `· 48m left`.
+    - It has none of `/usage`'s `22 requests · 94% of input tokens from cache · no misses`, because no API gives them. Anyone who wants them is one tab away, in `/usage`.
+- **Status, the other rows:** `/usage` has no counterpart for Size, Beating, This session, Cold guard or Last message. The Usage row repeats the percentages and adds where beating stops. That `/usage` shows the same percentages is inferred: "Decided from it" records only its cache line.
+- **Stats, the table:**
+  - Mirrors `/stats`' totals over a span of days.
+  - Departs from its range switch (`All time · Last 7 days · Last 30 days`): the spans stand side by side as columns. A read-only tab has no focus stops (pane mechanics, above), so a switch would add the page's first control. cachebeat keeps 30 days, so `All time` would only repeat `30 days`.
+  - Adds a This session column.
+- **Stats, by day:**
+  - Mirrors `/stats`' heatmap by day as a single strip, 30 days of beats on one row.
+  - Departs from its grid shape: one cell per day takes one row, where `/stats`' grid takes a row per weekday.
+
+**Choices for the user** (the mock-ups draw the recommended option):
+1. **The Cache row's wording:** `/usage`'s form, `warm (1h TTL, last read 12m ago) · 48m left`, or cachebeat's own, `warm · read 12m ago · about 48m left (1-hour cache)`. Recommended: `/usage`'s, since the user reads both.
+2. **The Size row's weighed figure** (`as 368k input tokens to cache again`): keep it, or show the bare size the way the guard's question speaks. Recommended: keep it. It is the one figure that says a re-cache costs more than its size (2× on a one-hour cache), which the dollar figure used to say.
+3. **The Usage row with no limits reported** (an API key, a cloud provider): hide the row, or show `none reported`. Recommended: hide it.
+4. **This session's total read:** show the last beat's figures (what cachebeat has now), or a session total, which step 6 can't have before step 7's record. Recommended: the last beat's. Stats' This session column has the totals.
+5. **Stats' spans:** columns side by side, or `/stats`' range switch. Recommended: columns.
+6. **Stats' This session column:** keep it or drop it. Recommended: keep it. A negative net shows there first: −30k in the mock-up, three beats and no turn back yet.
+7. **By day:** a one-row strip of beats per day, `/stats`' grid, or nothing. The grid would take 7 rows, and the page has room: it uses 19 of the 24. Recommended: the strip.
+8. **What counts as kept warm:** today's rule counts any turn after an idle stretch with a beat. On a one-hour cache, a turn 55 minutes after its last message was warm without the 50-minute beat, so that turn would overstate the Net. Recommended: count a turn only when it comes later than the cache would have lasted without the beats.
 
 ### Item 7: Stats (step 7, provisional)
 
-**[$?]** Tokens only: decided 2026-11-14. The `usd`, `keptUsd` and `coldUsd` counters and the page's dollar rows go; the Net is in input-token equivalents (tokens weighted by each model's read and write ratios, from `ratiosOf` in `hooks/prices.ts`). The record and the mock-up below still show dollars until step 7 redoes them.
+Tokens only (decided 2026-11-14; redone on 2026-11-23). The cost, avoided and net figures are in input-token equivalents: tokens weighed by the model's read and write ratios from `ratiosOf` in `hooks/prices.ts`.
 
 **What's counted.** These are per session, in the same `session:${id}` record as step 4, so concurrent sessions never collide:
 
 ```ts
 stats: {
   days: { [yyyy-mm-dd]: {
-    beats: number; read: number; wrote: number; usd: number // what beats cost
-    kept: number; keptUsd: number   // turns that came back to a cache a beat kept warm, and the re-cache they avoided
-    cold: number; coldTokens: number; coldUsd: number // turns sent on a cold cache, and what re-caching cost
-    held: number                    // sends the cold guard asked about (item 4), whatever the answer: the counter's meaning under a guard that asks, chosen 2026-11-14
+    beats: number; read: number; wrote: number // tokens beats read from the cache and wrote to it
+    beatCost: number                           // what beats read and wrote, in input-token equivalents
+    kept: number; avoided: number              // turns that came back to a cache a beat kept warm, and the re-cache they avoided, in input-token equivalents
+    cold: number; coldTokens: number           // turns sent on a cold cache, and the tokens they cached again (as the guard's question counts them)
+    held: number                               // sends the cold guard asked about (item 4), whatever the answer: the counter's meaning under a guard that asks, chosen 2026-11-14
+    common: boolean                            // some figure was weighed by the common ratios: a model the price table lacks
   } }
 }
 ```
 
+- **Weighed when counted.** Each figure is weighed with the request's own model and lifetime, when it is counted. A 30-day sum can't weigh it again later: the model and the lifetime may have changed in between. With `r = ratiosOf(model)` and `w` = `r.write1h` or `r.write5m` by the cache's lifetime:
+  - A beat adds `beatCost += read × r.read + wrote × w`. Its few output tokens aren't weighed: `ratiosOf` has no output ratio.
+  - A kept turn adds `avoided += cached × (w − r.read)`: the turn read what it would otherwise have written.
+  - A ratio with `isListed: false` sets the day's `common`, and the page says so (below).
 - **"Saved" is counted when it happens:**
-  - A turn after an idle stretch with at least one beat whose first `turn.step` reads the cache (`got + MISSED >= cached`) adds `kept += 1` and `keptUsd += (cached × (writeRate − readRate))`.
-  - **Net = `keptUsd − usd`,** and it can be negative. That's the honest number.
+  - A turn after an idle stretch with at least one beat whose first `turn.step` reads the cache (`got + MISSED >= cached`) adds `kept += 1` and `avoided`. Whether a turn the cache would have reached without the beats also counts is choice 8 (item 5, "What steps 6 and 7 wait on").
+  - **Net = `avoided − beatCost`,** and it can be negative. That's the honest number.
+- **The user's own model isn't in the table.** Fable 5.2, their saved default, is missing from `prices.ts`' `TABLE`, so `ratiosOf` gives it the common ratios: reads 0.1 where Fable 5.1's are 0.025. Its row needs adding, from the pricing page, before step 7 is built. That's a plugin change, outside this plan's items.
 - **A cold send** is a turn whose first step wrote more than it read after more than a TTL idle.
 - **Writes:** the record is written at most once per beat or turn end, through the same changed-only write as step 4. Retention is the same 30 days, by the record's `at`.
-- **The page** (the Stats tab) aggregates with `$.store.keys()` and reads every `session:*`. That's a few hundred small JSON values at most. It shows today, 7 days and 30 days, and this session:
+- **The page** (the Stats tab) aggregates with `$.store.keys()` and reads every `session:*`. That's a few hundred small JSON values at most. It shows today, 7 days, 30 days and this session, at the same 76 cells as Status. It takes 19 of the pane's 24 rows:
 
 ```
-                Today    7 days   30 days
-Beats             12       84       311
-Beat cost       ≈$0.21   ≈$1.40   ≈$5.02
-Kept warm          4       29       102     turns that came back to a warm cache
-Re-cache avoided ≈$2.80  ≈$19.10  ≈$66.40
-Net             ≈+$2.59  ≈+$17.70 ≈+$61.38
-Cold sends         1        6        20     ≈$0.69 · ≈$4.20 · ≈$13.80 paid to cache again
-Held by guard      1        4        11
+Status Stats Beating Limits Prompt heart Turn line Alerts
+────────────────────────────────────────────────────────────────────────────
+                           Today    7 days   30 days  This session
+Beats                         12        84       311             3
+Beat cost                   120k      852k      3.1M           30k
+Kept warm                      4        29       102             0
+Re-cache avoided            1.3M      9.0M     30.8M             0
+Net                        +1.2M     +8.2M    +27.7M          −30k
+Cold sends                     1         6        20             0
+  cached again              184k      910k      3.1M             0
+Guard asked                    1         4        11             0
+
+Beats by day          ··▂▃▅▂··▁▆█▅▃▂·▁▃▅▇▆▃·▂▄▅▃▂▆▃▅
+                      30 days ago → today
+────────────────────────────────────────────────────────────────────────────
+Cost, avoided and net are in input tokens, each request weighed by its
+model's cache rates: on Opus 5.5 a read counts 0.05 of one, a one-hour
+write 2. Kept warm: turns that came back to a cache only beats kept warm.
+↑↓ tabs · enter or 1-7 opens · esc closes
 ```
 
-  A daily row or heatmap (like `/stats`') is for the look pass (item 5, "What steps 6 and 7 wait on").
-- **Function names:** `countBeat($, …)`, `countTurn($, …)`, `taxPage($)`.
+  - **The figures are worked on Opus 5.5** with a one-hour cache (read 0.05, write 2), so they can be checked:
+    - Today's 12 beats read 1.92M and wrote 12k: 96k + 24k = 120k.
+    - Its 4 kept turns came back to 170k each: 4 × 170k × 1.95 = 1.33M.
+    - Net: 1.33M − 120k = +1.2M.
+    - This session's 3 beats read 552k and wrote 1.2k: 27.6k + 2.4k = 30k. With no turn back yet, the Net is −30k.
+  - **Cold sends' `cached again`** is in plain tokens, as the guard's question speaks of them, not weighed.
+  - **A span with a `common` day** adds a help line: `Fable 5.2 isn't in cachebeat's price table: its figures use the common rates.`
+  - **The look and its alternatives** (the range switch, the heatmap's shape, the This session column) are choices 5–7 (item 5, "What steps 6 and 7 wait on").
+- **Function names:** `countBeat($, …)`, `countTurn($, …)`, `statsPage($)` (was `taxPage`: the page isn't named after cache-tax).
 
 **Tests:**
-- A beat adds to today's `beats` and `usd`.
+- A beat adds to today's `beats`, `read`, `wrote` and `beatCost`, weighed by its model's ratios.
+- A model the price table lacks is weighed by the common ratios, sets `common`, and the page says so.
+- A negative Net renders with its minus sign.
 - A turn after a kept stretch adds `kept`.
 - A cold turn adds `cold`.
 - A send the guard asks about adds `held`; answered `Send`, or sent unanswered, it adds `cold` too.
@@ -602,7 +675,7 @@ Held by guard      1        4        11
 - A record older than 30 days is pruned, and isn't counted.
 - The page renders with no records (all zeros, no `NaN`).
 
-**README:** **[$?]** (tokens only: decided 2026-11-14, so no dollar figure in it) the Privacy section gains "and, for each session, counts of beats, tokens and cold sends by day, kept on your machine for 30 days to show on the Stats page. Nothing of it is sent anywhere." A short Stats paragraph under "What you'll see".
+**README:** in tokens only, with no dollar figure. The Privacy section gains "and, for each session, counts of beats, tokens and cold sends by day, kept on your machine for 30 days to show on the Stats page. Nothing of it is sent anywhere." A short Stats paragraph under "What you'll see".
 
 ### Item 8: the demo GIF (step 8)
 
