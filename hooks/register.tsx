@@ -66,6 +66,8 @@ let lastKept = '' // the record as last written or read, so a save writes only w
 let keeping: Promise<unknown> = Promise.resolve() // record writes, one after another
 let resumeHint: ResumeHint | null = null // Claude Code's figures for the resumed conversation, until they're applied
 let isRestored = false // session.start put the resumed conversation's own state in place: a hint arriving later applies at once
+let offNote: string | null = null // why a resumed conversation came back off when the one before was on, or its keep-alive time ran out
+let convs = 0 // conversations this session has held: a beat answered after /clear or /resume was the one left behind's
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
 let paneSurface = 'terminal' // where the settings pane last drew: the terminal's keys are walked here, a desktop's its own
@@ -120,8 +122,11 @@ async function save($: EngineInterface) {
   await keepRecord($)
 }
 
-/** A conversation's own on/off, keep-alive time and beat count, in the store by its id, for a resume to pick up. */
-type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beats: number }
+/**
+ * A conversation's own on/off, keep-alive time and beat count, in the store by its id, for a resume to pick up, and
+ * when its cache was last read: a beat moves that, and Claude Code's resume hint, counting from the last response, doesn't.
+ */
+type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beats: number; warm?: number | null }
 
 /** What Claude Code says about a resumed conversation as it comes back: the time since its last response. */
 type ResumeHint = { id: string | undefined; secondsSince: number | undefined; at: number }
@@ -133,7 +138,7 @@ const keyOf = () => JSON.stringify([conv, s.enabled, s.keepUntil, s.beats])
 /** The record stored under a key, if it is one this version reads. */
 const keptOf = (x: unknown): Kept | null =>
   isObject(x) && x.v === 1 && typeof x.at === 'number' && typeof x.enabled === 'boolean' && typeof x.beats === 'number'
-    && (x.keepUntil === null || typeof x.keepUntil === 'number') ? x as Kept : null
+    && (x.keepUntil === null || typeof x.keepUntil === 'number') && (x.warm == null || typeof x.warm === 'number') ? x as Kept : null
 
 /** From here, this session's record is `id`'s; it is written at the next change, not now. */
 function keepAs(id: string | null) {
@@ -148,16 +153,20 @@ async function keepRecord($: EngineInterface) {
   if (kept === lastKept) return
   lastKept = kept
   const key = `session:${conv}`
-  const record = { enabled: s.enabled, keepUntil: s.keepUntil, beats: s.beats }
+  // a beat changes the count, so the record has the read it made; a turn's read is the resume hint's
+  const record = { enabled: s.enabled, keepUntil: s.keepUntil, beats: s.beats, warm: s.lastWarm }
   // in order: two saves close together would otherwise race, and the earlier could land last
   const writing = keeping.then(async () => $.store.set(key, { v: 1, at: await $.clock.now(), ...record }))
   keeping = writing.catch(() => undefined)
   await writing
 }
 
-/** Drops the records of conversations not written for 30 days. */
+/** Drops the records of conversations not written for 30 days, at most once a day: each read goes through the store's whole file. */
 async function pruneRecords($: EngineInterface) {
   const now = await $.clock.now()
+  const last = await $.store.get('prunedAt')
+  if (typeof last === 'number' && now - last < DAY) return
+  await $.store.set('prunedAt', now)
   for (const key of await $.store.keys()) {
     if (!key.startsWith('session:')) continue
     const value = await $.store.get(key)
@@ -171,17 +180,34 @@ async function pruneRecords($: EngineInterface) {
  * for the next message either way: nothing of it is cached in this process yet.
  */
 async function restoreConversation($: EngineInterface, id: string | null) {
-  const kept = id === null ? null : keptOf(await $.store.get(`session:${id}`))
+  const stored = id === null ? null : keptOf(await $.store.get(`session:${id}`))
   const now = await $.clock.now()
+  const kept = stored && now - stored.at <= KEEP_DAYS * DAY ? stored : null // one not yet pruned is as good as gone
   const isOver = kept?.keepUntil != null && kept.keepUntil <= now
+  const wasOn = s.enabled // the conversation left behind, on /resume
   s = {
     ...fresh, isCacheShort: s.isCacheShort, paused: RESUMED,
     ...(kept ? { enabled: kept.enabled && !isOver, keepUntil: isOver ? null : kept.keepUntil, beats: kept.beats } : { enabled: cfg.defaultOn }),
   }
+  if (kept?.warm != null) warmFrom(kept.warm)
+  offNote = kept?.enabled && isOver ? `beats are off: the keep-alive time ended at ${clockText(kept.keepUntil!, now)}`
+    : !kept && wasOn && !s.enabled ? 'beats are off in this conversation' : null
   keepAs(id)
   if (id === null) return
   isRestored = true
-  if (resumeHint?.id === id) seedFromResume(resumeHint)
+  if (resumeHint) await takeHint($, resumeHint)
+}
+
+/**
+ * Claude Code's hint on a resumed or forked conversation, once this session's state is in place. One naming another
+ * conversation than the one kept is a hand-over, as /clear is: from here, changes go to that conversation's record.
+ */
+async function takeHint($: EngineInterface, hint: ResumeHint) {
+  seedFromResume(hint)
+  if (hint.id === undefined || hint.id === conv) return
+  keepAs(hint.id)
+  lastKept = ''
+  await keepRecord($)
 }
 
 /**
@@ -195,7 +221,12 @@ function seedFromResume(hint: ResumeHint) {
 
 /** The resume line: when beats start, and whether the cache is likely still warm, as far as the resume hint said. */
 async function sayResumed($: EngineInterface) {
-  if (!s.enabled) return
+  const note = offNote
+  offNote = null
+  if (!s.enabled) {
+    if (note) $.ui.log(note)
+    return
+  }
   ttl = await cacheTtl($)
   const view = viewOf(cacheFacts(null), await $.clock.now())
   const cache = view.state === 'warm' ? ` · cache likely warm for ${fmt(view.expiresAt! - view.at)} more`
@@ -687,11 +718,14 @@ async function beat($: EngineInterface): Promise<string> {
   const wasIdle = !busy
   const wasCached = cached
   const wasFirst = s.turns === 1
+  const era = convs
   const sentAt = await $.clock.now() // the cache it reads lives from here, however long the answer takes
   beating = true
   // tagged, so a request log or a proxy tells a beat from the user's own messages, and the model too
   const forking = $.model.fork({ prompt: busy ? ASK_MID_TURN : ASK })
   const r = await forking.finally(() => (beating = false))
+  // /clear or /resume while it was on its way: what it read was the conversation left behind's, none of this one's
+  if (era !== convs) return 'the conversation changed while the beat was on its way; its answer is set aside'
   if (!r.isAnswered && r.reason !== 'empty-reply') {
     if (r.reason === 'nothing-to-fork') return stop($, 'nothing to keep warm')
     const isTransient = r.reason === 'aborted' || r.error === 'overloaded' || r.error === 'server_error' || r.status === null
@@ -802,6 +836,7 @@ async function markWarm($: EngineInterface, sentAt: number) {
 
 /** After /clear or /resume: another conversation, its count from zero, this session's switch and keep-alive time kept. */
 async function anotherConversation($: EngineInterface) {
+  convs++
   s = { ...fresh, enabled: s.enabled, keepUntil: s.keepUntil, isCacheShort: s.isCacheShort }
   fullReads.clear() // Claude's copy of the state went with the conversation
   cached = 0 // nothing of it cached yet
@@ -1043,7 +1078,6 @@ export const register: Register = on => {
     await publish($)
     const prev = await read($, saved)
     const id = await $.session.id()
-    await pruneRecords($)
     const messages = prev ? [] : await $.session.messages()
     if (messages.length) {
       // a new process with a conversation already in it: --resume, --continue. Claude Code's hint on it may come before
@@ -1064,6 +1098,7 @@ export const register: Register = on => {
     })
     await $.tool.register(STATE)
     await $.tool.register(SET)
+    await pruneRecords($)
     return next(e)
   })
 
@@ -1108,8 +1143,8 @@ export const register: Register = on => {
         await schedule($)
         // the resumed conversation is drawn once this hook settles: a line logged before that is drawn over
         $.clock.after(SETTLE, () => void sayResumed($))
-      } else if (isRestored && id === conv) seedFromResume(hint)
-      else resumeHint = hint // --resume, --continue: session.start is still restoring, and applies it
+      } else if (isRestored) await takeHint($, hint)
+      else resumeHint = hint // --resume, --continue, a fork: session.start is still restoring, and applies it
     }
     return next(e)
   })

@@ -2108,15 +2108,17 @@ test('a resumed conversation with no record starts as New sessions start says: o
   expect([forks, logs]).toEqual([[], []])
 })
 
-test('a resumed conversation whose keep-alive time has passed comes back off, keeping its beat count', async ($: Engine, on: On) => {
+test('a resumed conversation whose keep-alive time has passed comes back off, keeping its beat count, and says so', async ($: Engine, on: On) => {
   const { clock, forks, logs } = await setup($, on, {
     settings: { interval: 3, defaultOn: true }, chat: CHAT, stored: { 'session:s1': { v: 1, at: -3 * M, enabled: true, keepUntil: -M, beats: 2 } },
   })
   const { session } = await stateNow($)
   expect([session.enabled, session.keepAliveUntil, session.beats]).toEqual([false, null, 2])
+  await clock.advance(1000)
+  expect(logs).toEqual([`beats are off: the keep-alive time ended at ${clockText(-M, 0)}`])
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect([forks, logs]).toEqual([[], []])
+  expect([forks, logs.length]).toEqual([[], 1])
 })
 
 test('/resume to a conversation that was off, from one that was on: off, with no line', async ($: Engine, on: On) => {
@@ -2133,13 +2135,15 @@ test('/resume to a conversation that was off, from one that was on: off, with no
 })
 
 test('/resume to a conversation with no record starts as New sessions start says, not as the one left behind', async ($: Engine, on: On) => {
-  const { clock, forks } = await setup($, on, { settings: { interval: 3 } })
+  const { clock, forks, logs } = await setup($, on, { settings: { interval: 3 } })
   await cmd($, '2h')
   await $.turn.complete(turn)
   await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
   await $.classic.SessionStart(hintOf(60, 's2'))
   const { session } = await stateNow($)
   expect([session.enabled, session.keepAliveUntil]).toEqual([false, null])
+  await clock.advance(1000)
+  expect(logs.at(-1)).toBe('beats are off in this conversation') // the one left behind was on: going off says why
   await $.turn.complete(turn)
   await clock.advance(10 * M)
   expect(forks).toEqual([])
@@ -2182,8 +2186,7 @@ test('the resume hint applies when it comes before session.start', async ($: Eng
 test('the resume hint applies when it comes while session.start is restoring', async ($: Engine, on: On) => {
   const { start, holdGet, clock, logs } = await setup($, on, { chat: CHAT, stored: { 'session:s1': on2 }, isStartLeft: true })
   let release = () => {}
-  // the first read of the record is the pruning's, the second the restore's
-  const parked = holdGet('session:s1', new Promise<void>(r => (release = r)), 2)
+  const parked = holdGet('session:s1', new Promise<void>(r => (release = r))) // the restore's read: pruning comes after
   const starting = start()
   await parked // session.start is reading the record, its state not yet in place
   await $.classic.SessionStart(hintOf(10 * 60))
@@ -2194,10 +2197,22 @@ test('the resume hint applies when it comes while session.start is restoring', a
   expect(logs).toEqual(['beats resume after your next message · cache likely warm for 50m more'])
 })
 
-test('a hint for another conversation is not applied', async ($: Engine, on: On) => {
-  await setup($, on, { chat: CHAT, stored: { 'session:s1': on2 } })
-  await $.classic.SessionStart(hintOf(10 * 60, 's9'))
-  expect((await stateNow($)).cache.state).toBe('unknown')
+test('a hint naming another conversation is a hand-over: from then on, changes go to that one\'s record', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { chat: CHAT, stored: { 'session:s1': on2 } })
+  await $.classic.SessionStart(hintOf(10 * 60, 's9', 'fork'))
+  expect(store.get('session:s9')).toMatchObject({ enabled: true, beats: 0 })
+  await cmd($, 'off')
+  expect(store.get('session:s9')).toMatchObject({ enabled: false })
+  expect(store.get('session:s1')).toEqual(on2) // the conversation it came from is left as it was
+  expect((await stateNow($)).cache.lastReadMinutesAgo).toBe(10)
+})
+
+test('a hint naming another conversation, come before session.start, hands over once the state is in place', async ($: Engine, on: On) => {
+  const { start, store } = await setup($, on, { chat: CHAT, stored: { 'session:s1': on2 }, isStartLeft: true })
+  await $.classic.SessionStart(hintOf(10 * 60, 's9', 'fork'))
+  await start()
+  await cmd($, 'off')
+  expect([store.get('session:s1'), store.get('session:s9')]).toEqual([on2, expect.objectContaining({ enabled: false })])
 })
 
 test('a forked conversation takes the hint as a resumed one does', async ($: Engine, on: On) => {
@@ -2210,12 +2225,12 @@ test('a conversation\'s record is written when its on/off, keep-alive time or be
   const { clock, store } = await setup($, on, { settings: { interval: 3 } })
   expect(store.has('session:s1')).toBe(false) // a new session as its settings start it: nothing to keep
   await cmd($, '2h')
-  expect(store.get('session:s1')).toEqual({ v: 1, at: 0, enabled: true, keepUntil: 120 * M, beats: 0 })
+  expect(store.get('session:s1')).toEqual({ v: 1, at: 0, enabled: true, keepUntil: 120 * M, beats: 0, warm: null })
   await clock.advance(1 * M)
   await $.turn.complete(turn) // schedules and saves, changing none of them
   expect(store.get('session:s1')).toMatchObject({ at: 0 })
   await clock.advance(3 * M)
-  expect(store.get('session:s1')).toEqual({ v: 1, at: 4 * M, enabled: true, keepUntil: 120 * M, beats: 1 })
+  expect(store.get('session:s1')).toEqual({ v: 1, at: 4 * M, enabled: true, keepUntil: 120 * M, beats: 1, warm: 4 * M }) // the beat's read
   await cmd($, 'off')
   expect(store.get('session:s1')).toMatchObject({ enabled: false, keepUntil: null, beats: 1 })
 })
@@ -2225,11 +2240,11 @@ test('/clear and /resume leave the record of the conversation left behind as it 
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
-  const left = { v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 1 }
+  const left = { v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 1, warm: 3 * M }
   expect(store.get('session:s1')).toEqual(left)
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } }) // its count back to zero
   await $.classic.SessionStart({ source: 'clear', session_id: 's3' } as never)
-  expect(store.get('session:s3')).toEqual({ v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 0 })
+  expect(store.get('session:s3')).toEqual({ v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 0, warm: null })
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(store.get('session:s3')).toMatchObject({ beats: 1 })
@@ -2252,12 +2267,63 @@ test('/resume keeps what this session found of its cache: a five-minute one stay
   expect((await stateNow($)).cache.ttl).toBe('5m')
 })
 
+test('a resume reads the cache as the beats left it: the hint counts from the last response, which a beat doesn\'t move', async ($: Engine, on: On) => {
+  const { clock, logs } = await setup($, on, { chat: CHAT, stored: { 'session:s1': { ...on2, beats: 2, warm: -20 * M } } })
+  await $.classic.SessionStart(hintOf(70 * 60)) // the last turn: cold by itself
+  const { cache } = await stateNow($)
+  expect([cache.state, cache.lastReadMinutesAgo, cache.minutesLeft]).toEqual(['warm', 20, 40])
+  await clock.advance(1000)
+  expect(logs).toEqual(['beats resume after your next message · cache likely warm for 40m more'])
+})
+
+test('a beat on its way across /resume is set aside: the resumed conversation keeps its count and its cache', async ($: Engine, on: On) => {
+  const { clock, forks, store, logs } = await setup($, on, {
+    settings: { interval: 3 }, stored: { 'session:s2': { ...on2, beats: 5 } },
+    during: async n => {
+      if (n !== 1) return
+      await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
+      await $.classic.SessionStart(hintOf(3 * 3600, 's2'))
+    },
+  })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M + 1000)
+  expect(store.get('session:s2')).toMatchObject({ beats: 5 })
+  expect((await stateNow($)).cache.state).toBe('cold')
+  expect(logs.some(l => l.includes('renewed'))).toBe(false)
+  await $.turn.complete(turn) // and beats go on in it: the flag of a beat on its way was cleared
+  await clock.advance(3 * M)
+  expect(forks.length).toBe(2)
+  expect(store.get('session:s2')).toMatchObject({ beats: 6 })
+})
+
 test('records not written for 30 days are dropped as a session starts', async ($: Engine, on: On) => {
   const { store } = await setup($, on, {
     settings: { interval: 3 },
     stored: { 'session:old': { ...on2, at: -31 * DAY }, 'session:recent': { ...on2, at: -29 * DAY }, 'session:junk': 'x', customs: { interval: 7 } },
   })
-  expect([...store.keys()].filter(k => k !== 'settings').sort()).toEqual(['customs', 'session:recent'])
+  expect([...store.keys()].filter(k => k !== 'settings').sort()).toEqual(['customs', 'prunedAt', 'session:recent'])
+})
+
+test('records are pruned at most once a day', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { stored: { prunedAt: -12 * 60 * M, 'session:old': { ...on2, at: -31 * DAY } } })
+  expect(store.has('session:old')).toBe(true) // kept until the next day's start
+})
+
+test('a record past 30 days, not yet pruned, is not restored', async ($: Engine, on: On) => {
+  await setup($, on, { chat: CHAT, stored: { prunedAt: 0, 'session:s1': { ...on2, at: -31 * DAY } } })
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
+test('pruning comes after the command and the tools are registered', async ($: Engine, on: On) => {
+  const { start, holdGet, specs } = await setup($, on, { isStartLeft: true })
+  let release = () => {}
+  const parked = holdGet('prunedAt', new Promise<void>(r => (release = r)))
+  const starting = start()
+  await parked
+  expect(specs.length).toBe(2)
+  release()
+  await starting
 })
 
 test('a hot reload mid-conversation is not a resume', async ($: Engine, on: On) => {

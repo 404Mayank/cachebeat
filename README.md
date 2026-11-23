@@ -168,7 +168,7 @@ Settings with numbers also take a custom value at the bottom of their list, such
 
 | | What it holds | How long it lasts | How to set it |
 | --- | --- | --- | --- |
-| **This session** | Whether it beats, and for how long (a keep-alive time) | Until the session ends; `/clear` keeps it | **This session** on Beating, `/cachebeat on`, `off` or `<time>` |
+| **This session** | Whether it beats, and for how long (a keep-alive time) | Until the session ends, and again when you resume the conversation; `/clear` keeps it, `/resume` takes the resumed conversation's | **This session** on Beating, `/cachebeat on`, `off` or `<time>` |
 | **This folder** | Any setting, for sessions in this folder | Until you change it | **Settings for: this folder** in the menu, or `/cachebeat local …` |
 | **All folders** | Every setting | Until you change it | The menu, or `/cachebeat global …` |
 
@@ -278,7 +278,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 - Sending a message restarts the countdown, and so does each request Claude makes during a turn. A turn gets a beat once it has gone quiet for a whole interval, counted from its last request. A conversation's first turn gets none.
 - The countdown runs from when a request was sent, not from when its answer ended, since that's when the cache's lifetime starts. So a long answer brings the next beat sooner, and one that streams for longer than the cache lasts leaves it cold.
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
-- A resumed conversation (`claude --resume`, `--continue`, or `/resume`) picks up as you left it: on or off, and any time you gave it. What it was is kept for 30 days from its last change; without it, the conversation starts as **New sessions start** says. Beats start after your next message, since nothing of it is cached in this session yet, and a line says whether the cache is likely still warm.
+- A resumed conversation (`claude --resume`, `--continue`, or `/resume`) picks up as you left it: on or off, and any time you gave it, unless that time ran out while it was closed, which leaves it off. What it was is kept for 30 days from its last change; without it, the conversation starts as **New sessions start** says, as one started with `--fork-session` does. Coming back off from a session that was on, it says so. Beats start after your next message, since nothing of it is cached in this session yet, and a line says whether the cache is likely still warm.
 - After a conversation's first turn, Claude Code can cache the conversation anew where a beat can't reach it. A beat that finds this says so once, and beats wait for your next message rather than paying to write the cache again each time.
 - If the cache goes cold before a beat reaches it, as when your computer sleeps, beats wait for your next message too, and say so (unless **Cache gone cold** is set to stop).
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.
