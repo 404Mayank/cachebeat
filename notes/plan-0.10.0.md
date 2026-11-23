@@ -1191,6 +1191,30 @@ Each step is finished, tested and merged into `dev` before the next starts.
 - **First, the user:** item 8's choices, and B2's settings if one differs.
 - **Process:** a Sonnet session builds and times it from item 8. A review checks the GIF frame by frame against item 8's "On screen" column.
 
+#### B0–B8 results (2026-11-23, `cachebeat-gif`; scenes 0–3b built, scene 4 a stub)
+
+Two takes, both through `demo.py`: a Haiku dry run (`CACHEBEAT_DEMO_MODEL=haiku`), then one Sonnet take. The source is `adb66a7d-73a5-4756-bcef-545e5466da4c`, run from `~/Desktop/Projects` (`CACHEBEAT_DEMO_DIR`): 66k tokens, last answered 2026-10-08 on Haiku, 1098h ago. It isn't refreshed yet (below).
+
+- **B0: passes.** The tape's flags (Sonnet, the scratch copy, both installed copies off) came up `cachebeat: off · cache cold for 1098h 4m`. The fork carries the source's age and size, and the guard asked on the first message, with Sonnet forking a Haiku source too. `--model sonnet` on a fork of a Haiku source didn't read as a model switch (the guard still asked), which answers choice 6's unknown.
+- **B1: a fork doesn't restore the source's record.** A throwaway Haiku session turned `/cachebeat on`; its fork came up `off · cache warm`. So the fork follows New sessions start, whatever the source's record says. (The demo source has no record, so it came up off for either reason.)
+- **B2: settings match the storyboard**, read in a fork launched with the tape's flags, under "all folders": New sessions start off; Beat after idle auto · 50m; Cold guard on, chats from 20k, if unanswered don't send (closes after 5m); Countdown and Tokens kept on. The demo folder's own scope wasn't opened: the fork coming up off says it agrees. The Usage row waits for Status (step 6).
+- **B3: passes, in the order clock then dev.** `--plugin-dir` twice is accepted. With `--debug-file`, `cachebeat-demo-clock@inline` loaded first and one `cachebeat@inline`, no `cachebeat@cachebeat` or `@synced`. The countdown races after `/cachebeat 2h`: `next beat in 34m · 1h 44m left` 3.5s after the command.
+- **B4: passes.** A `model.fork` hook in another plugin sees cachebeat's forks with `next.origin.plugin === 'cachebeat'`: the shown clock stood still through each fork (`kept warm ×1 · next in 50m · 1h 10m left`, then `×2 · 20m left`). The fork's answer took about 1.5s, so a hook budget (10s, mods-gotchas G2) wasn't tested; inferred, not tried: a fork over 10s in the hook would be cut and sent again on its behalf, as G2 saw for a bare `clock.after` wait.
+- **B5: scene 1b's answer takes about 2s** on Sonnet over a cold 66k cache (raw 7.0s Enter on Send, 9.0s `done 12:42 PM`), 3s on Haiku. The tape doesn't sleep a set time: `Wait+Screen@40s /(?s)sent on a cold cache.*done \d+:\d+ [AP]M/`, then `Sleep 2s`. It's anchored after the cachebeat line, which prints above the new turn: a source refreshed today ends in `done 9:40 AM` with no date, and a bare `done \d+:\d+` would match that at once (the 46-day-old source's `done Thursday, Oct 8, …` hid this in both takes). Checked in VHS on a throwaway tape: it waits through a stale `done` and returns on the new one, the screen at least 700px tall (a short one scrolls the first line off and the wait times out). Nothing is on screen mid-answer at the cut.
+- **B6: no scene 2.** After the first turn on a cold cache, both beats landed with no `beats wait for your next turn`, on Haiku and on Sonnet.
+- **B7: passes.** `Send` has the focus: Enter alone sends (`sent on a cold cache: cold for 1098h 9m, 66k tokens cached again`).
+- **B8: passes.** The parts list shows two beats and the first fast-forward starting 2.5s after the status line first appears (`/cachebeat 2h`), never before it. Sonnet take: ×1 to 15.0s, ×3 to 23.4s, beat, ×1 to 27.0s, ×3 to 35.4s, beat, ×1 to the end; about 27s as a GIF before scene 4.
+
+**Changes to demo.py, from what the takes showed:**
+- `plan()` compares a count with the last one read, not with the frame before: the line reads as nothing for a moment as a beat lands (`next beat due now`), and with the old pair test the first beat was dropped and only one was found.
+- `status()` takes the highest count of a frame's lines, as item 8 said.
+- The tape's `--model "${CACHEBEAT_DEMO_MODEL:-sonnet}"` lets a dry run use Haiku without editing the tape.
+
+**For the final take:**
+- **Refresh the source** 2–6h before: it reads `cold for 1098h 16m` now. Resume it unforked (interactively, in tmux: what `-p` with `--resume` does to the session id wasn't tried), with no cachebeat loaded (both installed copies off in `--settings`, no `--plugin-dir`, or the guard's lines land in the last screenful), `--model sonnet`, and send one short line. That's one Sonnet turn over the 66k, and it makes it the 66k-token, Sonnet source. Then check the turn landed in `adb66a7d-….jsonl` itself (its mtime and last timestamp moved), not in a new session id. 66k is under the 100–200k the storyboard aimed at: the question reads `66k tokens`, not `184k`.
+- **Two lines on screen the old GIF didn't have,** both from this machine, not cachebeat: `← 2 agents` in the footer (inferred: other Claude sessions running here; a plain session shows it too) and `1 agent type available` / `1 skill available` under the first message (inferred: this machine's, since the plugin ships no agent or skill). Decide whether they stay in a public GIF, or the final take runs with the fleet closed.
+- **Throwaway sessions:** every take forks the source into a new session file under `~/.claude/projects/-home-zyrus-Desktop-Projects/`; they are the user's to clear.
+
 ### Step 9: release 0.10.0
 
 - **First, a sweep of the whole release.** Each step updated its own pieces; this cross-checks them together. Everything 0.10.0 adds must reach:
