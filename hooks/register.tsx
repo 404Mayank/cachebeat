@@ -32,6 +32,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 const fresh: Saved = {
   enabled: false, keepUntil: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, nextAt: null, beats: 0, row: null, small: null,
   isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0, compactions: 0, lastCompactAt: null,
+  guard: null, held: 0, cold: 0, coldTokens: 0,
 }
 let s: Saved = { ...fresh }
 
@@ -127,19 +128,20 @@ async function save($: EngineInterface) {
  * A conversation's own on/off, keep-alive time and beat count, in the store by its id, for a resume to pick up, and
  * when its cache was last read: a beat moves that, and Claude Code's resume hint, counting from the last response, doesn't.
  */
-type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beats: number; warm?: number | null }
+type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beats: number; warm?: number | null; guard?: boolean | null }
 
 /** What Claude Code says about a resumed conversation as it comes back: the time since its last response. */
 type ResumeHint = { id: string | undefined; secondsSince: number | undefined; at: number }
 
 const DAY = 24 * 60 * MIN
 const KEEP_DAYS = 30 // a record not written for this long is dropped
-const keyOf = () => JSON.stringify([conv, s.enabled, s.keepUntil, s.beats])
+const keyOf = () => JSON.stringify([conv, s.enabled, s.keepUntil, s.beats, s.guard])
 
 /** The record stored under a key, if it is one this version reads. */
 const keptOf = (x: unknown): Kept | null =>
   isObject(x) && x.v === 1 && typeof x.at === 'number' && typeof x.enabled === 'boolean' && typeof x.beats === 'number'
-    && (x.keepUntil === null || typeof x.keepUntil === 'number') && (x.warm == null || typeof x.warm === 'number') ? x as Kept : null
+    && (x.keepUntil === null || typeof x.keepUntil === 'number') && (x.warm == null || typeof x.warm === 'number')
+    && (x.guard == null || typeof x.guard === 'boolean') ? x as Kept : null
 
 /** From here, this session's record is `id`'s; it is written at the next change, not now. */
 function keepAs(id: string | null) {
@@ -155,7 +157,7 @@ async function keepRecord($: EngineInterface) {
   lastKept = kept
   const key = `session:${conv}`
   // a beat changes the count, so the record has the read it made; a turn's read is the resume hint's
-  const record = { enabled: s.enabled, keepUntil: s.keepUntil, beats: s.beats, warm: s.lastWarm }
+  const record = { enabled: s.enabled, keepUntil: s.keepUntil, beats: s.beats, warm: s.lastWarm, guard: s.guard }
   // in order: two saves close together would otherwise race, and the earlier could land last
   const writing = keeping.then(async () => $.store.set(key, { v: 1, at: await $.clock.now(), ...record }))
   keeping = writing.catch(() => undefined)
@@ -188,7 +190,7 @@ async function restoreConversation($: EngineInterface, id: string | null) {
   const wasOn = s.enabled // the conversation left behind, on /resume
   s = {
     ...fresh, isCacheShort: s.isCacheShort, paused: RESUMED,
-    ...(kept ? { enabled: kept.enabled && !isOver, keepUntil: isOver ? null : kept.keepUntil, beats: kept.beats } : { enabled: cfg.defaultOn }),
+    ...(kept ? { enabled: kept.enabled && !isOver, keepUntil: isOver ? null : kept.keepUntil, beats: kept.beats, guard: kept.guard ?? null } : { enabled: cfg.defaultOn }),
   }
   if (kept?.warm != null) warmFrom(kept.warm)
   offNote = kept?.enabled && isOver ? `beats are off: the keep-alive time ended at ${clockText(kept.keepUntil!, now)}`
@@ -862,7 +864,9 @@ async function markWarm($: EngineInterface, sentAt: number) {
 /** After /clear or /resume: another conversation, its count from zero, this session's switch and keep-alive time kept. */
 async function anotherConversation($: EngineInterface) {
   convs++
-  s = { ...fresh, enabled: s.enabled, keepUntil: s.keepUntil, isCacheShort: s.isCacheShort }
+  asking?.close?.(LEFT_BEHIND) // a question about the conversation left behind: its message is dropped
+  asking = null
+  s = { ...fresh, enabled: s.enabled, keepUntil: s.keepUntil, isCacheShort: s.isCacheShort, guard: s.guard }
   fullReads.clear() // Claude's copy of the state went with the conversation
   cached = 0 // nothing of it cached yet
   resent = false
@@ -958,6 +962,8 @@ async function sessionOf($: EngineInterface, now: number) {
     keepAliveUntilLocal: s.keepUntil === null ? null : clockText(s.keepUntil, now),
     keepAliveMinutesLeft: s.keepUntil === null ? null : wholeMinutes(Math.max(0, s.keepUntil - now)),
     beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, nextBeat, skipping: s.small, paused: s.paused,
+    coldGuard: s.guard ?? cfg.coldGuard, coldGuardFrom: s.guard === null ? 'settings' : 'session',
+    coldGuardAsked: s.held, coldSends: s.cold, coldSendTokens: s.coldTokens,
   }
 }
 
@@ -1007,7 +1013,7 @@ async function stateOf($: EngineInterface, only: readonly Section[] = [], isSuba
   }
 }
 
-type Before = { enabled: boolean; keepUntil: number | null; settings: BeatSettings; own: Partial<BeatSettings> }
+type Before = { enabled: boolean; keepUntil: number | null; guard: boolean | null; settings: BeatSettings; own: Partial<BeatSettings> }
 
 /**
  * `set`'s answer: the fields the call changed (this session's own switch and keep-alive time, not what follows
@@ -1022,6 +1028,7 @@ async function answerSet($: EngineInterface, before: Before, change: SetChange) 
   const changed = [
     ...(before.enabled !== s.enabled ? ['session.enabled'] : []),
     ...(change.keepAliveMinutes !== undefined && before.keepUntil !== s.keepUntil ? ['session.keepAliveMinutes'] : []),
+    ...(before.guard !== s.guard ? ['session.coldGuard'] : []),
     ...settings.map(([k]) => `settings.${k}`),
     ...[...set.map(([k]) => k), ...dropped].map(k => `folder.${k}`),
   ]
@@ -1091,8 +1098,94 @@ function say($: EngineInterface, text: string) {
   void update($, tickAtom, t => t + 1)
 }
 
+/** `/cachebeat guard on|off`: this session's own Cold guard, over the setting's; bare, how it stands. */
+async function guardCommand($: EngineInterface, word: string | undefined) {
+  if (word === 'on' || word === 'off') {
+    s.guard = word === 'on'
+    await save($)
+    return `this session: Cold guard ${word}`
+  }
+  await syncSettings($)
+  const from = s.guard !== null ? 'this session' : own.coldGuard !== undefined ? 'this folder' : 'all folders'
+  return `Cold guard ${s.guard ?? cfg.coldGuard ? 'on' : 'off'} (${from}) · usage: /cachebeat guard on|off`
+}
+
+/** Origins the cold guard asks about: a person at this terminal. Every other is sent, logged and counted. */
+const ASKED_ORIGINS: readonly string[] = ['composer']
+
+/**
+ * The cold guard's question while it's open: its text, which the AskUserQuestion hook knows it by, and how to close it
+ * unanswered, with the reason the ask then rejects with.
+ */
+let asking: { text: string; close: ((reason: string) => void) | null } | null = null
+
+// why the guard closed its own question: the ask's rejection carries it, so none is taken for the user's Esc
+const TIMED_OUT = 'unanswered: cachebeat sent the message'
+const LEFT_OPEN = 'unanswered too long: cachebeat dropped the message'
+const LEFT_BEHIND = 'the conversation changed: cachebeat dropped the message'
+
+/**
+ * How long a question under `don't send` stays open. Claude Code runs incoming messages through `prompt.submit` one at a
+ * time, so while it is open every queued message, other sessions' among them, waits behind it.
+ */
+const DROP_AFTER = 5 * MIN
+
+/** How the guard's own timer closed its question: the wait under `send after`, or the ceiling under `don't send`. */
+export type Closed = 'wait' | 'ceiling' | 'left' | null
+
+/**
+ * What the cold guard does with its question's outcome: any answer decides (Send sends, anything else drops). With none,
+ * the timer of `send after` sends; the ceiling of `don't send` drops, saying so; a dismissal drops.
+ */
+export const coldOutcome = (answer: string | null, closed: Closed): 'send' | 'send-unanswered' | 'drop' | 'drop-unanswered' | 'drop-left' =>
+  answer === 'Send' ? 'send' : answer !== null ? 'drop' : closed === 'wait' ? 'send-unanswered'
+    : closed === 'ceiling' ? 'drop-unanswered' : closed === 'left' ? 'drop-left' : 'drop'
+
+/** Why the guard dropped a message, and the way to send it. */
+const dropped = (why: string) => `cachebeat: not sent. ${why} Send it again to be asked, or /cachebeat guard off.`
+
+/**
+ * A message about to go to the cache the guard asked about, read again: a turn or a beat may have warmed it while the
+ * question was open, and then it goes as any message does. Still cold, it is counted and said before it goes.
+ */
+async function noteColdSend($: EngineInterface, how: string) {
+  const view = await cacheNow($)
+  if (view.state !== 'cold' || view.contextTokens === null) return
+  s.cold++
+  s.coldTokens += view.contextTokens
+  await save($)
+  $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
+}
+
+/** Asks the cold guard's question; resolves the answer, or null when it was dismissed, closed unanswered, or couldn't be asked. */
+async function askCold($: EngineInterface, text: string, wait: 'drop' | number) {
+  const open: NonNullable<typeof asking> = { text, close: null }
+  asking = open
+  let timer: { cancel: () => void } | undefined
+  try {
+    s.held++
+    await save($)
+    // past the wait, the AskUserQuestion hook closes the dialog, and the ask rejects with the timer's own reason
+    // under don't send, a ceiling: the question closes and the message is dropped, so the messages queued behind it go on
+    timer = $.clock.after(wait === 'drop' ? DROP_AFTER : wait * MIN, () => open.close?.(wait === 'drop' ? LEFT_OPEN : TIMED_OUT))
+    let answer: string | null = null
+    let closed: Closed = null
+    try {
+      answer = await $.ui.ask(text, ['Send', "Don't send"])
+    } catch (err) {
+      // dismissed (Esc), closed by the timer or a change of conversation, or nowhere to ask: only the timer's reason sends
+      const why = String(err)
+      closed = why.includes(TIMED_OUT) ? 'wait' : why.includes(LEFT_OPEN) ? 'ceiling' : why.includes(LEFT_BEHIND) ? 'left' : null
+    }
+    return { answer, closed }
+  } finally {
+    timer?.cancel()
+    if (asking === open) asking = null
+  }
+}
+
 const OPENED = 'settings opened'
-const USAGE = 'usage: on, off, a time like 2h, now, settings · global or local: on, off, minutes · local reset'
+const USAGE = 'usage: on, off, a time like 2h, now, guard on|off, settings · global or local: on, off, minutes · local reset'
 
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
@@ -1118,7 +1211,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'cachebeat',
       description: 'Keep the prompt cache warm while idle',
-      argumentHint: '[on|off|<time, like 2h>|now|global …|local …|settings]',
+      argumentHint: '[on|off|<time, like 2h>|now|guard on|off|global …|local …|settings]',
       immediate: true,
     })
     await $.tool.register(STATE)
@@ -1174,6 +1267,45 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // the cold guard: a message to a session whose cache has gone cold re-caches the whole conversation, so the user is asked
+  // first. It fails open (a hook that fails lets the prompt through), except at the question: one not answered Send drops it
+  on('prompt.submit', async ($, e, next) => {
+    // mid-turn, the turn's own requests read the cache anyway
+    if (e.turnId !== undefined || busy) return next(e)
+    await syncSettings($)
+    if (!(s.guard ?? cfg.coldGuard)) return next(e)
+    ttl = await cacheTtl($) // the lifetime the cache is judged by, as it is now
+    const view = await cacheNow($)
+    if (view.state !== 'cold' || view.contextTokens === null || view.contextTokens < cfg.coldGuardTokens) return next(e)
+    const coldFor = fmt(view.coldFor!)
+    const size = view.contextTokens
+    if (!ASKED_ORIGINS.includes(e.origin.kind)) {
+      await noteColdSend($, '')
+      return next(e)
+    }
+    // a second message can't wait on the open question: a hook waiting with no question of its own is cut at 10s and sent
+    if (asking) return { drop: dropped('A question about the cold cache is open: answer it first.') }
+    const wait = cfg.coldGuardUnanswered
+    const said = `The cache has been cold for ${coldFor}, so this message caches ${tokens(size)} tokens again. Send it?`
+    const { answer, closed } = await askCold($, said, wait)
+    const then = coldOutcome(answer, closed)
+    if (then === 'drop-unanswered') return { drop: dropped(`The question went unanswered for ${fmt(DROP_AFTER)}.`) }
+    if (then === 'drop-left') return { drop: 'cachebeat: not sent. The conversation changed: send it again.' }
+    if (then === 'drop') return { drop: dropped(`The cache has been cold for ${coldFor}, and sending caches ${tokens(size)} tokens again.`) }
+    await noteColdSend($, then === 'send' ? '' : ` after ${wait}m unanswered`)
+    return next(e)
+  })
+
+  // the cold guard's own question: closed unanswered when its wait is up. Every other question, the model's own among them, passes
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const open = asking
+    if (!open || e.questions[0]?.question !== open.text) return next(e)
+    const closed = new Promise<{ deny: string }>(resolve => {
+      open.close = reason => resolve({ deny: reason })
+    })
+    return Promise.race([next(e), closed])
+  })
+
   // typed over a running turn, the command runs at once but its reply is drawn only when the turn ends: the toast says it was taken.
   // The settings pane opens at once and is feedback enough; it holds toasts, so this one would show only after the pane closes
   on('command.run', { command: 'cachebeat' }, async ($, e, next) => {
@@ -1190,6 +1322,7 @@ export const register: Register = on => {
       return { text: OPENED }
     }
     if (words[0] === 'now') return { text: await beatNow($) }
+    if (words[0] === 'guard') return { text: await guardCommand($, words[1]) }
     if (words[0] === 'global' || words[0] === 'local') return { text: await scoped($, words[0] === 'local' ? 'folder' : 'global', words[1]) }
     if (words[0] === 'off') return { text: `this session: ${s.enabled ? await stop($) : 'already off'}` }
     // `on` (no time limit), a keep-alive time (`2h`, `1h 30m`), or both
@@ -1204,7 +1337,10 @@ export const register: Register = on => {
       return { text: `this session: ${await turnOn($, undefined, keep)}` }
     }
     if (words.length) return { text: USAGE }
-    if (!s.enabled) return { text: 'off' }
+    // the cache as it stands, on or off: what a message sent now would find
+    const view = await cacheNow($)
+    const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
+    if (!s.enabled) return { text: `off${cache}` }
     const now = await $.clock.now()
     const at = s.nextAt
     const ms = at === null ? undefined : Math.max(0, at - now)
@@ -1212,7 +1348,7 @@ export const register: Register = on => {
     const source = from === 'all folders' ? '' : ` (this ${from}'s)`
     const left = s.keepUntil === null ? '' : ` · ${keepLeft(s.keepUntil, now)}`
     const upcoming = s.keepUntil !== null && s.keepUntil <= now ? '' : ` · ${when(ms)}` // past the time, no beat is coming
-    return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'}${upcoming}` }
+    return { text: `on, ${every()}${source}${left} · ${s.beats} beat${s.beats === 1 ? '' : 's'}${upcoming}${cache}` }
   })
 
   // a loop's first read is answered whole whatever it names: Claude holds nothing of cachebeat's state until it has read it
@@ -1231,7 +1367,7 @@ export const register: Register = on => {
     const change = parseSet({ session: e.session, settings: e.settings, folder: e.folder })
     if ('error' in change) return { deny: change.error }
     await syncSettings($)
-    const before: Before = { enabled: s.enabled, keepUntil: s.keepUntil, settings: global, own }
+    const before: Before = { enabled: s.enabled, keepUntil: s.keepUntil, guard: s.guard, settings: global, own }
     const hasPatch = Object.keys(change.patch).length > 0
     if (hasPatch || change.folder !== undefined) {
       await changeSettings($, {
@@ -1242,6 +1378,7 @@ export const register: Register = on => {
     const now = await $.clock.now()
     if (change.enabled !== undefined) s.enabled = change.enabled
     if (change.keepAliveMinutes !== undefined) s.keepUntil = change.keepAliveMinutes === null ? null : now + change.keepAliveMinutes * MIN
+    if (change.coldGuard !== undefined) s.guard = change.coldGuard
     // always: setSettings reschedules only while on, and this is what cancels a beat when turned off
     await schedule($)
     return { result: json(await answerSet($, before, change)) }
@@ -1502,7 +1639,7 @@ export const register: Register = on => {
     const to: Target = editsFolder ? 'folder' : 'global'
     const where = cut(place.root, PATH)
     const view = {
-      page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, keepUntil: s.keepUntil === null ? null : clockText(s.keepUntil, now),
+      page, tick, focus, columns: e.props.bodyColumns, isOn: s.enabled, keepUntil: s.keepUntil === null ? null : clockText(s.keepUntil, now), guard: s.guard,
       autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal', customs,
       own: place.own, path: where, editsFolder, allFolders: global,
     }
@@ -1522,6 +1659,10 @@ export const register: Register = on => {
       resetRow: key => {
         if (!editsFolder) return void setSettings($, { [key]: DEFAULTS[key] }, 'global').then(() => say($, `${label(key)} back to its default`))
         void changeSettings($, { drop: [key] }).then(() => say($, `${label(key)} follows all folders again`))
+      },
+      dropGuard: () => {
+        s.guard = null
+        void save($).then(() => say($, 'Cold guard follows the settings again in this session'))
       },
       dropKeep: () => {
         s.keepUntil = null

@@ -1,6 +1,9 @@
 import type { BeatSettings, Look, Ttl } from '../types'
 import { STATUS_HEARTS, VARIANTS } from './animations'
 
+/** The chat size, in tokens, under which beating can be skipped and the cold guard doesn't ask: cheap to cache again. */
+export const SMALL_CHAT = 20_000
+
 export const DEFAULTS: BeatSettings = {
   defaultOn: false,
   interval: 'auto',
@@ -8,7 +11,10 @@ export const DEFAULTS: BeatSettings = {
   stopAtUsage: 90,
   onCold: 'wait',
   skipSmall: false,
-  skipSmallTokens: 20_000,
+  skipSmallTokens: SMALL_CHAT,
+  coldGuard: true,
+  coldGuardTokens: SMALL_CHAT,
+  coldGuardUnanswered: 'drop',
   heartPlacement: 'tail',
   variant: 'classic',
   showCount: true,
@@ -67,7 +73,7 @@ export function normalize(stored: unknown): BeatSettings {
   }
   for (const [k, v] of Object.entries(from)) {
     const isNumberFor = (...keys: string[]) => keys.includes(k) && typeof v === 'number'
-    if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval'))) s[k] = v
+    if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval', 'coldGuardUnanswered'))) s[k] = v
   }
   const out = s as BeatSettings
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
@@ -79,6 +85,10 @@ export function normalize(stored: unknown): BeatSettings {
   if (out.interval !== 'auto' && (typeof out.interval !== 'number' || parseMinutes(`${out.interval}`) === undefined)) out.interval = DEFAULTS.interval
   if (!['wait', 'warm'].includes(out.onModelSwitch)) out.onModelSwitch = DEFAULTS.onModelSwitch
   if (!['wait', 'stop'].includes(out.onCold)) out.onCold = DEFAULTS.onCold
+  if (parseTokens(`${out.coldGuardTokens}`) === undefined) out.coldGuardTokens = DEFAULTS.coldGuardTokens
+  if (out.coldGuardUnanswered !== 'drop' && (typeof out.coldGuardUnanswered !== 'number' || parseWait(`${out.coldGuardUnanswered}`) === undefined)) {
+    out.coldGuardUnanswered = DEFAULTS.coldGuardUnanswered
+  }
   return out
 }
 
@@ -213,6 +223,7 @@ export const parseDuration = Object.assign((text: string): number | undefined =>
 export const parseHours = reader('hours', { '': 1, h: 1, m: 1 / 60, min: 1 / 60 }, 0.5, 48, false)
 export const parsePercent = reader('percent', { '': 1, '%': 1 }, 10, 100, true)
 export const parseFrameMs = reader('ms a frame', { '': 1, ms: 1 }, 20, 500, true)
+export const parseWait = reader('minutes', { '': 1, m: 1, min: 1 }, 1, 15, true) // a cold guard's question left unanswered
 
 /** 184000 → 184k, 1250000 → 1.3M. */
 export const tokens = (n: number) =>
@@ -311,6 +322,22 @@ export const TABS: readonly Tab[] = [
         key: 'onCold', label: 'Cache gone cold', values: ['wait', 'stop'],
         fmt: v => (v === 'wait' ? 'start on your next message' : 'stop'),
         help: 'If the cache goes cold before a beat reaches it, as when your computer sleeps: start beating again on your next message, or stop.',
+      },
+      {
+        key: 'coldGuard', label: 'Cold guard', values: [true, false], fmt: onOff,
+        help: 'Asks before sending a message to a session whose cache has gone cold, and says how many tokens sending it caches again.',
+      },
+      {
+        key: 'coldGuardTokens', label: '  chats from', values: [10_000, 20_000, 50_000, 100_000], show: s => s.coldGuard,
+        fmt: v => `${tokens(Number(v))} tokens`,
+        help: 'The smallest chat the guard asks about: a smaller one is cheap to cache again.',
+        custom: { placeholder: 'e.g. 35k', parse: parseTokens },
+      },
+      {
+        key: 'coldGuardUnanswered', label: '  if unanswered', values: ['drop', 2, 5, 10], show: s => s.coldGuard,
+        fmt: v => (v === 'drop' ? "don't send (closes after 5m)" : `send after ${v}m`),
+        help: "What happens to a held message when the question isn't answered: it isn't sent (the question closes after 5m, so other incoming messages wait at most 5m), or it's sent after this long.",
+        custom: { placeholder: 'e.g. 3m', parse: parseWait },
       },
       {
         key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,
