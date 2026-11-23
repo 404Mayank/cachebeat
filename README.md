@@ -118,7 +118,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 - cachebeat collects no personal data and has no telemetry. It sends nothing to its author or anyone else.
 - A beat is a request to Anthropic's API, made by Claude Code with your account, the same way your own messages are sent.
-- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. So does each conversation's on or off, keep-alive time, beat count and cold guard switch, by its session id, for 30 days from its last change, so that a resumed conversation picks up as you left it. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
+- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. So does each conversation's on or off, keep-alive time, beat count and cold guard switch, by its session id, for 30 days from its last change, so that a resumed conversation picks up as you left it. With them, for each conversation, go its counts of beats, tokens and cold sends by day, kept for the same 30 days to show on the Stats page. None of it is sent anywhere. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
 
 ## Commands
 
@@ -134,6 +134,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 | `/cachebeat global <minutes>` | Sets the interval for all folders, and turns it on here |
 | `/cachebeat local on` / `off` / `<minutes>` | The same, for sessions in this folder only |
 | `/cachebeat local reset` | Drops this folder's own settings: it follows all folders again |
+| `/cachebeat stats` | Opens the Stats page, and answers with a line of the last 30 days. Typed while Claude is working, or from a remote session, it gives the line alone |
 | `/cachebeat settings` | Opens the settings menu, on its Beating tab |
 
 A command typed while Claude is working takes effect at once. Claude Code shows the command and its reply in the transcript only when the turn ends, so cachebeat shows the reply in a toast right away.
@@ -155,11 +156,21 @@ A command typed while Claude is working takes effect at once. Claude Code shows 
 
 **The Status page** is the first tab of the menu, and `/cachebeat` opens it. It is read-only, and it shows this session as it stands: whether the cache is warm or cold, with its lifetime, when it was last read and how long it has left, or how long it has been cold; the conversation's size in tokens, and what caching it again would cost in input tokens; whether this session beats, at what interval, and when the next beat is due; the beats so far and what the last one read and wrote; the cold guard; your usage limits and where beats stop; and when you last sent a message. It updates each minute while it is open. Warm or cold is judged by the time since the cache was last read; only the next request confirms it.
 
+**The Stats page** is the second tab, and `/cachebeat stats` opens it. It adds up what beats cost and what they saved, for today, the last 7 and 30 days, and this session, across every session on your machine:
+
+- **Beats · cost:** the beats sent, and the tokens they read and wrote.
+- **Kept warm · avoided:** the turns that came back to a cache only beats had kept warm, and the tokens they didn't have to cache again. A turn that came back before the cache would have lapsed anyway isn't counted.
+- **Net:** the avoided tokens less the cost, which can be negative: a beat costs something even when no message follows.
+- **Cold sends · re-cached:** the messages sent on a cold cache, and the tokens they cached again.
+- **Guard asked:** the messages the cold guard asked about.
+
+Cost, avoided and net are in input tokens: each request counts by its model's cache prices, a read for a small part of an input token and a write for more than one (an hour's cache twice as much, five minutes' a quarter more). A model cachebeat has no prices for is counted at the usual ones, and the page says so. Under them, one block a day shows the beats of the last 30. It is all counted by cachebeat itself, so it begins when you update to this version.
+
 ## Settings
 
 Open the menu with `/cachebeat settings`, or ask Claude to change a setting. Settings apply in all folders, unless you give a folder its own (see [Where settings apply](#where-settings-apply)).
 
-- On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–6 jump straight into a tab, Status first.
+- On the tab bar, ↑↓ switch tabs and Enter goes into one. 1–7 jump straight into a tab, Status and Stats first.
 - Inside a tab, ↑↓ move between settings. Enter flips a setting with two choices, or opens the list of one with more. A dim line at the bottom says what the focused setting does.
 - **r** puts the focused setting back to its default. On a folder's own setting, it goes back to the one for all folders. On **This session** with a keep-alive time, it drops the time, and the session keeps beating with no limit.
 - In a list, ↑↓ preview each choice and Enter picks it.
@@ -212,7 +223,7 @@ With **Skip small chats** on, cachebeat tells you up front when a chat is under 
 </details>
 
 <details>
-<summary><b>Prompt heart</b>: the heart under the prompt</summary>
+<summary><b>Heart</b>: the heart under the prompt</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |

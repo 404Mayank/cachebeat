@@ -5,6 +5,8 @@ import type { Preview, Row, Span, Value } from './settings'
 import { DEFAULTS, HEX_OF, PAGES, READ_ONLY, SESSION_HELP, TABS, isFlip, isHex, isLit, lookOf, rowOf, spans, tokens } from './settings'
 import { STATUS_NOTE, statusRows } from './status'
 import type { StatusFacts } from './status'
+import { statsLines } from './stats'
+import type { StatsFacts } from './stats'
 
 export const PANE = 'cachebeat-settings'
 
@@ -32,6 +34,7 @@ export type View = {
   focus: string
   columns: number
   status: StatusFacts | null // what the Status tab draws, read when it is on show
+  stats: StatsFacts | null // and the Stats tab
   isOn: boolean // this session beats
   keepUntil: string | null // when this session's keep-alive time is up, as the clock reads it (/cachebeat 2h); null: no time limit
   guard: boolean | null // this session's own Cold guard (/cachebeat guard on|off), over the setting; null: none
@@ -223,6 +226,21 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
       ))}
     </Box>
   )
+  if (!tab && v.page.tab === 'stats') {
+    const lines = v.stats ? statsLines(v.stats) : null
+    const tree = (
+      <Box flexDirection="column">
+        {bar}
+        {rule}
+        {lines && <Text>{lines.header}</Text>}
+        {lines?.rows.map(r => <Text>{r}</Text>)}
+        {lines && <Text>{lines.strip}</Text>}
+        {lines && <Text dimColor>{lines.note}</Text>}
+        <Text dimColor>{v.isTerminal ? `↑↓ tabs · enter or ${keys} opens · esc closes` : `tab moves · ${keys} tabs · esc closes`}</Text>
+      </Box>
+    )
+    return { tree, ring }
+  }
   if (!tab) {
     const tree = (
       <Box flexDirection="column">

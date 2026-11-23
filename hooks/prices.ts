@@ -3,11 +3,15 @@
 
 // $ per million tokens, from https://platform.claude.com/docs/en/about-claude/pricing, checked 2026-11-09. Only the
 // ratios leave this file. Cache writes are 1.25× input for five minutes and 2× for an hour everywhere. Reads are not
-// one multiple: 0.1×, except Fable 5.1 and Mythos 5.1 (0.025×) and Opus 5.5 and Sonnet 5.5 (0.05×). Haiku 5.5 costs
+// one multiple: 0.1×, except Fable and Mythos 5.1 and 5.2 (0.025×) and Opus 5.5 and Sonnet 5.5 (0.05×). Haiku 5.5 costs
 // five times as much on every kind past a 100,000-token prompt, which leaves every ratio as it is.
 type Rates = { input: number; output: number; read: number }
 
 const TABLE: Record<string, Rates> = {
+  // Fable 5.2 and Mythos 5.2 share their pricing: input $8, output $40, cache read $0.20, five-minute write $10, one-hour write $16
+  // (Fable 5.2's overview and https://platform.claude.com/docs/en/about-claude/pricing, found by search 2026-11-23); the writes are the usual 1.25× and 2×
+  'claude-fable-5-2': { input: 8, output: 40, read: 0.2 },
+  'claude-mythos-5-2': { input: 8, output: 40, read: 0.2 },
   'claude-fable-5-1': { input: 10, output: 50, read: 0.25 },
   'claude-mythos-5-1': { input: 10, output: 50, read: 0.25 },
   'claude-fable-5': { input: 10, output: 50, read: 1 },
