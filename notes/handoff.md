@@ -48,7 +48,8 @@ The next agent raises these with the user before anything else. The user said on
 
   **Look at the GIF before shipping:** it is public once on `main`. It shows the source session's last screenful, and Status's Usage row shows the account's real percentages.
 - **The GIF shows two things the old one didn't:** `← 2 agents` in the footer, and "1 agent type / 1 skill available" under the first message. Both are probably from this machine's setup rather than the plugin (inferred). The orchestrator kept them, because the fleet can't be closed for the take. Look at them in the GIF before shipping.
-- **Leftover fork session files from the GIF takes** are under ~/.claude/projects/-home-zyrus-Desktop-Projects/. They were left in place; delete them if you like.
+- **Leftover fork session files from the GIF takes** are under ~/.claude/projects/-home-zyrus-Desktop-Projects/: `5fae1024-…`, `6d96bcd6-…`, `6bae1637-…`, `eae6b2e8-…` and `896b9994-…` (all .jsonl, 2026-11-23 12:31–12:43), plus the final take's fork. They were left in place; delete them if you like. The demo source `adb66a7d-…` was refreshed with one Sonnet turn at 12:51 ("ok, thanks").
+- **Your Remote Control session disconnected: "Trusted devices now required — run /remote-control to start a new session".** It showed while the demo source was being refreshed, 2026-11-23 12:51. It's an account change, not cachebeat's. It is now in the demo source's transcript, so the GIF's opening screenful may show it. The final take checks scene 0.
 - **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
 
 ## Paused for usage (2026-11-23 09:48)
