@@ -6,7 +6,7 @@
 
 **Keep Claude Code's prompt cache warm while you're away.**
 
-![cachebeat keeping an idle session's cache warm: the countdown runs down and beats land on their own, then the animation picker](assets/demo.gif)
+![cachebeat asking before a message goes to a cold cache, keeping the cache warm for two hours as beats land on their own, then its Status page](assets/demo.gif)
 
 [![CI](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml/badge.svg)](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml)
 [![Claude Code 2.1.287+](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
@@ -23,8 +23,10 @@ You come back from lunch, type your next message, and it picks up right where yo
 
 - **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation
 - **A keep-alive time**: `/cachebeat 2h` keeps the cache warm through a break of that long, then turns itself off
+- **A cold guard** asks before your message goes to a cache that's gone cold, with how many tokens sending it would cache again. It's on from the start, even with beating off
 - **A live heart** under the prompt, with 19 animations to choose from
 - **A turn line** under your latest turn shows the beats so far and the time until the next one
+- **A Status page and a Stats page**: the cache as it stands, and what beats cost and saved over the last 30 days
 - **A settings menu** with live previews, driven by keyboard or mouse
 - **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words, or ask it how full its context is and whether the cache is still warm
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
@@ -118,7 +120,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 - cachebeat collects no personal data and has no telemetry. It sends nothing to its author or anyone else.
 - A beat is a request to Anthropic's API, made by Claude Code with your account, the same way your own messages are sent.
-- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. So does each conversation's on or off, keep-alive time, beat count and cold guard switch, by its session id, for 30 days from its last change, so that a resumed conversation picks up as you left it. With them, for each conversation, go its counts of beats, tokens and cold sends by day, kept for the same 30 days to show on the Stats page. None of it is sent anywhere. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
+- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. So does each conversation's on or off, keep-alive time, beat count, cold guard switch and when its cache was last read, by its session id, for 30 days from its last change, so that a resumed conversation picks up as you left it. With them, for each conversation, go its counts by day of beats and their tokens, turns kept warm, cold sends and the cold guard's questions, kept for the same 30 days to show on the Stats page. None of it is sent anywhere. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
 
 ## Commands
 
@@ -290,6 +292,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 
 ## Good to know
 
+- Don't run another keep-warm plugin beside cachebeat. Two sets of beats and two cold guards in one session behave unpredictably.
 - A keep-alive time counts from the command, and your messages don't extend it. Beats come only while the cache would otherwise go cold before the time is up, so the last one can come well before the end. A running turn finishes first, then the session turns off. A usage limit or an API error still stops it early.
 - Sending a message restarts the countdown, and so does each request Claude makes during a turn. A turn gets a beat once it has gone quiet for a whole interval, counted from its last request. A conversation's first turn gets none.
 - The countdown runs from when a request was sent, not from when its answer ended, since that's when the cache's lifetime starts. So a long answer brings the next beat sooner, and one that streams for longer than the cache lasts leaves it cold.
