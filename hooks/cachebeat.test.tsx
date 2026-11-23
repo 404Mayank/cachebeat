@@ -3502,6 +3502,7 @@ test('the cold guard decides by the answer first: any answer wins over its timer
   expect([coldOutcome("Don't send", 'wait'), coldOutcome('later', 'wait')]).toEqual(['drop', 'drop']) // answered as the wait ran out
   expect([coldOutcome(null, 'wait'), coldOutcome(null, null)]).toEqual(['send-unanswered', 'drop'])
   expect(coldOutcome(null, 'ceiling')).toBe('drop-unanswered') // don't send's question closed at its ceiling
+  expect([coldOutcome(null, 'left'), coldOutcome('Send', 'left')]).toEqual(['drop-left', 'send']) // closed by /clear or /resume
 })
 
 test('setting off, session on: the row shows both, its sub-rows show, and Enter visibly flips the setting', async ($: Engine, on: On) => {
@@ -3534,7 +3535,7 @@ test('a question open as the conversation changes is closed, its message dropped
   const first = submit($)
   await shown
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
-  expect((await first).drop).toBe(NOT_SENT)
+  expect((await first).drop).toBe('cachebeat: not sent. The conversation changed: send it again.')
   await $.turn.complete(turn)
   await clock.advance(3 * 60 * M + 14 * M)
   answers.push('Send')

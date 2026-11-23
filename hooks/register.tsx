@@ -1106,14 +1106,15 @@ const LEFT_BEHIND = 'the conversation changed: cachebeat dropped the message'
 const DROP_AFTER = 5 * MIN
 
 /** How the guard's own timer closed its question: the wait under `send after`, or the ceiling under `don't send`. */
-export type Closed = 'wait' | 'ceiling' | null
+export type Closed = 'wait' | 'ceiling' | 'left' | null
 
 /**
  * What the cold guard does with its question's outcome: any answer decides (Send sends, anything else drops). With none,
  * the timer of `send after` sends; the ceiling of `don't send` drops, saying so; a dismissal drops.
  */
-export const coldOutcome = (answer: string | null, closed: Closed): 'send' | 'send-unanswered' | 'drop' | 'drop-unanswered' =>
-  answer === 'Send' ? 'send' : answer !== null ? 'drop' : closed === 'wait' ? 'send-unanswered' : closed === 'ceiling' ? 'drop-unanswered' : 'drop'
+export const coldOutcome = (answer: string | null, closed: Closed): 'send' | 'send-unanswered' | 'drop' | 'drop-unanswered' | 'drop-left' =>
+  answer === 'Send' ? 'send' : answer !== null ? 'drop' : closed === 'wait' ? 'send-unanswered'
+    : closed === 'ceiling' ? 'drop-unanswered' : closed === 'left' ? 'drop-left' : 'drop'
 
 /** Why the guard dropped a message, and the way to send it. */
 const dropped = (why: string) => `cachebeat: not sent. ${why} Send it again to be asked, or /cachebeat guard off.`
@@ -1149,7 +1150,7 @@ async function askCold($: EngineInterface, text: string, wait: 'drop' | number) 
     } catch (err) {
       // dismissed (Esc), closed by the timer or a change of conversation, or nowhere to ask: only the timer's reason sends
       const why = String(err)
-      closed = why.includes(TIMED_OUT) ? 'wait' : why.includes(LEFT_OPEN) ? 'ceiling' : null
+      closed = why.includes(TIMED_OUT) ? 'wait' : why.includes(LEFT_OPEN) ? 'ceiling' : why.includes(LEFT_BEHIND) ? 'left' : null
     }
     return { answer, closed }
   } finally {
@@ -1264,6 +1265,7 @@ export const register: Register = on => {
     const { answer, closed } = await askCold($, said, wait)
     const then = coldOutcome(answer, closed)
     if (then === 'drop-unanswered') return { drop: dropped(`The question went unanswered for ${fmt(DROP_AFTER)}.`) }
+    if (then === 'drop-left') return { drop: 'cachebeat: not sent. The conversation changed: send it again.' }
     if (then === 'drop') return { drop: dropped(`The cache has been cold for ${coldFor}, and sending caches ${tokens(size)} tokens again.`) }
     await noteColdSend($, then === 'send' ? '' : ` after ${wait}m unanswered`)
     return next(e)

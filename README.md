@@ -124,7 +124,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 | Command | What it does |
 | --- | --- |
-| `/cachebeat` | Shows the status: on or off, the interval, the time left on a keep-alive time, beats so far, the next beat |
+| `/cachebeat` | Shows the status: on or off, the interval, the time left on a keep-alive time, beats so far, the next beat, and whether the cache is warm or cold |
 | `/cachebeat on` | Turns it on for this session, with no time limit |
 | `/cachebeat off` | Turns it off for this session |
 | `/cachebeat <time>` | Keeps the cache warm for that long from now, then turns this session off: `/cachebeat 2h`, `45m`, `1h30m` (5 minutes to 48 hours; the unit is required) |
