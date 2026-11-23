@@ -63,7 +63,7 @@ The next agent raises these with the user before anything else. The user said on
   - Good to know gained "don't run another keep-warm plugin beside cachebeat".
   - The GIF has its new alt text.
   - "Beat after idle" was left as it is, because the Good to know bullet on the request start reads true against the code.
-  - No shipped text was wrong.
+  - No shipped text was wrong. Every field `state` returns (`sessionOf`, `cacheOf`, `contextOf`, `whole`) is described in `STATE`, and every field described is returned.
 - **The README's GIF alt text describes the new GIF, which isn't on `dev` yet.** `assets/demo.gif` there is still the 2026-10-09 one. The new GIF waits on step 8's final take (`step-gif`), so the alt text and the GIF must land together on the release branch.
 
 ## 0.10.0 release notes (draft)
@@ -79,10 +79,11 @@ Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. 
 - **A resumed conversation keeps its on or off,** and any keep-alive time, for 30 days from its last change. A conversation with no record starts as **New sessions start** says, and that now includes `/resume`, which used to keep the on or off of the conversation you left.
 - **Bare `/cachebeat` opens the new Status page.** It still answers with its line, which now ends with whether the cache is warm or cold.
 - **The "Prompt heart" tab is now "Heart".** Its settings are the same.
+- **The prompt heart shows during a turn too.** It holds still while a request of the turn is on its way.
 
 **New**
 
-- **Keep-alive time:** `/cachebeat 2h`, `45m` or `1h30m` (5 minutes to 48 hours) keeps the cache warm for that long, then turns the session off. Your messages don't extend it.
+- **Keep-alive time:** `/cachebeat 2h`, `45m` or `1h30m` (5 minutes to 48 hours) keeps the cache warm for that long, then turns the session off. Your messages don't extend it, and the turn line shows the time left.
 - **The Status page** (`/cachebeat`) shows the cache as it stands: warm or cold, its size, the next beat, the cold guard and your usage limits.
 - **The Stats page** (`/cachebeat stats`) shows, for today, 7 days, 30 days and this session:
   - what beats cost
