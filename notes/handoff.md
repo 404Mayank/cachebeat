@@ -47,6 +47,8 @@ The next agent raises these with the user before anything else. The user said on
   - the old demo session as the source, refreshed
 
   **Look at the GIF before shipping:** it is public once on `main`. It shows the source session's last screenful, and Status's Usage row shows the account's real percentages.
+- **The GIF shows two things the old one didn't:** `← 2 agents` in the footer, and "1 agent type / 1 skill available" under the first message. Both are probably from this machine's setup rather than the plugin (inferred). The orchestrator kept them, because the fleet can't be closed for the take. Look at them in the GIF before shipping.
+- **Leftover fork session files from the GIF takes** are under ~/.claude/projects/-home-zyrus-Desktop-Projects/. They were left in place; delete them if you like.
 - **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
 
 ## Paused for usage (2026-11-23 09:48)
