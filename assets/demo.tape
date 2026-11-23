@@ -30,7 +30,8 @@ Sleep 2s
 # Scene 1b: Send has the focus. The answer re-caches the whole conversation, and it is the turn beats need.
 Enter
 Wait+Screen@10s /sent on a cold cache/
-Wait+Screen@40s /done \d+:\d+ [AP]M/
+# The cachebeat line prints above the new turn, so this skips the source's own last "done 9:40 AM".
+Wait+Screen@40s /(?s)sent on a cold cache.*done \d+:\d+ [AP]M/
 Sleep 2s
 
 # Scene 3: cachebeat is off until now, so the clock mod's fast stretch starts with this command's first step.
