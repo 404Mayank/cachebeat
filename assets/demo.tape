@@ -15,17 +15,22 @@ Set Padding 22
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 70ms
 
-# Scene 0: the forked conversation's last screenful.
+# Scene 0, hidden: the fork's last screenful ends with a "Remote Control disconnected" notice from the account,
+# so the frame opens on the guard's question instead. A bare /cachebeat first pushes the notice off the top, and the
+# question is typed out of frame; Show comes when the question is up.
 Hide
 Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --plugin-dir "$CACHEBEAT_DEMO_CLOCK" --plugin-dir "$CACHEBEAT_DEMO_PLUGIN" --model "${CACHEBEAT_DEMO_MODEL:-sonnet}" --permission-mode default --settings '{"verbose":true,"advisorModel":"","statusLine":{"type":"command","command":"true"},"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false}}'` Enter
 Sleep 9s
+Type "/cachebeat" Sleep 500ms Enter
+Wait+Screen@10s /Cache\s+cold/
+Escape
+Sleep 500ms
+Type "in one line, which board is this sketch for?" Sleep 500ms Enter
+Wait+Screen@20s /Don't send/
 Show
 
 # Scene 1: the cache is cold, so the guard asks first.
-Sleep 1s
-Type "in one line, which board is this sketch for?" Sleep 500ms Enter
-Wait+Screen@20s /Don't send/
-Sleep 2s
+Sleep 2500ms
 
 # Scene 1b: Send has the focus. The answer re-caches the whole conversation, and it is the turn beats need.
 Enter
@@ -42,5 +47,9 @@ Wait+Screen@10s /next beat in/
 Wait+Screen@90s /kept warm ×2/
 Sleep 1500ms
 
-# Scene 4 (Status): the final pass fills this in once the Status page exists (step 6).
+# Scene 4: bare /cachebeat opens Status, on the Cache row first.
+Type "/cachebeat" Sleep 500ms Enter
+Wait+Screen@5s /Cache\s+warm/
+Sleep 3s
+Escape
 Sleep 1s
