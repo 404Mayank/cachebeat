@@ -57,6 +57,40 @@ The next agent raises these with the user before anything else. The user said on
   - A full plugin store costs only records and Stats; beating goes on.
 - **Live checks left probe `session:<id>` records in the real plugin store** (steps 4 and 7). They are pruned 30 days after their last write.
 - **Fable 5.2 and Mythos 5.2 have rows in hooks/prices.ts** (step 7): input $8, cache read $0.20, 5m write $10, 1h write $16 per million tokens. Checked against the claude-api skill's model table, citing https://platform.claude.com/docs/en/about-claude/pricing. Mythos 5.2 is for verified organizations only, priced the same.
+- **Step 9's README sweep (`step-readme`, 2026-11-23)** checked the README against the code:
+  - Features gained the cold guard (on from the start, even with beating off) and the Status and Stats pages.
+  - Privacy now lists everything the conversation record keeps. It had missed the time the cache was last read, and the turns kept warm and guard questions in the day counts.
+  - Good to know gained "don't run another keep-warm plugin beside cachebeat".
+  - The GIF has its new alt text.
+  - "Beat after idle" was left as it is, because the Good to know bullet on the request start reads true against the code.
+  - No shipped text was wrong.
+- **The README's GIF alt text describes the new GIF, which isn't on `dev` yet.** `assets/demo.gif` there is still the 2026-10-09 one. The new GIF waits on step 8's final take (`step-gif`), so the alt text and the GIF must land together on the release branch.
+
+## 0.10.0 release notes (draft)
+
+Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. The rest of the notes follow the usual pattern (notes/README.md, "Releasing, step by step"). Each line was checked against `git diff main -- README.md` and the code at `c279dde`.
+
+> [!IMPORTANT]
+> **`/cachebeat <time>` changed.** It now sets how long to keep the cache warm, and it needs a unit: `/cachebeat 2h` keeps the cache warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global 30`.
+
+**Changed**
+
+- **The cold guard is on by default.** Before your message goes to a session whose cache has gone cold, cachebeat asks first. It says how long the cache has been cold and how many tokens sending the message caches again. It asks in chats of 20k tokens or more, whether beating is on or not. A question left unanswered doesn't send the message, and it closes after 5 minutes. To turn the guard off, run `/cachebeat guard off` for one session, or set **Cold guard** under Limits in `/cachebeat settings`. Messages from Remote Control, other sessions, scheduled tasks and `claude -p` are sent without asking.
+- **A resumed conversation keeps its on or off,** and any keep-alive time, for 30 days from its last change. A conversation with no record starts as **New sessions start** says, and that now includes `/resume`, which used to keep the on or off of the conversation you left.
+- **Bare `/cachebeat` opens the new Status page.** It still answers with its line, which now ends with whether the cache is warm or cold.
+- **The "Prompt heart" tab is now "Heart".** Its settings are the same.
+
+**New**
+
+- **Keep-alive time:** `/cachebeat 2h`, `45m` or `1h30m` (5 minutes to 48 hours) keeps the cache warm for that long, then turns the session off. Your messages don't extend it.
+- **The Status page** (`/cachebeat`) shows the cache as it stands: warm or cold, its size, the next beat, the cold guard and your usage limits.
+- **The Stats page** (`/cachebeat stats`) shows, for today, 7 days, 30 days and this session:
+  - what beats cost
+  - what they saved
+  - the net, in input tokens
+  - cold sends
+- **Claude can read its context:** ask it how full the context window is, when it will compact, and whether the cache is still warm.
+- **A command typed while Claude is working** answers at once in a toast.
 
 ## Paused for usage (2026-11-23 09:48)
 
@@ -237,6 +271,7 @@ Figures are `clear`'s report at wrap-up (2026-11-14). Check with ListAgents and 
 - **`claude -p` waits 3 seconds for stdin** unless given `< /dev/null`, and its `--output-format json` is an array: the entry with `type: "result"` holds `usage`.
 - **Check `origin/main` and `origin/dev` before cutting a release.** Cloud sessions release and push notes too; a version number was nearly reused.
 - **The release branch takes plugin files from a specific commit when `dev` holds later work:** branch from that commit, merge `origin/main` into it, then `git checkout <it> -- .claude-plugin hooks types README.md LICENSE .github` on the release branch.
+- **`tsc -p .` in a fresh worktree has no `.claude-plugin/types`** (it's git-ignored and written only when Claude Code loads the plugin). Found 2026-11-23, step 9. Without those types, `tsconfig.json`'s `extends` finds nothing, so `tsc` falls back to its defaults: it fails, and it writes a `.js` beside every hook. Copy the types from the main checkout first (`cp -r ../cachebeat/.claude-plugin/types .claude-plugin/`), and never `--plugin-dir` the worktree.
 - **`claude plugin validate --strict .` fails on `dev`** for `CLAUDE.md` at the plugin root. Expected: run it on the release branch.
 
 ## Docs to update when things land
