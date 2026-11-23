@@ -3661,6 +3661,15 @@ test('typed mid-turn, bare /cachebeat opens no pane: its line is toasted at once
   expect([opened, toasts]).toEqual([[], ['cachebeat: off']])
 })
 
+test('bare /cachebeat from a remote client or a -p run opens no pane, and answers its line all the same', async ($: Engine, on: On) => {
+  const { opened } = await setup($, on)
+  for (const kind of ['bridge', 'sdk'] as const) {
+    const r = await $.command.run({ command: 'cachebeat', args: '', origin: { kind }, presentation: { isFullscreen: false, columns: 80 } })
+    expect(r.text).toBe('off')
+  }
+  expect(opened).toEqual([])
+})
+
 test('Status after a sleep says cold for how long, with the conversation\'s size weighed for a one-hour cache', async ($: Engine, on: On) => {
   await coldSetup($, on)
   await cmd($, '')

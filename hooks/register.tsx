@@ -1356,8 +1356,9 @@ export const register: Register = on => {
     }
     if (words.length) return { text: USAGE }
     // the pane opens on Status, and the line is the answer all the same: the transcript keeps it, and so do a remote client, a -p
-    // run and the toast of a command typed mid-turn. Mid-turn the pane stays shut: it holds toasts, and the line is the feedback
-    if (!busy) await openSettings($, 'summary')
+    // run and the toast of a command typed mid-turn. Mid-turn the pane stays shut: it holds toasts, and the line is the feedback.
+    // Nor does one open for a command that isn't the person's at this terminal (a Remote Control client, a -p run): no one is at its keys
+    if (!busy && e.origin.kind === 'composer') await openSettings($, 'summary')
     // the cache as it stands, on or off: what a message sent now would find
     const view = await cacheNow($)
     const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
