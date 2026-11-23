@@ -583,7 +583,6 @@ async function beat($: EngineInterface): Promise<string> {
   // no event marks /rewind, which runs between turns: the conversation's ending tells it. Mid-turn the ending
   // grows by itself, as each tool's result lands
   if (!busy && s.tail !== null && await isRewound($, s.tail)) {
-    fullReads.clear() // what Claude read of cachebeat's state no longer matches the conversation it keeps
     await pause($, REWOUND, REWOUND)
     return `beats wait for your next turn: ${REWOUND}`
   }
@@ -880,8 +879,8 @@ async function answerSet($: EngineInterface, before: Before, change: SetChange) 
   const folder = change.folder === undefined ? {} : { folder: { path: root, ...Object.fromEntries([...set, ...dropped.map(k => [k, null])]) } }
   await syncSettings($)
   ttl = await cacheTtl($) // the interval it answers is what `auto` comes to
-  // saved for all folders, and not what this folder follows: it has its own
-  const shadowed = settings.map(([k]) => k).filter(k => k in own)
+  // saved for all folders, and not what this folder follows: it has its own, whether the call changed the saved value or not
+  const shadowed = Object.keys(change.patch).filter(k => k in own)
   return { changed, session: await sessionOf($, await $.clock.now()), settings: Object.fromEntries(settings), ...folder, shadowed }
 }
 
@@ -1118,7 +1117,9 @@ export const register: Register = on => {
   // caches the new one. One within a turn needs nothing: the turn's next request starts the count from when it's sent
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
-    const isDone = e.agentId === undefined && e.trigger !== 'precompute' && r.skip === undefined
+    const stands = e.trigger !== 'precompute' && r.skip === undefined
+    const isDone = e.agentId === undefined && stands
+    if (stands && e.agentId !== undefined) fullReads.delete(e.agentId) // the subagent's own conversation is replaced: what it read of the state is gone
     if (isDone) {
       s.turns = 0 // a conversation anew: its next turn sends it as a first one
       s.compactions++
@@ -1138,6 +1139,8 @@ export const register: Register = on => {
       turnId = e.turnId
       stepping = true // its first request goes out next
       isTurnWarmed = false // a turn.complete skipped (one ending while a beat runs, after a reload) left it set
+      // /rewind runs between turns: a read of cachebeat's state made in the turns it took back went with them
+      if (s.tail !== null && await isRewound($, s.tail)) fullReads.clear()
       s.asked = await $.clock.now()
       s.row = null // the line moves to this turn's row once it ends
       await schedule($)

@@ -29,7 +29,7 @@ const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
 
 type World = {
   fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown
-  contextPercent?: number; breakdown?: Record<string, unknown> // the rest of the engine's context figures, with `contextTokens`
+  resetsAt?: string; contextPercent?: number; breakdown?: Record<string, unknown> // the rest of the engine's context figures, with `contextTokens`
   settings?: Partial<typeof DEFAULTS>
   env?: Record<string, string>; settingsFile?: Record<string, unknown>; isSubscription?: boolean
   folders?: Record<string, unknown> // the store's folders, by path
@@ -81,7 +81,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
         tokens: world.contextTokens, window: 200_000, ...(world.contextPercent === undefined ? {} : { percent: world.contextPercent }),
         ...(world.lastUsage || world.breakdown ? { breakdown: { ...(world.lastUsage ? { apiUsage: world.lastUsage } : {}), ...world.breakdown } } : {}),
       },
-      rateLimits: world.isSubscription === false ? [] : [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10 }],
+      rateLimits: world.isSubscription === false ? [] : [{ kind: 'five_hour', percentUsed: world.percentUsed ?? 10, ...(world.resetsAt ? { resetsAt: world.resetsAt } : {}) }],
     },
   }) as never)
   let model: string = OPUS
@@ -976,11 +976,10 @@ test('a read that named nothing, as a loop\'s first, says nothing of being widen
   expect(keysOf(await stateNow($, { only: ['cache'] }))).toEqual(['cache']) // and it counts as the first read
 })
 
-test('after /clear, a compaction of the main conversation, or a noticed rewind, a narrow read is whole again', async ($: Engine, on: On) => {
-  const { clock, rewind, talk } = await setup($, on, { settings: { interval: 3 } })
+test('after /clear, a compaction of the main conversation, or a /rewind, a narrow read is whole again', async ($: Engine, on: On) => {
+  const { rewind, talk } = await setup($, on)
   const narrow = async () => keysOf(await stateNow($, { only: ['cache'] }))
   const WHOLE = ['whole', 'session', 'cache', 'context', 'settings', 'folder', 'defaults']
-  await cmd($, 'on')
   talk('long question')
   await $.turn.complete(turn)
   expect(await narrow()).toEqual(WHOLE)
@@ -993,14 +992,44 @@ test('after /clear, a compaction of the main conversation, or a noticed rewind, 
   expect(await narrow()).toEqual(['cache'])
   await $.session.compact({ messages: [said('user', 'summary')], agentId: 'sub' } as never) // a subagent's own: not the conversation Claude read it in
   expect(await narrow()).toEqual(['cache'])
-  await cmd($, 'on')
   talk('another question')
   await $.turn.complete(turn)
-  await clock.advance(3 * M)
   rewind(2)
-  await clock.advance(3 * M) // the beat notices the rewind
+  await $.turn.start({ text: 'again', turnId: 't3' }) // the turn after a /rewind, which no event tells of
   expect(await narrow()).toEqual(WHOLE)
   expect(await narrow()).toEqual(['cache'])
+})
+
+// beating off, or the next message before a beat is due: nothing but the turn's start sees the rewind
+for (const [name, isOn] of [['with beating off', false], ['with beating on, the next turn before a beat is due', true]] as const) {
+  test(`a /rewind clears what Claude read of the state ${name}`, async ($: Engine, on: On) => {
+    const { rewind, talk } = await setup($, on)
+    if (isOn) await cmd($, 'on')
+    talk('long question')
+    await $.turn.start({ text: 'long question', turnId: 't1' })
+    expect(keysOf(await stateNow($, { only: ['context'] }))).toContain('whole')
+    expect(keysOf(await stateNow($, { only: ['context'] }))).toEqual(['context'])
+    await $.turn.complete(turn)
+    rewind(2) // back to before the question
+    await $.turn.start({ text: 'another question', turnId: 't2' })
+    expect(keysOf(await stateNow($, { only: ['context'] }))).toContain('whole')
+  })
+}
+
+test('a subagent\'s own compaction clears its own read, and no other\'s', async ($: Engine, on: On) => {
+  await setup($, on)
+  const narrow = async (agentId?: string) => keysOf(await stateNow($, { only: ['cache'], ...(agentId ? { agentId } : {}) }))
+  await narrow()
+  await narrow('sub')
+  await narrow('other')
+  expect(await narrow('sub')).toEqual(['cache'])
+  await $.session.compact({ messages: [said('user', 'summary')], agentId: 'sub' } as never)
+  expect(await narrow('sub')).toContain('whole')
+  expect(await narrow('sub')).toEqual(['cache'])
+  expect(await narrow('other')).toEqual(['cache'])
+  expect(await narrow()).toEqual(['cache'])
+  await $.session.compact({ messages: [said('user', 'summary')], agentId: 'other', trigger: 'precompute' } as never) // installs nothing
+  expect(await narrow('other')).toEqual(['cache'])
 })
 
 test('a subagent\'s first read is whole after the main loop\'s, and its context says whose it is', async ($: Engine, on: On) => {
@@ -1056,7 +1085,11 @@ test('set answers which settings it saved that this folder has its own of, and n
   expect((await set($, { settings: { interval: 30 } })).shadowed).toEqual([]) // the loop's first call, with no read before it
   await call($, 'set', { folder: { interval: 20, showTokens: false } })
   expect((await set($, { settings: { interval: 25, showTokens: false, skipSmall: true } })).shadowed).toEqual(['interval', 'showTokens'])
-  expect((await set($, { settings: { interval: 25 } })).shadowed).toEqual([]) // unchanged: nothing saved
+  expect((await set($, { settings: { interval: 25 } })).shadowed).toEqual(['interval']) // the saved value didn't change, and this folder still keeps its own
+  const same = await set($, { settings: { interval: 'auto', showTokens: true } }) // all folders at their defaults already
+  expect([same.changed, same.shadowed]).toEqual([['settings.interval', 'settings.showTokens'], ['interval', 'showTokens']])
+  const again = await set($, { settings: { interval: 'auto' } })
+  expect([again.changed, again.shadowed]).toEqual([[], ['interval']]) // nothing changed for all folders, and this folder still keeps its own 20
   expect((await set($, { settings: { interval: 40 }, folder: { interval: null } })).shadowed).toEqual([]) // dropped by the same call
   expect(keysOf(await stateNow($, { only: ['cache'] }))).toContain('whole') // a set is not a read
 })
@@ -1078,9 +1111,9 @@ test('the answers print compact, on one line', async ($: Engine, on: On) => {
   expect((await call($, 'set', { settings: { interval: 30 }, folder: { stopAtUsage: 80 } })).result).not.toContain('\n')
 })
 
-test('state names the usage windows', async ($: Engine, on: On) => {
-  await setup($, on, { percentUsed: 37 })
-  expect((await stateNow($)).session.usageLimits).toEqual([{ kind: 'five_hour', percentUsed: 37 }])
+test('state names the usage windows, and when each resets', async ($: Engine, on: On) => {
+  await setup($, on, { percentUsed: 37, resetsAt: '2026-11-23T18:00:00Z' })
+  expect((await stateNow($)).session.usageLimits).toEqual([{ kind: 'five_hour', percentUsed: 37, resetsAt: '2026-11-23T18:00:00Z' }])
 })
 
 // what writing the context again comes to, in input tokens: 1.25× for a five-minute cache and 2× for an hour's

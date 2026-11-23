@@ -98,7 +98,7 @@ To keep the cache warm for a set time, such as through a long meeting, and have 
 
 Or ask Claude: "keep the cache warm in this session", "keep it warm for the next 2 hours", "always start it in this repo", "make 30 minutes the default beat time".
 
-To have Claude watch its own context, add a line to your `CLAUDE.md`, such as: "Before a long task, read your context with cachebeat's state tool (only: context)."
+To have Claude watch its own context, add a line to your `CLAUDE.md`, such as: "Before a long task, read your context with mcp__cachebeat__state (only: ["context"])."
 
 Beats fit your cache by themselves: every 50 minutes on a Claude subscription's one-hour cache, and every 4 on the five-minute cache of an API key, a cloud provider or usage credits. To pick your own interval, use `/cachebeat global 30` or set **Beat after idle** in `/cachebeat settings`.
 
