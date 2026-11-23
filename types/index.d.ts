@@ -20,6 +20,10 @@ export type Saved = {
   turns: number // turns this conversation has had: after its first, Claude Code can cache it anew out of a beat's reach
   compactions: number // the main conversation's compactions cachebeat has seen; /clear and /resume start the count again
   lastCompactAt: number | null // when the latest was
+  guard: boolean | null // this session's own Cold guard, over the setting's; null follows the setting
+  held: number // messages the cold guard asked about in this conversation, whatever the answer
+  cold: number // messages sent on a cold cache: answered Send, sent unanswered, or from where nobody is asked
+  coldTokens: number // the tokens those cached again
 }
 
 /** How long the main conversation's prompt cache lives. */
@@ -44,6 +48,9 @@ export type BeatSettings = {
   onCold: 'wait' | 'stop' // the cache went cold before a beat reached it (a sleeping computer, retries): wait for the next turn, or stop
   skipSmall: boolean
   skipSmallTokens: number
+  coldGuard: boolean // ask before sending a message to a session whose cache has gone cold
+  coldGuardTokens: number // the smallest chat it asks about
+  coldGuardUnanswered: 'drop' | number // a question left unanswered: the message isn't sent, or is after this many minutes
   // the heart under the prompt
   heartPlacement: 'tail' | 'line'
   variant: string
@@ -81,7 +88,7 @@ declare module 'claude-code' {
   interface McpToolInputs {
     mcp__cachebeat__state: Record<string, never>
     mcp__cachebeat__set: {
-      session?: { enabled?: boolean; keepAliveMinutes?: number | null }
+      session?: { enabled?: boolean; keepAliveMinutes?: number | null; coldGuard?: boolean | null }
       settings?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } // null resets to the default
       folder?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } | null // null follows all folders; the whole null drops every one
     }

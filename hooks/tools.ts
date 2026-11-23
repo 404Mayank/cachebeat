@@ -16,6 +16,9 @@ const ABOUT: Record<keyof BeatSettings, string> = {
   onCold: "If the cache goes cold before a beat reaches it (the computer slept, or retries ran past its lifetime): wait, and beat again after the user's next message, or stop beating.",
   skipSmall: 'Skips beating chats smaller than skipSmallTokens.',
   skipSmallTokens: "The smallest chat kept warm while skipSmall is on; setting it doesn't turn skipSmall on.",
+  coldGuard: "Asks the user before their message is sent to a session whose cache has gone cold, saying how long it's been cold and the tokens sending caches again. Only messages typed at the terminal are asked about; a session can override it (session.coldGuard).",
+  coldGuardTokens: 'The smallest chat the cold guard asks about, in tokens.',
+  coldGuardUnanswered: "A cold guard question left unanswered: drop, the message isn't sent (the question stays open), or minutes after which it is sent.",
   heartPlacement: 'The prompt heart: tail, at the end of the hint line, always dim; line, on its own line, in color. Terminal only.',
   variant: "The prompt heart's animation. Terminal only.",
   showCount: 'Shows the beat count beside the prompt heart. Terminal only.',
@@ -91,7 +94,7 @@ export const STATE: ToolSpec = {
       '`only` names the sections to read: `context`, `cache`, `session`, `settings`. Name the ones you need; leave it out for all of them. A first read, and the first after a compaction or rewind, is answered whole whatever you name (`whole` says why). Settings can change outside this conversation (the menu, another session), so read `settings` again before you quote one.',
       "`context` is the main conversation's, also when a subagent asks (`of` says so then). `tokens`, `window` and `percent` are Claude Code's own figures, the status line's: the input of the last finished response against the model's window, so mid-turn they miss what the turn has added since; null when Claude Code has none. `autoCompactAt` is the token count at which Claude Code compacts on its own, null when that is off. `compactions` is the compactions cachebeat has seen in this conversation, with `lastCompactionMinutesAgo`. `lastMessageMinutesAgo` is the time since the current turn began (between turns, since the last turn ended).",
       "`cache` is whether this session's prompt cache is likely still warm, judged by the time since it was last read against its lifetime, as Claude Code judges it; only the next request confirms it. `state` is warm, cold, or unknown when no time of its last read is known; `ttl` is the lifetime, `1h` or `5m`, worked out on each call; then `lastReadMinutesAgo`, `minutesLeft` or `coldForMinutes`, and `contextTokens`: what the next message writes to the cache again if it is cold, the last request and its reply. `recacheInputTokens` is that written again at the model's cache-write price, in input-token equivalents.",
-      "`session`: `nextBeat` is `in 42m` (mid-turn too: counted from when the turn's last request was sent), `due now`, `50m after the request on its way was sent`, `after this turn`, `after the next turn` (nothing cached yet), `none needed` (a keep-alive time is set and the cache outlasts it), or null when off or skipping. `intervalMinutes` is the beat interval in effect, read-only: `set` changes it through `settings.interval` or `folder.interval`, and `intervalFrom` says which it follows (`folder`, `all folders`, or `auto`). `keepAliveUntil` (UTC), `keepAliveUntilLocal` (the user's clock: tell the user this one) and `keepAliveMinutesLeft` are set while the session has a keep-alive time. `skipping` says why beats skip this chat. `paused` says why beats wait for the user's next turn; only that turn ends it. A beat re-sends the conversation as last sent, with one line tagged `[cachebeat]`; it reads the cached conversation (`lastBeatReadTokens`) and writes only what wasn't cached (`lastBeatWrittenTokens`), both null before the first beat. `usageLimits` are the subscription's usage windows: `kind`, `percentUsed` and `resetsAt` (UTC, absent when unknown: tell the user it in their own time); empty off a subscription or before the first reading.",
+      "`session`: `nextBeat` is `in 42m` (mid-turn too: counted from when the turn's last request was sent), `due now`, `50m after the request on its way was sent`, `after this turn`, `after the next turn` (nothing cached yet), `none needed` (a keep-alive time is set and the cache outlasts it), or null when off or skipping. `intervalMinutes` is the beat interval in effect, read-only: `set` changes it through `settings.interval` or `folder.interval`, and `intervalFrom` says which it follows (`folder`, `all folders`, or `auto`). `keepAliveUntil` (UTC), `keepAliveUntilLocal` (the user's clock: tell the user this one) and `keepAliveMinutesLeft` are set while the session has a keep-alive time. `skipping` says why beats skip this chat. `paused` says why beats wait for the user's next turn; only that turn ends it. A beat re-sends the conversation as last sent, with one line tagged `[cachebeat]`; it reads the cached conversation (`lastBeatReadTokens`) and writes only what wasn't cached (`lastBeatWrittenTokens`), both null before the first beat. `coldGuard` is whether the cold guard asks in this session, and `coldGuardFrom` whether that is the session's own (`session`, set by `/cachebeat guard on|off` or `session.coldGuard`) or the settings'; `coldGuardAsked` is the messages it asked about in this conversation, and `coldSends` and `coldSendTokens` the messages sent on a cold cache and the tokens they cached again. `usageLimits` are the subscription's usage windows: `kind`, `percentUsed` and `resetsAt` (UTC, absent when unknown: tell the user it in their own time); empty off a subscription or before the first reading.",
       "`settings`: the values in effect here, this folder's own over those for all folders. `folder` is this session's folder (`path`) and the settings it has of its own (`own`); `allFolders`, present while it has any, has the settings for all folders; `defaults` has the default of each setting that differs from it.",
     ].join('\n\n'),
   ].join('\n\n'),
@@ -133,6 +136,10 @@ export const SET: ToolSpec = {
         anyOf: [{ type: 'number', minimum: parseDuration.min, maximum: parseDuration.max }, { type: 'null' }],
         description: `Keeps the cache warm for this many minutes from now, then turns this session off; turns beating on. null drops the time. (${range(parseDuration)})`,
       },
+      coldGuard: {
+        anyOf: [{ type: 'boolean' }, { type: 'null' }],
+        description: "The cold guard for this session alone, over settings.coldGuard; null follows the setting again.",
+      },
     }),
     settings: object(Object.fromEntries(KEYS.map(k => [k, field(k)]))),
     folder: {
@@ -147,7 +154,7 @@ export const SET: ToolSpec = {
  * settings to save for all folders, and this folder's own to save and drop (null drops every one).
  */
 export type SetChange = {
-  enabled?: boolean; keepAliveMinutes?: number | null; patch: Partial<BeatSettings>
+  enabled?: boolean; keepAliveMinutes?: number | null; coldGuard?: boolean | null; patch: Partial<BeatSettings>
   folder?: { own: Partial<BeatSettings>; drop: (keyof BeatSettings)[] } | null
 }
 
@@ -170,6 +177,9 @@ export function parseSet(input: { session?: unknown; settings?: unknown; folder?
       const m = v === null ? null : typeof v === 'number' ? (v >= parseDuration.min && v <= parseDuration.max ? Math.round(v) : undefined) : typeof v === 'string' ? parseDuration(v) : undefined
       if (m !== undefined) change.keepAliveMinutes = m
       else bad.push(`session.keepAliveMinutes takes ${range(parseDuration)} or null, not ${said(v)}`)
+    } else if (k === 'coldGuard') {
+      if (typeof v === 'boolean' || v === null) change.coldGuard = v
+      else bad.push(`session.coldGuard takes true, false or null, not ${said(v)}`)
     } else if (k === 'intervalMinutes') {
       // a session still holding the schema from before the interval became a setting
       bad.push('session has no intervalMinutes: the beat interval is settings.interval (or folder.interval), and session.keepAliveMinutes keeps the cache warm for that long')
@@ -224,6 +234,7 @@ export function summary(change: SetChange, s: BeatSettings, path: string) {
   const here = [
     change.keepAliveMinutes ? `on for ${minutesText(change.keepAliveMinutes)}` : change.enabled !== undefined && (change.enabled ? 'on' : 'off'),
     change.keepAliveMinutes === null && 'without a time limit',
+    change.coldGuard !== undefined && (change.coldGuard === null ? 'Cold guard as settings' : `Cold guard ${change.coldGuard ? 'on' : 'off'}`),
   ].filter(Boolean)
   const each = (patch: Partial<BeatSettings>) => (Object.entries(patch) as [keyof BeatSettings, Value][]).map(([key, v]) =>
     `${label(key)} ${HEX_KEYS.includes(key) ? v : shown(rowOf(key)!.row, v, s)}`,

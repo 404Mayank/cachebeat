@@ -20,6 +20,7 @@ export type Actions = {
   refuse: (text: string) => void // a typed value the setting doesn't take: says why in the footer
   resetRow: (key: keyof BeatSettings) => void // one setting back to its default; one of this folder's own dropped
   dropKeep: () => void // this session's keep-alive time dropped: it beats with no time limit
+  dropGuard: () => void // this session's own Cold guard dropped: it follows the setting
   toggleFolder: () => void // menu changes save for this folder alone, or all folders
 }
 /** What the pane draws from, besides the settings. */
@@ -30,6 +31,7 @@ export type View = {
   columns: number
   isOn: boolean // this session beats
   keepUntil: string | null // when this session's keep-alive time is up, as the clock reads it (/cachebeat 2h); null: no time limit
+  guard: boolean | null // this session's own Cold guard (/cachebeat guard on|off), over the setting; null: none
   autoMinutes: number // what `auto` beats at for this session's cache
   isTerminal: boolean // the terminal's keys walk the pane; a desktop's Tab and clicks move its own focus
   notice: string // the last action's outcome, shown in the footer
@@ -224,12 +226,15 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
   // kept in its list
   const back = v.focus === 'session' && v.keepUntil !== null ? { label: 'drop the time limit', run: act.dropKeep }
     : !focusedRow ? undefined
+    : focusedRow.key === 'coldGuard' && v.guard !== null ? { label: 'follow the setting in this session', run: act.dropGuard }
     : v.editsFolder ? (isOwn(focusedRow) ? { label: `back to ${shown(focusedRow, v.allFolders[focusedRow.key], s)} (all folders)`, run: () => act.resetRow(focusedRow.key) } : undefined)
     : s[focusedRow.key] !== DEFAULTS[focusedRow.key] ? { label: `back to ${shown(focusedRow, DEFAULTS[focusedRow.key], s)}`, run: () => act.resetRow(focusedRow.key) }
     : undefined
   const keys = `1-${TABS.length}`
   // a row's value, and where it comes from when not the settings on show: this folder's
   const valueOf = (r: Row) => {
+    // this session's own Cold guard is what applies here: the row shows it, and the setting's value once it's dropped
+    if (r.key === 'coldGuard' && v.guard !== null) return `${shown(r, v.guard, s)} · this session`
     const mark = !isOwn(r) ? '' : v.editsFolder ? ' · this folder' : ` · here: ${shown(r, v.own[r.key]!, s)}`
     return shown(r, s[r.key], s) + (r.key === 'interval' ? intervalTail(s, v) : '') + mark
   }

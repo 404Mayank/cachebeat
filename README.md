@@ -111,13 +111,14 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
 - To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
 - `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself. The tools read or change only cachebeat's own state and settings. Claude calls them without a permission prompt, and each call that goes through shows as one line in the transcript.
+- With **Cold guard** on, cachebeat asks before sending your message to a session whose cache has gone cold, whether beating is on or not. Messages nobody can be asked about (scheduled tasks, other sessions, `claude -p`, Slack and other channels) are sent as usual, and so are messages from Remote Control: before sending from your phone or the web to a session that may have gone cold, run `/cachebeat` there to see.
 - cachebeat also sees `/model` switches, without changing them, so beats can wait for your next message or warm the new model, as **After /model** says.
 
 ## Privacy
 
 - cachebeat collects no personal data and has no telemetry. It sends nothing to its author or anyone else.
 - A beat is a request to Anthropic's API, made by Claude Code with your account, the same way your own messages are sent.
-- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. So does each conversation's on or off, keep-alive time and beat count, by its session id, for 30 days from its last change, so that a resumed conversation picks up as you left it. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
+- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. So does each conversation's on or off, keep-alive time, beat count and cold guard switch, by its session id, for 30 days from its last change, so that a resumed conversation picks up as you left it. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
 
 ## Commands
 
@@ -128,6 +129,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 | `/cachebeat off` | Turns it off for this session |
 | `/cachebeat <time>` | Keeps the cache warm for that long from now, then turns this session off: `/cachebeat 2h`, `45m`, `1h30m` (5 minutes to 48 hours; the unit is required) |
 | `/cachebeat now` | Beats right away |
+| `/cachebeat guard on` / `off` | Turns the cold guard on or off for this session, whatever **Cold guard** says |
 | `/cachebeat global on` / `off` | Sets whether new sessions start on, in all folders, and applies it here too |
 | `/cachebeat global <minutes>` | Sets the interval for all folders, and turns it on here |
 | `/cachebeat local on` / `off` / `<minutes>` | The same, for sessions in this folder only |
@@ -193,12 +195,13 @@ A folder is where the session started, or where `/cd` or a worktree move took it
 </details>
 
 <details>
-<summary><b>Limits</b>: when beating stops or skips</summary>
+<summary><b>Limits</b>: when beating stops or skips, and the cold guard</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
 | Stop after idle | Stops beating after this long without a message from you. A session with a keep-alive time (`/cachebeat 2h`) keeps to that instead | 8 hours |
 | Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop | start on your next message |
+| Cold guard | Asks before sending a message to a session whose cache has gone cold, saying how long it's been cold and how many tokens sending it caches again. It asks about chats from a minimum size. A question left unanswered doesn't send the message, or sends it after a few minutes if you choose | on, from 20k tokens, don't send |
 | Stop at usage | Stops once any of your usage limits reaches this percentage | 90% |
 | Skip small chats | Skips beating chats under a minimum size | off, 20k tokens |
 
