@@ -1227,7 +1227,8 @@ export const register: Register = on => {
       await noteColdSend($, '', coldFor, size)
       return next(e)
     }
-    if (isTimedOut) {
+    // only no answer at all is the timeout's: a label or free text that landed as the timer fired still decides
+    if (answer === null && isTimedOut) {
       await noteColdSend($, ` after ${wait}m unanswered`, coldFor, size)
       return next(e)
     }
