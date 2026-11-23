@@ -350,6 +350,15 @@ Claude Code 2.1.329, `--model haiku`, tmux, `step-guard`'s tree loaded from an a
 - **After `/model`, the guard reads the cache as warm** while the new model's cache is empty: `lastWarm` is the old model's last read, and the guard doesn't look at `warmModel`. Left as is (a decision for the user, on the handoff's list).
 - **The installed cachebeat, and the trap in the handoff: `--settings '{"enabledPlugins":{"cachebeat@cachebeat":false}}'` is not enough.** The user has a second copy, synced to the account, at `~/.claude/plugins/synced/<ids>/cachebeat~g2`, which loads as `cachebeat@synced` (the 0.9.3 marketplace copy is the one the key disables: "will NOT register, plugin is disabled"). In a session loading no copy of ours, `cachebeat@synced`'s hooks module loaded and registered, which explains G1–G3's Haiku knowing cachebeat's settings. With `"cachebeat@synced": false` added, its `hooks.json` was still read but no module loaded and nothing registered (one run each, zero turns; inferred that the key is what did it). A `--plugin-dir` copy named `cachebeat` shadows both: this step's run showed only `cachebeat@inline` modules. **For a probe loading no copy:** `--settings '{"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false}}'`, and check the debug log for `hooks module cachebeat@`.
 
+### The Status tab (step 6, 2026-11-23)
+
+- **The pane's height follows the terminal.** At 80×40 on 2.1.329 an inline pane showed 11 body rows, so Status (13 rows with its note and footer) lost its note's second line and the footer; at 80×60 it showed whole. Status has nothing to focus, so the focus can't scroll it; PageDown scrolls the window. The Beating tab (10 rows) fits at 40.
+- **Its width was 76 at an 80-column terminal** (`bodyColumns`), the figure the mock-up inferred.
+- **`tickAtom` is bumped only by `say`, `restartClocks` and the pane's ticker,** not by the step timers, though the plan said so. The Status tab needs its own: nothing redraws a pane while beating is off or paused.
+- **A mounted pane in the kit re-renders on an atom change, not on `find`:** the ticker test fails without the ticker.
+- **The kit's `$.ui.scroll` is the plugin's call** (`to`, `in`), and doesn't raise a person's scroll to the hook, so the arrows' walk along the tab bar can't be driven there; `$.ui.focus` with `origin: { kind: 'person' }` can.
+- **Bare `/cachebeat` mid-turn opens no pane,** because the pane holds toasts: the toast of its line (what the user sees mid-turn) would draw only when the pane closed.
+
 ## The lifetime counts from a request's start (found live, 2026-11-14)
 
 Anthropic's docs say the cache's lifetime "is measured from the start of the request that writes or reads the cache entry, not from the end of its response". Observed, one trial and one control, Claude Code 2.1.322, Haiku, `claude -p --resume`, the five-minute cache forced with `FORCE_PROMPT_CACHING_5M=1` (the writes came back as `ephemeral_5m_input_tokens`), cachebeat disabled, a 52k-token unique filler as the first message:

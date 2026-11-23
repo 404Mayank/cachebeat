@@ -1,6 +1,6 @@
 # 0.10.0: cache state, keep-alive time, resume, cold guard, Status and Stats
 
-Status (2026-11-23): steps 0–5 are built, reviewed and merged into `dev`: 0, 1, 2, 2b, 3, 3b, tokens-only, the request-start fix, the retry fix, compat, midturn, 3c and 4. 0.9.3 (step 1 with the request-start, compat and retry fixes) shipped on 2026-11-23. The Status and Stats mock-ups (items 5 and 7) are redrawn in tokens and approved by the orchestrator. The guard's choices (item 4) were answered by the user on 2026-11-23 (handoff, "Answered on 2026-11-23"), and G1–G3 ran (mods-gotchas). Step 5 (the cold guard) is built on `step-guard` and waits for review; it was checked live (mods-gotchas, "Step 5 live"). Where to start: notes/handoff.md.
+Status (2026-11-23): steps 0–5 are built, reviewed and merged into `dev`: 0, 1, 2, 2b, 3, 3b, tokens-only, the request-start fix, the retry fix, compat, midturn, 3c and 4. 0.9.3 (step 1 with the request-start, compat and retry fixes) shipped on 2026-11-23. The Status and Stats mock-ups (items 5 and 7) are redrawn in tokens and approved by the orchestrator. The guard's choices (item 4) were answered by the user on 2026-11-23 (handoff, "Answered on 2026-11-23"), and G1–G3 ran (mods-gotchas). Step 5 (the cold guard) is built on `step-guard` and waits for review; it was checked live (mods-gotchas, "Step 5 live"). Step 6 (the Status page) is built on `step-status` and waits for review; it was looked at live on 2.1.329 (mods-gotchas, "The Status tab"). Where to start: notes/handoff.md.
 
 **Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 passed on 2026-11-23, and P8 ran in step 4 the same day.
 
@@ -1077,6 +1077,17 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 - **Delivers:** the pane's Status tab, and bare `/cachebeat` opening it.
 - **Depends on:** steps 1–5 (everything it shows), and the look pass (item 5, "What steps 6 and 7 wait on"). The screenshots arrived.
+- **Built 2026-11-23** on `step-status` (the commit "cachebeat 0.10.0 (step 6)"), with the eight choices as recommended. Departures from item 5:
+  - **Bare `/cachebeat` opens the pane on Status and still answers its line** (the cache's state included, which step 5 added and the README's Remote Control advice relies on). **Typed mid-turn it opens no pane:** the pane holds toasts (`holdToasts`), so the line's toast would draw only once the pane closed; the toast is the feedback there. A bare `/cachebeat` typed while the pane is open puts it back on Status (not reachable in the terminal, where the pane holds the keys).
+  - **The page redraws once a minute by a ticker of its own,** not "on each step timer": nothing bumps `tickAtom` on a step. While beating is off or paused no step timer runs at all, and the cold age would freeze. The pane's one ticker (`paneEvery` records its period) runs at `STEP` on the Status tab and at the animation's frame time on a tab with a preview.
+  - **`READ_ONLY` and `PAGES`** (`settings.ts`): `PAGES = [...READ_ONLY, ...TABS]`. Step 7 adds Stats as one entry in `READ_ONLY` and a branch beside Status's in `settingsPane`; it also needs a case in `factsOf` and the ticker's condition (`page.tab === 'summary'`) in the `ui.render` hook. `firstOf` answers `tab:<id>` for a read-only page, so Enter and a click leave the focus on the tab bar. `tabBeside(focus, by)` is the arrow's step along the tab bar, pulled out of the `ui.scroll` hook so a test can reach it.
+  - **The rows are pure** (`hooks/status.ts`, `statusRows(facts)`), over the same figures `state` reports: `factsOf($)` (register.tsx) calls `cacheOf`, `sessionOf` and `contextOf`, plus `$.session.usage()` for the limits. The render hook does not call `stateOf`: its `syncSettings` can publish, restart the clocks and reschedule from inside a render.
+  - **Wording the mock-up didn't draw:** a cache under a minute old reads `last read under 1m ago`; Beating says `beats skip · <why>`, `beats wait for your next message · <why>` or `no beat needed`, and the other `nextBeat` forms follow `next beat …`; a session's own guard reads `on · this session · asks from 20k tokens`; no figure reads `not counted yet` (Size) and `none yet` (Last message).
+  - **The Usage row keeps `beats stop at N%` always:** `stopAtUsage` has no off value (80, 90 or 100).
+  - **The hotkeys are 1–6,** not 1–7: Stats isn't built. The footer is the tab bar's, as drawn, though Enter on Status goes nowhere.
+  - **The width is the pane's `bodyColumns`.** Live on 2.1.329 in an 80-column terminal it was 76, as the mock-up inferred.
+  - **Test 633** ("six tabs" asserting five) is now six tabs and asserts six.
+  - Not pinned by a test: the `ui.scroll` hook's use of `tabBeside` (the kit can't raise a person's scroll; `$.ui.scroll` is the plugin's call). `tabBeside` itself is unit-tested.
 
 ### Step 7: Stats (item 7, provisional)
 
