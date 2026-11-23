@@ -7,9 +7,10 @@ import { PANE, cut } from './pane'
 import { TTL_MS, viewOf } from './cache'
 import { ratiosOf } from './prices'
 import { DEADLINE, IDLE, RETRY, STEP, clockText, coldOutcome, fmt, restored } from './register'
+import { beatAdd, statsText, addTo, dayAgo, dayKey, emptyDay, stripOf, signed, statsLines, keptAdd, factsFrom } from './stats'
 import type { StatusFacts } from './status'
 import { STATUS_NOTE, statusRows } from './status'
-import { DEFAULTS, EPISODE, SESSION_HELP, accept, glyphs, lookOf, minutesText, mixedMode, normalize, parseDuration, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans, tabBeside } from './settings'
+import { DEFAULTS, EPISODE, SESSION_HELP, accept, glyphs, lookOf, minutesText, mixedMode, normalize, parseDuration, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans, tabBeside, PAGES } from './settings'
 import { SET, STATE } from './tools'
 
 /** The tools as the model calls them: `mcp__<plugin>__<name>`, spelled out as register.tsx's matchers are. */
@@ -65,7 +66,9 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   for (const [k, v] of Object.entries(world.stored ?? {})) store.set(k, v)
   // a key whose `nth` read from now answers once `until` resolves
   const getsHeld = new Map<string, { nth: number; until: Promise<void>; parked: () => void }>()
+  const gets: string[] = [] // the keys read from the store
   on('store.get', async (_$, e) => {
+    gets.push(e.key)
     const held = getsHeld.get(e.key)
     if (held && --held.nth === 0) {
       getsHeld.delete(e.key)
@@ -77,7 +80,11 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
   on('store.keys', () => ({ value: [...store.keys()] }) as never)
   on('store.delete', (_$, e) => (store.delete(e.key), { value: undefined }) as never)
   on('session.id', () => ({ value: world.id ?? 's1' }) as never)
-  on('store.set', (_$, e) => (store.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never)
+  let isFull = false // the store refuses a conversation's record, as one over its size limit does
+  on('store.set', (_$, e) => {
+    if (isFull && e.key.startsWith('session:')) throw new Error('the store is full')
+    return (store.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }) as never
+  })
   const forks: number[] = []
   const logs: string[] = []
   const toasts: string[] = []
@@ -175,7 +182,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     nextQuestion: () => new Promise<void>(r => (isAsked = r)), breakUsage: () => (isUsageBroken = true),
     // resolves once the read is parked
     holdGet: (key: string, until: Promise<void>, nth = 1) => new Promise<void>(parked => getsHeld.set(key, { nth, until, parked })),
-    clock, forks, prompts, logs, toasts, tails, opened, store, specs, reads, lengths, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    clock, forks, prompts, logs, toasts, tails, opened, gets, fillStore: () => (isFull = true), store, specs, reads, lengths, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
     add: (role: 'user' | 'assistant', text: string) => (chat = [...chat, said(role, text)]),
   }
@@ -329,7 +336,7 @@ test('commands answer for the state they find', async ($: Engine, on: On) => {
   expect(await cmd($, 'on')).toBe('this session: on, every 50m idle · starts after your next turn')
   expect(await cmd($, 'on')).toBe('this session: already on, every 50m idle · starts after your next turn')
   expect(await cmd($, 'off')).toBe('this session: off')
-  expect(await cmd($, 'bogus')).toBe('usage: on, off, a time like 2h, now, guard on|off, settings · global or local: on, off, minutes · local reset')
+  expect(await cmd($, 'bogus')).toBe('usage: on, off, a time like 2h, now, guard on|off, stats, settings · global or local: on, off, minutes · local reset')
 })
 
 test('a global default on starts a new session beating', async ($: Engine, on: On) => {
@@ -723,15 +730,18 @@ test('on its own line the heart takes the color', async ($: Engine, on: On) => {
   expect(texts[2]?.text).toBe(' ×0')
 })
 
+/** The day a 90k-token beat on Opus 5.5 leaves: it read 90,000 at a twentieth of an input token each. */
+const BEAT_DAY = { ...emptyDay(), beats: 1, read: 90_000, beatCost: 4_500 }
+
 const buttons = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
   (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith(prefix))
 
-test('the settings pane: six tabs (Status and five of settings), two choices flip in place, more open a list, help for what\'s focused', async ($: Engine, on: On) => {
+test('the settings pane: seven tabs (Status, Stats and five of settings), two choices flip in place, more open a list, help for what\'s focused', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await cmd($, 'settings')).toBe('settings opened')
   expect(await cmd($, 'config')).toBe('settings opened') // unlisted, for the hand that types it
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect(await buttons(ui, 'tab:')).toEqual(['tab:summary', 'tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:alerts'])
+  expect(await buttons(ui, 'tab:')).toEqual(['tab:summary', 'tab:stats', 'tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:alerts'])
   expect(await ui.find({ key: 'session' })).toBeDefined() // `settings` opens on Beating
   expect([(await ui.find({ key: 'beatNow' }))?.text, (await ui.find({ key: 'reset' }))?.text]).toEqual(['Beat now', 'Reset all'])
   expect((await ui.find({ key: 'folder' }))?.text).toBe('Settings for          all folders')
@@ -1375,7 +1385,7 @@ test('every form of the command typed over a running turn toasts its reply, a mi
   const replies: string[] = []
   for (const form of forms) replies.push((await cmd($, form))!)
   expect(toasts).toEqual(replies.map(r => `cachebeat: ${r}`))
-  expect(replies).toContain(`usage: on, off, a time like 2h, now, guard on|off, settings · global or local: on, off, minutes · local reset`) // banana
+  expect(replies).toContain(`usage: on, off, a time like 2h, now, guard on|off, stats, settings · global or local: on, off, minutes · local reset`) // banana
 })
 
 test('the settings command typed over a running turn toasts nothing: the pane it opens holds toasts until it closes', async ($: Engine, on: On) => {
@@ -1469,7 +1479,7 @@ test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and
   await ui.press({ key: 'opt:1' }) // picked: back on the tab, the focus left alone
   expect(moved().slice(before)).toEqual(['opt'])
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
-  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-6 tabs · esc closes')).toBe(true)
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-7 tabs · esc closes')).toBe(true)
   await ui.unmount()
 })
 
@@ -1550,7 +1560,7 @@ test('r takes the focused setting back to its default; a custom value stays in i
   await ui.unmount()
 })
 
-const USAGE = 'usage: on, off, a time like 2h, now, guard on|off, settings · global or local: on, off, minutes · local reset'
+const USAGE = 'usage: on, off, a time like 2h, now, guard on|off, stats, settings · global or local: on, off, minutes · local reset'
 
 test('a folder\'s own settings win over all folders\', for starting on and the interval', async ($: Engine, on: On) => {
   const { clock, forks } = await setup($, on, { folders: { [HOME]: { defaultOn: true, interval: 5 } } })
@@ -2261,12 +2271,12 @@ test('a conversation\'s record is written when its on/off, keep-alive time or be
   const { clock, store } = await setup($, on, { settings: { interval: 3 } })
   expect(store.has('session:s1')).toBe(false) // a new session as its settings start it: nothing to keep
   await cmd($, '2h')
-  expect(store.get('session:s1')).toEqual({ v: 1, at: 0, enabled: true, keepUntil: 120 * M, beats: 0, warm: null, guard: null })
+  expect(store.get('session:s1')).toEqual({ v: 1, at: 0, enabled: true, keepUntil: 120 * M, beats: 0, warm: null, guard: null, stats: {} })
   await clock.advance(1 * M)
   await $.turn.complete(turn) // schedules and saves, changing none of them
   expect(store.get('session:s1')).toMatchObject({ at: 0 })
   await clock.advance(3 * M)
-  expect(store.get('session:s1')).toEqual({ v: 1, at: 4 * M, enabled: true, keepUntil: 120 * M, beats: 1, warm: 4 * M, guard: null }) // the beat's read
+  expect(store.get('session:s1')).toEqual({ v: 1, at: 4 * M, enabled: true, keepUntil: 120 * M, beats: 1, warm: 4 * M, guard: null, stats: { [dayKey(0)]: BEAT_DAY } }) // the beat's read
   await cmd($, 'off')
   expect(store.get('session:s1')).toMatchObject({ enabled: false, keepUntil: null, beats: 1 })
 })
@@ -2276,11 +2286,11 @@ test('/clear and /resume leave the record of the conversation left behind as it 
   await cmd($, 'on')
   await $.turn.complete(turn)
   await clock.advance(3 * M)
-  const left = { v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 1, warm: 3 * M, guard: null }
+  const left = { v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 1, warm: 3 * M, guard: null, stats: { [dayKey(0)]: BEAT_DAY } }
   expect(store.get('session:s1')).toEqual(left)
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } }) // its count back to zero
   await $.classic.SessionStart({ source: 'clear', session_id: 's3' } as never)
-  expect(store.get('session:s3')).toEqual({ v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 0, warm: null, guard: null })
+  expect(store.get('session:s3')).toEqual({ v: 1, at: 3 * M, enabled: true, keepUntil: null, beats: 0, warm: null, guard: null, stats: {} })
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(store.get('session:s3')).toMatchObject({ beats: 1 })
@@ -2766,6 +2776,10 @@ test('ratiosOf: each model has its own read ratio, and near-identical ids do not
   expect([read('claude-opus-5-5'), read('claude-opus-5'), read('claude-opus-4-8')]).toEqual([0.05, 0.1, 0.1])
   expect([read('claude-sonnet-5-5'), read('claude-sonnet-5'), read('claude-sonnet-4-6')]).toEqual([0.05, 0.1, 0.1])
   expect([read('claude-haiku-5-5'), read('claude-haiku-4-5')]).toEqual([0.1, 0.1])
+})
+
+test('ratiosOf: Fable 5.2 and Mythos 5.2 are listed, from the published rates: a cache read is 0.2 of an $8 input', () => {
+  for (const m of ['claude-fable-5-2', 'claude-mythos-5-2']) expect(ratiosOf(m)).toEqual({ read: 0.025, write5m: 1.25, write1h: 2, isListed: true })
 })
 
 test('ratiosOf: writes are 1.25× input for five minutes and 2× for an hour, on every listed model', () => {
@@ -3294,7 +3308,7 @@ test("a beat finishing after a newer one has entered leaves that one's claim alo
   await t.clock.advance(2 * M)
   const first = cmd($, 'now') // answered; its schedule() waits on the time, the claim already let go
   await t.clock.settle()
-  void cmd($, 'now') // a newer beat holds the claim, on its way
+  void cmd($, 'now').catch(() => {}) // a newer beat holds the claim, on its way; the engine's end rejects its parked promise
   await isParked
   release() // beat 1 ends while beat 2 holds the claim
   await first
@@ -3768,15 +3782,19 @@ test('Status takes the pane\'s real width, and has no rows to focus or press', a
   await ui.unmount()
 })
 
-test('the tab hotkeys reach every tab, Status first, and the footer counts them', async ($: Engine, on: On) => {
+test('the tab bar fits the pane\'s 76 cells on one line: a row more would cut the page\'s footer at 40 rows', () => {
+  expect(PAGES.map((p, i) => `${i + 1}: ${p.title}`).join(' ').length).toBeLessThanOrEqual(76) // the engine draws each hotkey as `N: ` before the title
+})
+
+test('the tab hotkeys reach every tab, Status and Stats first, and the footer counts them', async ($: Engine, on: On) => {
   await setup($, on)
   await cmd($, '')
   const ui = await $.ui.mount(SETTINGS_PANE)
   const tabs = (await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('tab:'))
   expect(tabs.map(b => [b.key, b.props?.hotkey])).toEqual([
-    ['tab:summary', '1'], ['tab:beating', '2'], ['tab:limits', '3'], ['tab:heart', '4'], ['tab:status', '5'], ['tab:alerts', '6'],
+    ['tab:summary', '1'], ['tab:stats', '2'], ['tab:beating', '3'], ['tab:limits', '4'], ['tab:heart', '5'], ['tab:status', '6'], ['tab:alerts', '7'],
   ])
-  expect((await ui.findAll({ type: 'Text' })).some(x => x.text === '↑↓ tabs · enter or 1-6 opens · esc closes')).toBe(true)
+  expect((await ui.findAll({ type: 'Text' })).some(x => x.text === '↑↓ tabs · enter or 1-7 opens · esc closes')).toBe(true)
   await ui.press({ key: 'tab:limits' })
   expect(await ui.find({ key: 'row:skipSmall' })).toBeDefined()
   await ui.press({ key: 'tab:summary' }) // a press on Status shows it, with nothing to go into
@@ -3787,7 +3805,8 @@ test('the tab hotkeys reach every tab, Status first, and the footer counts them'
 
 test('the arrows along the tab bar walk Status in, and wrap from Alerts to it and back', () => {
   expect(['tab:alerts', 'tab:summary', 'tab:beating'].map((from, i) => tabBeside(from, i === 0 ? 1 : i === 1 ? -1 : 1).id)).toEqual(['summary', 'alerts', 'limits'])
-  expect(tabBeside('tab:summary', 1).id).toBe('beating')
+  expect(tabBeside('tab:summary', 1).id).toBe('stats')
+  expect(tabBeside('tab:stats', -1).id).toBe('summary')
 })
 
 test('Status counts on while beating is off and nothing else redraws it: the cold time moves each step', async ($: Engine, on: On) => {
@@ -3799,4 +3818,282 @@ test('Status counts on while beating is off and nothing else redraws it: the col
   await clock.advance(STEP)
   expect((await statusOf(ui)).Cache).toBe('cold for 2h 25m (1h TTL, last read 3h 25m ago)')
   await ui.unmount()
+})
+
+// the Stats tab
+
+/** The Stats page as drawn: its lines, and a row's four columns. */
+const statsTexts = async (ui: { findAll: (q: { type: string }) => Promise<{ text?: string }[]> }) => (await ui.findAll({ type: 'Text' })).map(x => x.text ?? '')
+const columns = (texts: string[], label: string) => {
+  const line = texts.find(x => x.startsWith(label))
+  return line === undefined ? undefined : (line.slice(23).match(/.{1,13}/g) ?? []).map(x => x.trim())
+}
+const STATS_PANE = SETTINGS_PANE
+const day = (more: Partial<ReturnType<typeof emptyDay>>) => ({ ...emptyDay(), ...more })
+const stepped = async ($: Engine, id: string) => {
+  await $.turn.start({ text: 'hi', turnId: id })
+  await step($, id, 0)
+  await $.turn.complete({ ...turn, turnId: id })
+}
+
+test('a beat adds to today: its tokens, and their weight by its model and the cache\'s lifetime', async ($: Engine, on: On) => {
+  const { clock, store } = await setup($, on, { settings: { interval: 3 }, fork: [{ ...ok, usage: usage(90_000, 1_200) }] })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  // Opus 5.5 reads at a twentieth of an input token, a one-hour write at twice
+  expect(store.get('session:s1')).toMatchObject({ stats: { [dayKey(0)]: day({ beats: 1, read: 90_000, wrote: 1_200, beatCost: 90_000 * 0.05 + 1_200 * 2 }) } })
+})
+
+test('a five-minute cache weighs a write at 1.25', async ($: Engine, on: On) => {
+  const { clock, store } = await setup($, on, { env: { FORCE_PROMPT_CACHING_5M: '1' }, settings: { interval: 3 }, fork: [{ ...ok, usage: usage(0, 1_000) }] })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  expect((store.get('session:s1') as { stats: Record<string, { beatCost: number }> }).stats[dayKey(0)]!.beatCost).toBe(1_250)
+})
+
+test('a model the price table lacks is weighed by the common ratios, and the day says so', async ($: Engine, on: On) => {
+  const { clock, store, switchTo } = await setup($, on, { settings: { interval: 3 } })
+  switchTo('claude-future-9')
+  await cmd($, 'on')
+  await $.turn.complete({ ...turn, usage: { ...turn.usage, model: 'claude-future-9' } })
+  await clock.advance(3 * M)
+  expect(store.get('session:s1')).toMatchObject({ stats: { [dayKey(0)]: day({ beats: 1, read: 90_000, beatCost: 9_000, common: true }) } })
+})
+
+test('a turn that comes back to a cache only beats kept warm is counted, with the re-cache it avoided', async ($: Engine, on: On) => {
+  const { clock, store } = await setup($, on)
+  await cmd($, 'on')
+  await stepped($, 't1')
+  await clock.advance(110 * M) // beats at 50m and 100m; the cache alone would have lapsed at 60m
+  await $.turn.start({ text: 'back', turnId: 't2' })
+  await step($, 't2', 0)
+  const days = (store.get('session:s1') as { stats: Record<string, ReturnType<typeof emptyDay>> }).stats
+  expect(days[dayKey(110 * M)]).toMatchObject({ beats: 2, kept: 1, avoided: 90_000 * (2 - 0.05) })
+})
+
+test('a turn the cache would have reached without the beats is not counted as kept', async ($: Engine, on: On) => {
+  const { clock, store } = await setup($, on)
+  await cmd($, 'on')
+  await stepped($, 't1')
+  await clock.advance(55 * M) // one beat at 50m; the cache had 5m left without it
+  await $.turn.start({ text: 'back', turnId: 't2' })
+  await step($, 't2', 0)
+  expect(store.get('session:s1')).toMatchObject({ stats: { [dayKey(55 * M)]: { beats: 1, kept: 0, avoided: 0 } } })
+})
+
+test('a turn that found the cache gone, though beats ran, is not counted as kept', async ($: Engine, on: On) => {
+  const { clock, store, reads } = await setup($, on)
+  await cmd($, 'on')
+  await stepped($, 't1')
+  await clock.advance(110 * M)
+  reads.push(usage(0, 90_000)) // it wrote the whole conversation
+  await $.turn.start({ text: 'back', turnId: 't2' })
+  await step($, 't2', 0)
+  expect(store.get('session:s1')).toMatchObject({ stats: { [dayKey(110 * M)]: { beats: 2, kept: 0 } } })
+})
+
+test('a later request of a turn is not a turn coming back', async ($: Engine, on: On) => {
+  const { clock, store } = await setup($, on)
+  await cmd($, 'on')
+  await stepped($, 't1')
+  await clock.advance(110 * M)
+  await $.turn.start({ text: 'back', turnId: 't2' })
+  await step($, 't2', 0)
+  await step($, 't2', 1)
+  expect(store.get('session:s1')).toMatchObject({ stats: { [dayKey(110 * M)]: { kept: 1 } } })
+})
+
+test('a long turn with beats mid-turn is no turn coming back: only its first request counts', async ($: Engine, on: On) => {
+  const { clock, store } = await setup($, on)
+  await cmd($, 'on')
+  await stepped($, 't1')
+  await clock.advance(5 * M)
+  await $.turn.start({ text: 'run it', turnId: 't2' })
+  await step($, 't2', 0) // back inside the cache's lifetime: nothing kept
+  await clock.advance(110 * M) // a tool runs on, and the quiet turn gets beats
+  await step($, 't2', 1) // its next request, past a lifetime from the turn before
+  const days = (store.get('session:s1') as { stats: Record<string, ReturnType<typeof emptyDay>> }).stats
+  expect(days[dayKey(115 * M)]!.beats).toBeGreaterThan(0)
+  expect(days[dayKey(115 * M)]).toMatchObject({ kept: 0, avoided: 0 })
+})
+
+test('the guard\'s counts are kept by day in the conversation\'s record, and state reads them from it', async ($: Engine, on: On) => {
+  const { clock, store, answers } = await coldSetup($, on)
+  answers.push('Send')
+  await submit($)
+  expect(store.get('session:s1')).toMatchObject({ stats: { [dayKey(clock.now())]: { held: 1, cold: 1, coldTokens: 184_000 } } })
+  const { session } = await stateNow($)
+  expect([session.coldGuardAsked, session.coldSends, session.coldSendTokens]).toEqual([1, 1, 184_000])
+})
+
+test('a resumed conversation takes its counts back from its record', async ($: Engine, on: On) => {
+  const stats = { [dayKey(0)]: day({ held: 3, cold: 2, coldTokens: 400_000, beats: 4 }) }
+  const { start } = await setup($, on, { chat: CHAT, stored: { 'session:s1': { ...on2, beats: 4, stats } }, isStartLeft: true })
+  await start()
+  const { session } = await stateNow($)
+  expect([session.coldGuardAsked, session.coldSends, session.coldSendTokens, session.beats]).toEqual([3, 2, 400_000, 4])
+})
+
+test('a /clear starts the conversation\'s counts again', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { stored: { 'session:s1': { ...on2, stats: { [dayKey(0)]: day({ held: 3 }) } } } })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 's3' } as never)
+  expect((await stateNow($)).session.coldGuardAsked).toBe(0)
+  expect(store.get('session:s3')).toMatchObject({ stats: {} })
+})
+
+test('addTo sums into today, drops the days past thirty, and leaves what it was given alone', () => {
+  const now = Date.UTC(2026, 10, 23, 12)
+  const old = { [dayAgo(now, 29)]: day({ beats: 1 }), [dayAgo(now, 30)]: day({ beats: 7 }) }
+  const out = addTo(old, now, { beats: 2, beatCost: 10 })
+  expect(Object.keys(out).sort()).toEqual([dayAgo(now, 29), dayKey(now)].sort())
+  expect(out[dayKey(now)]).toMatchObject({ beats: 2, beatCost: 10 })
+  expect(addTo(out, now, { beats: 1, common: true })[dayKey(now)]).toMatchObject({ beats: 3, common: true })
+  expect(Object.keys(old)).toHaveLength(2) // not mutated
+})
+
+test('a net draws its sign: a plus, a real minus, or a bare zero; a day of beats is a block, none a dot', () => {
+  expect([signed(1_200_000), signed(-30_000), signed(0), signed(0.4)]).toEqual(['+1.2M', '−30k', '0', '0'])
+  expect(stripOf([0, 1, 4, 8])).toBe('·▁▄█')
+  expect(stripOf([0, 0])).toBe('··')
+})
+
+test('the Stats page adds up every session\'s days, by span, and this session\'s own', async ($: Engine, on: On) => {
+  const stored = {
+    'session:other': { ...on2, stats: {
+      [dayKey(0)]: day({ beats: 4, beatCost: 15_500, kept: 1, avoided: 170_000, held: 2, cold: 1, coldTokens: 184_000 }),
+      [dayAgo(0, 3)]: day({ beats: 10, beatCost: 50_000, kept: 2, avoided: 340_000 }),
+      [dayAgo(0, 40)]: day({ beats: 99, beatCost: 9_000_000 }), // past thirty days: not counted
+    } },
+  }
+  const { clock } = await setup($, on, { settings: { interval: 3 }, stored })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(3 * M)
+  await cmd($, 'stats')
+  const ui = await $.ui.mount(STATS_PANE)
+  const texts = await statsTexts(ui)
+  expect((texts[1]!.slice(23).match(/.{1,13}/g) ?? []).map(x => x.trim())).toEqual(['Today', '7 days', '30 days', 'This session'])
+  expect(columns(texts, 'Beats · cost')).toEqual(['5 · 20k', '15 · 70k', '15 · 70k', '1 · 5k'])
+  expect(columns(texts, 'Kept warm · avoided')).toEqual(['1 · 170k', '3 · 510k', '3 · 510k', '0'])
+  expect(columns(texts, 'Net')).toEqual(['+150k', '+440k', '+440k', '−5k']) // this session paid for a beat and had no turn back
+  expect(columns(texts, 'Cold sends · re-cached')).toEqual(['1 · 184k', '1 · 184k', '1 · 184k', '0'])
+  expect(columns(texts, 'Guard asked')).toEqual(['2', '2', '2', '0'])
+  await ui.unmount()
+})
+
+test('the Stats page with no records at all is zeros, and no NaN', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, 'stats')
+  const ui = await $.ui.mount(STATS_PANE)
+  const texts = await statsTexts(ui)
+  expect(texts.join('\n')).not.toMatch(/NaN|undefined/)
+  expect(columns(texts, 'Beats · cost')).toEqual(['0', '0', '0', '0'])
+  expect(columns(texts, 'Net')).toEqual(['0', '0', '0', '0'])
+  expect(texts.find(x => x.startsWith('Beats by day'))).toBe(`${'Beats by day'.padEnd(23)}${'·'.repeat(30)} 30 days ago → today`)
+  await ui.unmount()
+})
+
+test('the Stats page says when a figure used the common rates', async ($: Engine, on: On) => {
+  await setup($, on, { stored: { 'session:other': { ...on2, stats: { [dayKey(0)]: day({ beats: 1, beatCost: 100, common: true }) } } } })
+  await cmd($, 'stats')
+  const ui = await $.ui.mount(STATS_PANE)
+  expect((await statsTexts(ui)).some(x => x === 'A model missing from the price table was weighed at the common rates.')).toBe(true)
+  await ui.unmount()
+})
+
+test('the Stats page fits 40 rows: eleven, one rule, and every line under the pane\'s 76 cells', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, 'stats')
+  const ui = await $.ui.mount(STATS_PANE)
+  const texts = await statsTexts(ui)
+  expect(texts).toHaveLength(10) // the rule, the header, five rows, the strip, the note, the footer: with the tab bar, eleven
+  expect(texts.filter(x => /^─+$/.test(x))).toHaveLength(1)
+  expect(Math.max(...texts.filter(x => !/^─+$/.test(x)).map(x => x.length))).toBeLessThanOrEqual(76)
+  await ui.unmount()
+})
+
+test('/cachebeat stats opens Stats and answers a line; mid-turn, or from a remote client, no pane', async ($: Engine, on: On) => {
+  const { opened } = await setup($, on)
+  expect(await cmd($, 'stats')).toBe('30 days: 0 beats cost 0, 0 turns kept warm avoided 0, net 0 input tokens · this session 0')
+  expect(statsText(factsFrom([], { [dayKey(0)]: day({ beats: 1, kept: 1 }) }, 0))).toContain('1 beat cost 0, 1 turn kept warm')
+  expect(opened).toEqual([PANE])
+  const ui = await $.ui.mount(STATS_PANE)
+  expect((await statsTexts(ui)).some(x => x.startsWith('Kept warm · avoided'))).toBe(true)
+  await ui.unmount()
+  const r = await $.command.run({ command: 'cachebeat', args: 'stats', origin: { kind: 'bridge' }, presentation: { isFullscreen: false, columns: 80 } })
+  expect(r.text).toContain('30 days:')
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  await cmd($, 'stats')
+  expect(opened).toEqual([PANE]) // neither opened another
+})
+
+test('the Stats page reads the other sessions\' records when it opens, and then every ten minutes', async ($: Engine, on: On) => {
+  const { clock, gets } = await setup($, on, { stored: { 'session:other': { ...on2, stats: {} }, 'session:more': { ...on2, stats: {} } } })
+  const read = () => gets.filter(k => k.startsWith('session:')).length
+  await cmd($, 'stats')
+  const ui = await $.ui.mount(STATS_PANE)
+  const first = read()
+  expect(first).toBeGreaterThanOrEqual(2) // each other session, once
+  await ui.redraw()
+  await clock.advance(5 * STEP) // the page's own ticker redraws it each minute, from what it holds
+  expect(read()).toBe(first)
+  await clock.advance(6 * STEP) // ten minutes since it read them
+  expect(read()).toBe(first + 2)
+  await cmd($, 'stats') // asked again: read afresh
+  await ui.redraw()
+  expect(read()).toBe(first + 4)
+  await ui.unmount()
+})
+
+test('/cachebeat stats reads the other sessions\' records afresh where no pane opens', async ($: Engine, on: On) => {
+  const { gets } = await setup($, on, { stored: { 'session:other': { ...on2, stats: {} } } })
+  const read = () => gets.filter(k => k === 'session:other').length
+  const ask = () => $.command.run({ command: 'cachebeat', args: 'stats', origin: { kind: 'bridge' }, presentation: { isFullscreen: false, columns: 80 } })
+  await ask()
+  const first = read()
+  await ask()
+  expect(read()).toBe(first + 1)
+})
+
+test('a send on a cold cache is counted with the guard off, and under its size, and not said', async ($: Engine, on: On) => {
+  const off = await coldSetup($, on, { settings: { coldGuard: false } })
+  expect((await submit($)).drop).toBe(undefined)
+  expect(off.questions).toEqual([])
+  expect(off.store.get('session:s1')).toMatchObject({ stats: { [dayKey(off.clock.now())]: { cold: 1, coldTokens: 184_000, held: 0 } } })
+  expect(off.logs.some(l => l.startsWith('sent on a cold cache'))).toBe(false)
+})
+
+test('a send on a cold cache under the guard\'s size is counted, not asked about, and not said', async ($: Engine, on: On) => {
+  const small = await coldSetup($, on, { contextTokens: 15_000 })
+  expect((await submit($)).drop).toBe(undefined)
+  expect(small.questions).toEqual([])
+  expect(small.store.get('session:s1')).toMatchObject({ stats: { [dayKey(small.clock.now())]: { cold: 1, coldTokens: 15_000, held: 0 } } })
+  expect(small.logs.some(l => l.startsWith('sent on a cold cache'))).toBe(false)
+})
+
+test('a send on a warm cache is not a cold send, guard on or off', async ($: Engine, on: On) => {
+  const { store } = await setup($, on, { contextTokens: 184_000, settings: { coldGuard: false } })
+  await $.turn.complete(turn)
+  await submit($)
+  expect((store.get('session:s1') as { stats?: unknown } | undefined)?.stats ?? {}).toEqual({})
+})
+
+test('a store that refuses the record costs the record and Stats, and no beat; it says so once', async ($: Engine, on: On) => {
+  const { clock, forks, logs, fillStore } = await setup($, on, { settings: { interval: 3 } })
+  fillStore()
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(7 * M) // beats at 3m and 6m
+  expect(forks).toHaveLength(2)
+  expect(logs.filter(l => l.includes("its store can't be written"))).toHaveLength(1)
+  const { session } = await stateNow($)
+  expect(session.beats).toBe(2)
+})
+
+test('a beat\'s cost and a kept turn\'s re-cache avoided are whole tokens', () => {
+  expect(beatAdd('claude-opus-5-5', '5m', 90_001, 1, true).beatCost).toBe(4_501) // 4500.05 + 1.25
+  expect(keptAdd('claude-opus-5-5', '1h', 3).avoided).toBe(6) // 3 × 1.95
 })

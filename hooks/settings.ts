@@ -357,7 +357,7 @@ export const TABS: readonly Tab[] = [
     ],
   },
   {
-    id: 'heart', title: 'Prompt heart', preview: 'heart',
+    id: 'heart', title: 'Heart', preview: 'heart',
     rows: [
       {
         key: 'heartPlacement', label: 'Placement', name: 'Prompt heart placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line'),
@@ -402,7 +402,7 @@ export const TABS: readonly Tab[] = [
 export type ReadOnlyPage = { id: string; title: string }
 
 /** The read-only tabs, ahead of the settings tabs: a new one is one entry here and a page for it in the pane. */
-export const READ_ONLY: readonly ReadOnlyPage[] = [{ id: 'summary', title: 'Status' }]
+export const READ_ONLY: readonly ReadOnlyPage[] = [{ id: 'summary', title: 'Status' }, { id: 'stats', title: 'Stats' }]
 
 /** Every tab the pane walks: the tab bar, the hotkeys and the arrows. `TABS` stays settings alone, which is what `rowOf`, `accept` and the tool read. */
 export const PAGES: readonly ReadOnlyPage[] = [...READ_ONLY, ...TABS]

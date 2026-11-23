@@ -21,10 +21,24 @@ export type Saved = {
   compactions: number // the main conversation's compactions cachebeat has seen; /clear and /resume start the count again
   lastCompactAt: number | null // when the latest was
   guard: boolean | null // this session's own Cold guard, over the setting's; null follows the setting
-  held: number // messages the cold guard asked about in this conversation, whatever the answer
-  cold: number // messages sent on a cold cache: answered Send, sent unanswered, or from where nobody is asked
-  coldTokens: number // the tokens those cached again
+  stats: Days // this conversation's counts, by day, for the Stats page
 }
+
+/** One day's counts for a conversation. `beatCost` and `avoided` are weighed when counted, by the request's own model and lifetime. */
+export type Day = {
+  beats: number
+  read: number // tokens beats read from the cache
+  wrote: number // and wrote to it
+  beatCost: number // what beats read and wrote, in input-token equivalents
+  kept: number // turns that came back to a cache only beats kept warm
+  avoided: number // and the re-cache they avoided, in input-token equivalents
+  cold: number // messages sent on a cold cache: answered Send, sent unanswered, or from where nobody is asked
+  coldTokens: number // and the tokens they cached again
+  held: number // messages the cold guard asked about, whatever the answer
+  common: boolean // some figure was weighed by the common ratios: a model the price table lacks
+}
+/** Days by local date, `2026-11-23`: at most the last 30. */
+export type Days = Record<string, Day>
 
 /** How long the main conversation's prompt cache lives. */
 export type Ttl = '5m' | '1h'

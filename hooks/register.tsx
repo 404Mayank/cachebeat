@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement } from 'claude-code'
-import type { Alert, BeatSettings, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
+import type { Alert, BeatSettings, Days, Folder, PanePage, Pulse, Saved, Ttl } from '../types'
 import { TTL_MS, viewOf } from './cache'
 import type { CacheFacts, CacheView } from './cache'
 import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './animations'
@@ -10,6 +10,8 @@ import type { Span, Value } from './settings'
 import { ratiosOf } from './prices'
 import { usageName } from './status'
 import type { StatusFacts } from './status'
+import { addTo, beatAdd, daysOf, factsFrom, keptAdd, statsText, sumOf } from './stats'
+import type { StatsFacts } from './stats'
 import { SET, STATE, label, parseOnly, parseSet, readSummary, summary } from './tools'
 import type { Section, SetChange } from './tools'
 
@@ -34,7 +36,7 @@ const focusAtom = atom({ plugin: 'cachebeat', key: 'focus' } as const, '')
 const fresh: Saved = {
   enabled: false, keepUntil: null, lastReal: null, lastWarm: null, lastRead: null, lastWrote: null, nextAt: null, beats: 0, row: null, small: null,
   isCacheShort: false, paused: null, warmModel: null, tail: null, asked: null, turns: 0, compactions: 0, lastCompactAt: null,
-  guard: null, held: 0, cold: 0, coldTokens: 0,
+  guard: null, stats: {},
 }
 let s: Saved = { ...fresh }
 
@@ -61,6 +63,10 @@ let blast = -1 // the blast frame showing after a beat, or -1
 let busy = false // a main-thread turn is running
 let turnId = '' // that turn's id: its end is told from a fork's by it
 let stepping = false // a request of that turn is on its way, which keeps the cache warm itself
+let isStoreFull = false // a write of the conversation's record was refused: said once in this session
+let beatsSince = 0 // beats since the main conversation's last request: a turn coming back after them may have been kept warm by them
+let isFirstStep = false // the running turn's first request has not yet answered
+let others: { at: number; days: Days[] } | null = null // the other sessions' recorded days: read when the pane or `/cachebeat stats` opens, then every ten minutes
 let isTurnWarmed = false // a request of that turn read the cache, and stamped when it was sent
 let cached = 0 // tokens the main conversation's last request read from the cache or wrote to it
 let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
@@ -101,6 +107,9 @@ const untilNext = (ms: number) => (ms <= 0 ? 'due now' : `in ${fmt(ms)}`)
 /** The interval between beats: the setting's, `auto` read off the cache's lifetime. */
 const idle = () => (cfg.interval === 'auto' ? AUTO[s.isCacheShort ? '5m' : ttl] : cfg.interval) * MIN
 
+/** The lifetime of this session's cache: five minutes once a beat found it so, else what Claude Code picked. */
+const lifetime = (): Ttl => (s.isCacheShort ? '5m' : ttl)
+
 const isSet = (v: string | undefined) => v !== undefined && /^(1|true|yes|on)$/i.test(v)
 
 /**
@@ -132,14 +141,15 @@ async function save($: EngineInterface) {
  * A conversation's own on/off, keep-alive time and beat count, in the store by its id, for a resume to pick up, and
  * when its cache was last read: a beat moves that, and Claude Code's resume hint, counting from the last response, doesn't.
  */
-type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beats: number; warm?: number | null; guard?: boolean | null }
+type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beats: number; warm?: number | null; guard?: boolean | null; stats?: unknown }
 
 /** What Claude Code says about a resumed conversation as it comes back: the time since its last response. */
 type ResumeHint = { id: string | undefined; secondsSince: number | undefined; at: number }
 
 const DAY = 24 * 60 * MIN
+const OTHERS_EVERY = 10 * MIN // how long the Stats page keeps what it read of the other sessions' records
 const KEEP_DAYS = 30 // a record not written for this long is dropped
-const keyOf = () => JSON.stringify([conv, s.enabled, s.keepUntil, s.beats, s.guard])
+const keyOf = () => JSON.stringify([conv, s.enabled, s.keepUntil, s.beats, s.guard, s.stats])
 
 /** The record stored under a key, if it is one this version reads. */
 const keptOf = (x: unknown): Kept | null =>
@@ -150,6 +160,7 @@ const keptOf = (x: unknown): Kept | null =>
 /** From here, this session's record is `id`'s; it is written at the next change, not now. */
 function keepAs(id: string | null) {
   conv = id
+  others = null // the other sessions' days exclude this conversation's own record
   lastKept = keyOf()
 }
 
@@ -161,11 +172,17 @@ async function keepRecord($: EngineInterface) {
   lastKept = kept
   const key = `session:${conv}`
   // a beat changes the count, so the record has the read it made; a turn's read is the resume hint's
-  const record = { enabled: s.enabled, keepUntil: s.keepUntil, beats: s.beats, warm: s.lastWarm, guard: s.guard }
+  const record = { enabled: s.enabled, keepUntil: s.keepUntil, beats: s.beats, warm: s.lastWarm, guard: s.guard, stats: s.stats }
   // in order: two saves close together would otherwise race, and the earlier could land last
   const writing = keeping.then(async () => $.store.set(key, { v: 1, at: await $.clock.now(), ...record }))
   keeping = writing.catch(() => undefined)
-  await writing
+  // a store that can't take the record (it is over its size limit) costs the record and Stats, and no more: beating goes on
+  try {
+    await writing
+  } catch {
+    if (!isStoreFull) $.ui.log("cachebeat: its store can't be written (it may be full), so records and Stats aren't kept")
+    isStoreFull = true
+  }
 }
 
 /** Drops the records of conversations not written for 30 days, at most once a day: each read goes through the store's whole file. */
@@ -194,7 +211,7 @@ async function restoreConversation($: EngineInterface, id: string | null) {
   const wasOn = s.enabled // the conversation left behind, on /resume
   s = {
     ...fresh, isCacheShort: s.isCacheShort, paused: RESUMED,
-    ...(kept ? { enabled: kept.enabled && !isOver, keepUntil: isOver ? null : kept.keepUntil, beats: kept.beats, guard: kept.guard ?? null } : { enabled: cfg.defaultOn }),
+    ...(kept ? { enabled: kept.enabled && !isOver, keepUntil: isOver ? null : kept.keepUntil, beats: kept.beats, guard: kept.guard ?? null, stats: daysOf(kept.stats) } : { enabled: cfg.defaultOn }),
   }
   if (kept?.warm != null) warmFrom(kept.warm)
   offNote = kept?.enabled && isOver ? `beats are off: the keep-alive time ended at ${clockText(kept.keepUntil!, now)}`
@@ -797,6 +814,7 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
     // the first beat on a new model writes its cache, as the next turn would have: kept warm from here
     s.warmModel = model
     warmFrom(sentAt)
+    await countDay($, beatAdd(model, lifetime(), got, wrote, false)) // it paid for the write, though it is no beat of the count
     const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written)`
     $.ui.log(warmed)
     await schedule($)
@@ -806,6 +824,7 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
   // read: no sign the cache lapsed
   if (got < wrote && wasIdle) {
     const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
+    await countDay($, beatAdd(model, lifetime(), got, wrote, false)) // what it cost, though no beat of the count
     // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
     // this beat wrote it afresh, so beat at that from here
     if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m') return stop($, why)
@@ -820,6 +839,8 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
   s.lastRead = cached > 0 ? Math.min(got, cached) : got
   s.lastWrote = wrote
   s.beats++
+  beatsSince++
+  await countDay($, beatAdd(model, lifetime(), got, wrote, true))
   if (cfg.heartAnimate) blast = 0
   const renewed = `♥ cache renewed (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
   if (logs(cfg.onBeat) || (s.row === null && !isStatusOnBand)) $.ui.log(renewed) // else no line at all says it
@@ -874,6 +895,7 @@ async function anotherConversation($: EngineInterface) {
   fullReads.clear() // Claude's copy of the state went with the conversation
   cached = 0 // nothing of it cached yet
   resent = false
+  beatsSince = 0
   await syncSettings($)
 }
 
@@ -960,6 +982,7 @@ async function sessionOf($: EngineInterface, now: number) {
     : isCovered ? 'none needed'
     : 'after the next turn'
   const from = intervalFrom()
+  const mine = sumOf([s.stats], new Set(Object.keys(s.stats)))
   return {
     enabled: s.enabled, intervalMinutes: idle() / MIN, intervalFrom: from === 'all folders' && cfg.interval === 'auto' ? 'auto' : from,
     keepAliveUntil: s.keepUntil === null ? null : new Date(s.keepUntil).toISOString(),
@@ -967,7 +990,7 @@ async function sessionOf($: EngineInterface, now: number) {
     keepAliveMinutesLeft: s.keepUntil === null ? null : wholeMinutes(Math.max(0, s.keepUntil - now)),
     beats: s.beats, lastBeatReadTokens: s.lastRead, lastBeatWrittenTokens: s.lastWrote, nextBeat, skipping: s.small, paused: s.paused,
     coldGuard: s.guard ?? cfg.coldGuard, coldGuardFrom: s.guard === null ? 'settings' : 'session',
-    coldGuardAsked: s.held, coldSends: s.cold, coldSendTokens: s.coldTokens,
+    coldGuardAsked: mine.held, coldSends: mine.cold, coldSendTokens: mine.coldTokens,
   }
 }
 
@@ -996,6 +1019,24 @@ async function contextOf($: EngineInterface, now: number, isSubagent: boolean) {
     lastMessageMinutesAgo: wholeMinutes(lastWord === -Infinity ? null : now - lastWord),
     ...(isSubagent ? { of: 'main conversation' } : {}),
   }
+}
+
+/**
+ * What the Stats tab draws: the other sessions' recorded days, read when the pane or the command opens and then every ten
+ * minutes (each read of the store goes through its whole file), and this conversation's own, live.
+ */
+async function statsFacts($: EngineInterface): Promise<StatsFacts> {
+  const now = await $.clock.now()
+  if (!others || now - others.at >= OTHERS_EVERY) {
+    const days: Days[] = []
+    for (const key of await $.store.keys()) {
+      if (!key.startsWith('session:') || key === `session:${conv}`) continue
+      const kept = keptOf(await $.store.get(key))
+      if (kept) days.push(daysOf(kept.stats))
+    }
+    others = { at: now, days }
+  }
+  return factsFrom(others.days, s.stats, now)
 }
 
 /** What `state` answers: each section asked for (none named: all of them), the main conversation's however a subagent asks. */
@@ -1072,6 +1113,7 @@ async function openSettings($: EngineInterface, tab = 'beating') {
   ttl = await cacheTtl($)
   notice = ''
   isResetArmed = false
+  others = null // read afresh
   editsFolder = Object.keys(own).length > 0 // a folder with settings of its own opens on them
   isPaneOpen = true
   await update($, pageAtom, () => ({ tab, picker: null }))
@@ -1170,16 +1212,34 @@ export const coldOutcome = (answer: string | null, closed: Closed): 'send' | 'se
 const dropped = (why: string) => `cachebeat: not sent. ${why} Send it again to be asked, or /cachebeat guard off.`
 
 /**
- * A message about to go to the cache the guard asked about, read again: a turn or a beat may have warmed it while the
- * question was open, and then it goes as any message does. Still cold, it is counted and said before it goes.
+ * A turn's first request, answered: if it came back to a cache that beats alone kept warm, it is counted, and the
+ * re-cache it avoided. That is so when beats ran since the last request, it read what that one cached, and it came later
+ * than the cache would have lasted from the turn before: counted from that turn's end, which can only miss a kept turn.
  */
-async function noteColdSend($: EngineInterface, how: string) {
+async function countKept($: EngineInterface, model: string, got: number, wasCached: number, sentAt: number) {
+  const since = beatsSince
+  beatsSince = 0
+  if (since === 0 || s.lastReal === null || wasCached === 0 || got + MISSED < wasCached) return
+  if (sentAt - s.lastReal <= TTL_MS[lifetime()]) return
+  await countDay($, keptAdd(model, lifetime(), got))
+}
+
+/** Adds to today's counts in this conversation's record, which the next save writes. */
+async function countDay($: EngineInterface, add: Parameters<typeof addTo>[2]) {
+  s.stats = addTo(s.stats, await $.clock.now(), add)
+}
+
+/**
+ * A message about to go to the cache the guard asked about, read again: a turn or a beat may have warmed it while the
+ * question was open, and then it goes as any message does. Still cold, it is counted and said before it goes: said
+ * unless `isSaid` is off, for a send the guard never asked about (it is off, or the chat is under its size), which Stats counts all the same.
+ */
+async function noteColdSend($: EngineInterface, how: string, isSaid = true) {
   const view = await cacheNow($)
   if (view.state !== 'cold' || view.contextTokens === null) return
-  s.cold++
-  s.coldTokens += view.contextTokens
+  await countDay($, { cold: 1, coldTokens: view.contextTokens })
   await save($)
-  $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
+  if (isSaid) $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
 }
 
 /** Asks the cold guard's question; resolves the answer, or null when it was dismissed, closed unanswered, or couldn't be asked. */
@@ -1188,7 +1248,7 @@ async function askCold($: EngineInterface, text: string, wait: 'drop' | number) 
   asking = open
   let timer: { cancel: () => void } | undefined
   try {
-    s.held++
+    await countDay($, { held: 1 })
     await save($)
     // past the wait, the AskUserQuestion hook closes the dialog, and the ask rejects with the timer's own reason
     // under don't send, a ceiling: the question closes and the message is dropped, so the messages queued behind it go on
@@ -1210,13 +1270,17 @@ async function askCold($: EngineInterface, text: string, wait: 'drop' | number) 
 }
 
 const OPENED = 'settings opened'
-const USAGE = 'usage: on, off, a time like 2h, now, guard on|off, settings · global or local: on, off, minutes · local reset'
+const USAGE = 'usage: on, off, a time like 2h, now, guard on|off, stats, settings · global or local: on, off, minutes · local reset'
 
 export const register: Register = on => {
   // also runs after every reload: pick up where the last load left off
   on('session.start', async ($, e, next) => {
     isStatusOnBand = false // until the band is drawn on a desktop
     paneSurface = 'terminal' // until the pane draws, on whichever surface
+    stopPaneTicker() // a pane left up by the module before a reload has no ticker of this load's
+    isPaneOpen = false
+    others = null
+    isStoreFull = false
     await load($)
     await publish($)
     const prev = await read($, saved)
@@ -1236,7 +1300,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'cachebeat',
       description: 'Keep the prompt cache warm while idle',
-      argumentHint: '[on|off|<time, like 2h>|now|guard on|off|global …|local …|settings]',
+      argumentHint: '[on|off|<time, like 2h>|now|guard on|off|stats|global …|local …|settings]',
       immediate: true,
     })
     await $.tool.register(STATE)
@@ -1298,10 +1362,14 @@ export const register: Register = on => {
     // mid-turn, the turn's own requests read the cache anyway
     if (e.turnId !== undefined || busy) return next(e)
     await syncSettings($)
-    if (!(s.guard ?? cfg.coldGuard)) return next(e)
     ttl = await cacheTtl($) // the lifetime the cache is judged by, as it is now
     const view = await cacheNow($)
-    if (view.state !== 'cold' || view.contextTokens === null || view.contextTokens < cfg.coldGuardTokens) return next(e)
+    if (view.state !== 'cold' || view.contextTokens === null) return next(e)
+    // a cold send the guard doesn't ask about still re-caches the chat, and Stats counts it: quietly, as it isn't the guard's to say
+    if (!(s.guard ?? cfg.coldGuard) || view.contextTokens < cfg.coldGuardTokens) {
+      await noteColdSend($, '', false)
+      return next(e)
+    }
     const coldFor = fmt(view.coldFor!)
     const size = view.contextTokens
     if (!ASKED_ORIGINS.includes(e.origin.kind)) {
@@ -1345,6 +1413,11 @@ export const register: Register = on => {
     if (words[0] === 'settings' || words[0] === 'config') {
       await openSettings($)
       return { text: OPENED }
+    }
+    if (words[0] === 'stats') {
+      others = null // read afresh
+      if (!busy && e.origin.kind === 'composer') await openSettings($, 'stats')
+      return { text: statsText(await statsFacts($)) }
     }
     if (words[0] === 'now') return { text: await beatNow($) }
     if (words[0] === 'guard') return { text: await guardCommand($, words[1]) }
@@ -1479,6 +1552,7 @@ export const register: Register = on => {
       busy = true
       turnId = e.turnId
       stepping = true // its first request goes out next
+      isFirstStep = true
       isTurnWarmed = false // a turn.complete skipped (one ending while a beat runs, after a reload) left it set
       // /rewind runs between turns: a read of cachebeat's state made in the turns it took back went with them
       if (s.tail !== null && await isRewound($, s.tail)) fullReads.clear()
@@ -1510,9 +1584,12 @@ export const register: Register = on => {
         // beat re-sends it short of that message, so it would write it all again: beats wait for the turn's next
         // request, or its end
         resent = got + MISSED < cached
+        const wasCached = cached
         cached = got + wrote
         await markWarm($, sentAt)
         isTurnWarmed = true
+        if (isFirstStep) await countKept($, e.model, got, wasCached, sentAt)
+        isFirstStep = false
       }
       await schedule($)
     }
@@ -1659,7 +1736,8 @@ export const register: Register = on => {
     const part = (picked?.tab.id ?? page.tab) === 'status' ? 'line' : 'heart'
     // the Status tab reads the session as it is now, and nothing else redraws it while beats wait or are off: one redraw a step
     const status = page.tab === 'summary' ? await factsOf($) : null
-    const wanted = !isPaneOpen ? 0 : isMoving ? frameMs(lookOf(c, part)) : status ? STEP : 0
+    const stats = page.tab === 'stats' ? await statsFacts($) : null
+    const wanted = !isPaneOpen ? 0 : isMoving ? frameMs(lookOf(c, part)) : status || stats ? STEP : 0
     if (wanted !== paneEvery) {
       stopPaneTicker()
       if (wanted) paneTicker = $.clock.every(wanted, () => void update($, tickAtom, () => ++paneTick))
@@ -1675,7 +1753,7 @@ export const register: Register = on => {
     const to: Target = editsFolder ? 'folder' : 'global'
     const where = cut(place.root, PATH)
     const view = {
-      page, tick, focus, columns: e.props.bodyColumns, status, isOn: s.enabled, keepUntil: s.keepUntil === null ? null : clockText(s.keepUntil, now), guard: s.guard,
+      page, tick, focus, columns: e.props.bodyColumns, status, stats, isOn: s.enabled, keepUntil: s.keepUntil === null ? null : clockText(s.keepUntil, now), guard: s.guard,
       autoMinutes: AUTO[s.isCacheShort ? '5m' : ttl], notice, isResetArmed, isTerminal: e.surface === 'terminal', customs,
       own: place.own, path: where, editsFolder, allFolders: global,
     }

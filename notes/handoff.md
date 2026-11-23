@@ -56,7 +56,7 @@ The next agent raises these with the user before anything else. The user said on
   - A cold send is counted whether or not the guard asked, but the "sent on a cold cache" line is logged only where the guard logs it today. With the guard off it counts silently.
   - A full plugin store costs only records and Stats; beating goes on.
 - **Live checks left probe `session:<id>` records in the real plugin store** (steps 4 and 7). They are pruned 30 days after their last write.
-- **Fable 5.2 (and Mythos 5.2) now have rows in hooks/prices.ts** (step 7, checked against the pricing in the claude-api skill). This line was:, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
+- **Fable 5.2 and Mythos 5.2 have rows in hooks/prices.ts** (step 7): input $8, cache read $0.20, 5m write $10, 1h write $16 per million tokens. Checked against the claude-api skill's model table, citing https://platform.claude.com/docs/en/about-claude/pricing. Mythos 5.2 is for verified organizations only, priced the same.
 
 ## Paused for usage (2026-11-23 09:48)
 
