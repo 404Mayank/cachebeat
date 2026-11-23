@@ -395,6 +395,18 @@ export const TABS: readonly Tab[] = [
   },
 ]
 
+/** A tab of the pane with no settings, only a page drawn from the session's figures. */
+export type ReadOnlyPage = { id: string; title: string }
+
+/** The read-only tabs, ahead of the settings tabs: a new one is one entry here and a page for it in the pane. */
+export const READ_ONLY: readonly ReadOnlyPage[] = [{ id: 'summary', title: 'Status' }]
+
+/** Every tab the pane walks: the tab bar, the hotkeys and the arrows. `TABS` stays settings alone, which is what `rowOf`, `accept` and the tool read. */
+export const PAGES: readonly ReadOnlyPage[] = [...READ_ONLY, ...TABS]
+
+/** The tab an arrow on the tab bar reaches from the one holding the focus (`tab:<id>`): `by` along the tabs, round at either end. */
+export const tabBeside = (focus: string, by: number) => PAGES[(PAGES.findIndex(p => `tab:${p.id}` === focus) + by + PAGES.length) % PAGES.length]!
+
 export const rowOf = (key: keyof BeatSettings) => {
   for (const tab of TABS) for (const row of tab.rows) if (row.key === key) return { tab, row }
   return undefined

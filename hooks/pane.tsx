@@ -2,7 +2,9 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { BeatSettings, PanePage } from '../types'
 import { previewFrame, statusFrame, variant } from './animations'
 import type { Preview, Row, Span, Value } from './settings'
-import { DEFAULTS, HEX_OF, SESSION_HELP, TABS, isFlip, isHex, isLit, lookOf, rowOf, spans, tokens } from './settings'
+import { DEFAULTS, HEX_OF, PAGES, READ_ONLY, SESSION_HELP, TABS, isFlip, isHex, isLit, lookOf, rowOf, spans, tokens } from './settings'
+import { STATUS_NOTE, statusRows } from './status'
+import type { StatusFacts } from './status'
 
 export const PANE = 'cachebeat-settings'
 
@@ -29,6 +31,7 @@ export type View = {
   tick: number
   focus: string
   columns: number
+  status: StatusFacts | null // what the Status tab draws, read when it is on show
   isOn: boolean // this session beats
   keepUntil: string | null // when this session's keep-alive time is up, as the clock reads it (/cachebeat 2h); null: no time limit
   guard: boolean | null // this session's own Cold guard (/cachebeat guard on|off), over the setting; null: none
@@ -200,7 +203,45 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
     return { tree, ring }
   }
 
-  const tab = TABS.find(t => t.id === v.page.tab) ?? TABS[0]!
+  // a read-only tab has no settings: it draws its page, and its ring is empty
+  const isReadOnly = READ_ONLY.some(p => p.id === v.page.tab)
+  const tab = isReadOnly ? undefined : TABS.find(t => t.id === v.page.tab) ?? TABS[0]!
+  const shownTab = tab?.id ?? v.page.tab
+  const keys = `1-${PAGES.length}`
+  const bar = (
+    <Box columnGap={1} flexWrap="wrap">
+      {PAGES.map((t, i) => (
+        <Button
+          plain
+          hotkey={`${i + 1}`}
+          key={`tab:${t.id}`}
+          dimColor={t.id !== shownTab}
+          onPress={() => act.tab(t.id)}
+        >
+          {t.title}
+        </Button>
+      ))}
+    </Box>
+  )
+  if (!tab) {
+    const tree = (
+      <Box flexDirection="column">
+        {bar}
+        {rule}
+        {(v.status ? statusRows(v.status) : []).map(r => (
+          // the value wraps under its own column, not under the label
+          <Box>
+            <Box width={LABEL} flexShrink={0}><Text>{r.label}</Text></Box>
+            <Box flexShrink={1}><Text>{r.value}</Text></Box>
+          </Box>
+        ))}
+        {rule}
+        <Text dimColor>{STATUS_NOTE}</Text>
+        <Text dimColor>{v.isTerminal ? `↑↓ tabs · enter or ${keys} opens · esc closes` : `tab moves · ${keys} tabs · esc closes`}</Text>
+      </Box>
+    )
+    return { tree, ring }
+  }
   // the cold guard's own rows follow the guard in effect: this session's own while it has one
   const rows = tab.rows.filter(r => !r.show || r.show(v.guard === null ? s : { ...s, coldGuard: v.guard }))
   // the tab's own ring: the tab bar above it is a level of its own, reached by Esc
@@ -231,7 +272,6 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
     : v.editsFolder ? (isOwn(focusedRow) ? { label: `back to ${shown(focusedRow, v.allFolders[focusedRow.key], s)} (all folders)`, run: () => act.resetRow(focusedRow.key) } : undefined)
     : s[focusedRow.key] !== DEFAULTS[focusedRow.key] ? { label: `back to ${shown(focusedRow, DEFAULTS[focusedRow.key], s)}`, run: () => act.resetRow(focusedRow.key) }
     : undefined
-  const keys = `1-${TABS.length}`
   // a row's value, and where it comes from when not the settings on show: this folder's
   const valueOf = (r: Row) => {
     // this session's own Cold guard is what applies here: the row shows it, and the setting's value once it's dropped
@@ -243,19 +283,7 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
   const line = (label: string, value: string, more = '') => `${label.padEnd(LABEL)}${value}${more}`
   const tree = (
     <Box flexDirection="column">
-      <Box columnGap={1} flexWrap="wrap">
-        {TABS.map((t, i) => (
-          <Button
-            plain
-            hotkey={`${i + 1}`}
-            key={`tab:${t.id}`}
-            dimColor={t.id !== tab.id}
-            onPress={() => act.tab(t.id)}
-          >
-            {t.title}
-          </Button>
-        ))}
-      </Box>
+      {bar}
       {rule}
       {tab.id === 'beating' && (
         <Button plain key="session" onPress={() => (act.at('session'), act.toggleSession())}>{line('This session', v.isOn ? `on${v.keepUntil === null ? '' : ` · until ${v.keepUntil}`}` : 'off')}</Button>

@@ -7,7 +7,9 @@ import { PANE, cut } from './pane'
 import { TTL_MS, viewOf } from './cache'
 import { ratiosOf } from './prices'
 import { DEADLINE, IDLE, RETRY, STEP, clockText, coldOutcome, fmt, restored } from './register'
-import { DEFAULTS, EPISODE, SESSION_HELP, accept, glyphs, lookOf, minutesText, mixedMode, normalize, parseDuration, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans } from './settings'
+import type { StatusFacts } from './status'
+import { statusRows } from './status'
+import { DEFAULTS, EPISODE, SESSION_HELP, accept, glyphs, lookOf, minutesText, mixedMode, normalize, parseDuration, parseFrameMs, parseHours, parseMinutes, parsePercent, parseTokens, spans, tabBeside } from './settings'
 import { SET, STATE } from './tools'
 
 /** The tools as the model calls them: `mcp__<plugin>__<name>`, spelled out as register.tsx's matchers are. */
@@ -139,7 +141,8 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine</Text>
   })
-  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  const opened: string[] = [] // the panes the plugin opened
+  on('ui.open', (_$, e) => (opened.push(e.id), { value: { isPlaced: true } }) as never)
   on('command.register', (_$, e) => ({ value: { command: e.name } }) as never)
   const specs: unknown[] = []
   on('tool.register', (_$, e) => (specs.push(e), { value: { tool: e.name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set' } }) as never)
@@ -172,7 +175,7 @@ const setup = async ($: Engine, on: On, world: World = {}) => {
     nextQuestion: () => new Promise<void>(r => (isAsked = r)), breakUsage: () => (isUsageBroken = true),
     // resolves once the read is parked
     holdGet: (key: string, until: Promise<void>, nth = 1) => new Promise<void>(parked => getsHeld.set(key, { nth, until, parked })),
-    clock, forks, prompts, logs, toasts, tails, store, specs, reads, lengths, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
+    clock, forks, prompts, logs, toasts, tails, opened, store, specs, reads, lengths, sleep: (ms: number) => (skew += ms), holdNow: (until: Promise<void>) => (held = until), afters: () => afters, switchTo: (m: string) => (model = m), moveTo: (r: string) => (root = r),
     rewind: (n: number) => (chat = chat.slice(0, -n)), talk: (text: string) => (chat = [...chat, said('user', text), said('assistant', 'ok')]),
     add: (role: 'user' | 'assistant', text: string) => (chat = [...chat, said(role, text)]),
   }
@@ -723,12 +726,13 @@ test('on its own line the heart takes the color', async ($: Engine, on: On) => {
 const buttons = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
   (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith(prefix))
 
-test('the settings pane: six tabs, two choices flip in place, more open a list, help for what\'s focused', async ($: Engine, on: On) => {
+test('the settings pane: six tabs (Status and five of settings), two choices flip in place, more open a list, help for what\'s focused', async ($: Engine, on: On) => {
   const { store } = await setup($, on)
   expect(await cmd($, 'settings')).toBe('settings opened')
   expect(await cmd($, 'config')).toBe('settings opened') // unlisted, for the hand that types it
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect(await buttons(ui, 'tab:')).toEqual(['tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:alerts'])
+  expect(await buttons(ui, 'tab:')).toEqual(['tab:summary', 'tab:beating', 'tab:limits', 'tab:heart', 'tab:status', 'tab:alerts'])
+  expect(await ui.find({ key: 'session' })).toBeDefined() // `settings` opens on Beating
   expect([(await ui.find({ key: 'beatNow' }))?.text, (await ui.find({ key: 'reset' }))?.text]).toEqual(['Beat now', 'Reset all'])
   expect((await ui.find({ key: 'folder' }))?.text).toBe('Settings for          all folders')
 
@@ -784,8 +788,13 @@ test('on the tab bar the arrows switch tabs, and do not go down into one', async
   expect(await ui.find({ key: 'row:variant' })).toBeDefined() // the page follows
   expect((await move($, 'row:variant')).deny).toBeDefined() // Enter goes in, not ↓
   await move($, 'tab:alerts')
-  expect(await move($, 'row:onBeat')).toEqual({}) // off the last tab: round to the first
-  expect(await ui.find({ key: 'session' })).toBeDefined()
+  expect(await move($, 'row:onBeat')).toEqual({}) // off the last tab: round to the first, Status
+  expect(await ui.find({ key: 'row:onBeat' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Cache' })).toBeDefined()
+  expect(await move($, 'row:interval')).toEqual({}) // off the first tab, the other way: round to the last
+  expect(await ui.find({ key: 'row:onBeat' })).toBeDefined()
+  await move($, 'tab:beating')
+  expect((await move($, 'row:interval')).deny).toBeDefined() // from a middle tab, Enter goes in
   await ui.unmount()
 })
 
@@ -1460,7 +1469,7 @@ test('on the desktop the pane leaves the keys to the app: Tab goes anywhere, and
   await ui.press({ key: 'opt:1' }) // picked: back on the tab, the focus left alone
   expect(moved().slice(before)).toEqual(['opt'])
   expect(await ui.find({ key: 'row:variant' })).toBeDefined()
-  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-5 tabs · esc closes')).toBe(true)
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === 'tab moves · enter or a click changes · 1-6 tabs · esc closes')).toBe(true)
   await ui.unmount()
 })
 
@@ -1668,9 +1677,11 @@ test('a keep-alive time shows on the session row, r drops it, and picking an int
   await ui.press({ key: 'row:interval' })
   await ui.press({ key: 'opt:3' }) // 30m for all folders: a setting, which leaves this session's time alone
   expect(await cmd($, '')).toBe('on, every 30m idle · 2h left · 0 beats · starts after your next turn')
+  await ui.press({ key: 'tab:beating' }) // a bare /cachebeat opens the pane on Status
   await move($, 'session')
   await ui.press({ key: 'resetRow' })
   expect(await cmd($, '')).toBe('on, every 30m idle · 0 beats · starts after your next turn')
+  await ui.press({ key: 'tab:beating' })
   expect((await ui.find({ key: 'session' }))?.text).toBe(`${'This session'.padEnd(22)}on`)
   expect(await ui.find({ key: 'resetRow' })).toBeUndefined()
   await ui.unmount()
@@ -3618,4 +3629,139 @@ test('a cache warmed while the question was open is sent as any message is: not 
   expect(sent).toEqual(['go on'])
   expect(logs.some(l => l.startsWith('sent on a cold cache'))).toBe(false)
   expect((await stateNow($)).session.coldSends).toBe(0)
+})
+
+// the Status tab
+
+/** The Status page as drawn: its label and value pairs, between the rules. */
+const statusOf = async (ui: { findAll: (q: { type: string }) => Promise<{ text?: string }[]> }) => {
+  const texts = (await ui.findAll({ type: 'Text' })).map(x => x.text ?? '')
+  const rules = texts.flatMap((x, i) => (/^─+$/.test(x) ? [i] : []))
+  const body = texts.slice(rules[0]! + 1, rules[1]!)
+  return Object.fromEntries(body.flatMap((x, i) => (i % 2 === 0 ? [[x, body[i + 1]!]] : [])))
+}
+
+test('bare /cachebeat opens the pane on Status and still answers its line; settings opens on Beating', async ($: Engine, on: On) => {
+  const { opened } = await setup($, on)
+  expect(await cmd($, '')).toBe('off')
+  expect(opened).toEqual([PANE])
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect(await ui.find({ type: 'Text', text: 'Cache' })).toBeDefined() // the Status page
+  expect(await ui.find({ key: 'session' })).toBeUndefined()
+  expect(await cmd($, 'settings')).toBe('settings opened')
+  expect(opened).toEqual([PANE, PANE])
+  expect(await ui.find({ key: 'session' })).toBeDefined() // Beating
+  await ui.unmount()
+})
+
+test('typed mid-turn, bare /cachebeat opens no pane: its line is toasted at once, as the pane would hold it', async ($: Engine, on: On) => {
+  const { opened, toasts } = await setup($, on)
+  await $.turn.start({ text: 'hi', turnId: 't2' })
+  expect(await cmd($, '')).toBe('off')
+  expect([opened, toasts]).toEqual([[], ['cachebeat: off']])
+})
+
+test('Status after a sleep says cold for how long, with the conversation\'s size weighed for a one-hour cache', async ($: Engine, on: On) => {
+  await coldSetup($, on)
+  await cmd($, '')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect(await statusOf(ui)).toEqual({
+    Cache: 'cold for 2h 14m (1h TTL, last read 3h 14m ago)',
+    Size: '184k tokens · as 368k input tokens to cache again',
+    Beating: 'off',
+    'This session': 'no beats yet',
+    'Cold guard': 'on · asks from 20k tokens',
+    Usage: 'five-hour 10% · beats stop at 90%',
+    'Last message': '3h 14m ago',
+  })
+  await ui.unmount()
+})
+
+test('Status draws warm with the time left, and the beating row with its interval, next beat and keep-alive time', async ($: Engine, on: On) => {
+  const { clock } = await setup($, on, { contextTokens: 184_000 })
+  await cmd($, '2h')
+  await $.turn.complete(turn)
+  await clock.advance(12 * M)
+  await cmd($, '')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  const rows = await statusOf(ui)
+  expect(rows.Cache).toBe('warm (1h TTL, last read 12m ago) · 48m left')
+  expect(rows.Beating).toBe('on · every 50m idle (auto) · next in 38m · 1h 48m left')
+  await ui.unmount()
+})
+
+test('Status hides the Usage row where no limits are reported', async ($: Engine, on: On) => {
+  await setup($, on, { isSubscription: false })
+  await cmd($, '')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect(Object.keys(await statusOf(ui))).toEqual(['Cache', 'Size', 'Beating', 'This session', 'Cold guard', 'Last message'])
+  await ui.unmount()
+})
+
+test('Status rows for a cache never written, a beat or two, a session\'s own guard, and a pause', () => {
+  const facts: StatusFacts = {
+    cache: { state: 'unknown', ttl: '5m', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null },
+    session: {
+      enabled: true, intervalMinutes: 4, intervalFrom: 'folder', keepAliveMinutesLeft: null, beats: 1, lastBeatReadTokens: 184_212, lastBeatWrittenTokens: 412,
+      nextBeat: 'after the next turn', skipping: null, paused: null, coldGuard: false, coldGuardFrom: 'session', usageLimits: [],
+    },
+    lastMessageMinutesAgo: null, coldGuardTokens: 20_000, stopAtUsage: 90,
+  }
+  const rows = (f: StatusFacts) => Object.fromEntries(statusRows(f).map(r => [r.label, r.value]))
+  expect(rows(facts)).toEqual({
+    Cache: 'nothing cached yet (5m TTL)', Size: 'not counted yet',
+    Beating: "on · every 4m idle (this folder's) · next beat after the next turn",
+    'This session': '1 beat · the last read 184k, wrote 412', 'Cold guard': 'off · this session', 'Last message': 'none yet',
+  })
+  const later = (session: Partial<StatusFacts['session']>) => rows({ ...facts, session: { ...facts.session, ...session } }).Beating
+  expect(later({ paused: 'the cache went cold' })).toBe("on · every 4m idle (this folder's) · beats wait for your next message · the cache went cold")
+  expect(later({ skipping: 'chat under 20k tokens' })).toBe("on · every 4m idle (this folder's) · beats skip · chat under 20k tokens")
+  expect(later({ nextBeat: 'none needed', keepAliveMinutesLeft: 0 })).toBe("on · every 4m idle (this folder's) · no beat needed · under 1m left")
+  expect(later({ nextBeat: 'due now', intervalFrom: 'auto' })).toBe('on · every 4m idle (auto) · next beat due now')
+  expect(rows({ ...facts, session: { ...facts.session, usageLimits: [{ kind: 'five_hour', percentUsed: 42 }, { kind: 'seven_day', percentUsed: 18 }] } }).Usage)
+    .toBe('five-hour 42% · seven-day 18% · beats stop at 90%')
+  expect(rows({ ...facts, cache: { ...facts.cache, state: 'warm', minutesLeft: 0, lastReadMinutesAgo: 5, contextTokens: 9000, recacheInputTokens: null } }).Size).toBe('9k tokens')
+})
+
+test('Status takes the pane\'s real width, and has no rows to focus or press', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, '')
+  const ui = await $.ui.mount({ ...SETTINGS_PANE, props: { ...SETTINGS_PANE.props, bodyColumns: 60 } })
+  expect((await ui.findAll({ type: 'Text' })).filter(x => /^─+$/.test(x.text ?? '')).map(x => x.text?.length)).toEqual([60, 60])
+  for (const key of ['session', 'folder', 'beatNow', 'reset', 'resetRow']) expect(await ui.find({ key })).toBeUndefined()
+  expect((await buttons(ui, 'row:')).length + (await buttons(ui, 'opt:')).length).toBe(0)
+  await ui.unmount()
+})
+
+test('the tab hotkeys reach every tab, Status first, and the footer counts them', async ($: Engine, on: On) => {
+  await setup($, on)
+  await cmd($, '')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  const tabs = (await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('tab:'))
+  expect(tabs.map(b => [b.key, b.props?.hotkey])).toEqual([
+    ['tab:summary', '1'], ['tab:beating', '2'], ['tab:limits', '3'], ['tab:heart', '4'], ['tab:status', '5'], ['tab:alerts', '6'],
+  ])
+  expect((await ui.findAll({ type: 'Text' })).some(x => x.text === '↑↓ tabs · enter or 1-6 opens · esc closes')).toBe(true)
+  await ui.press({ key: 'tab:limits' })
+  expect(await ui.find({ key: 'row:skipSmall' })).toBeDefined()
+  await ui.press({ key: 'tab:summary' }) // a press on Status shows it, with nothing to go into
+  expect(await ui.find({ type: 'Text', text: 'Cache' })).toBeDefined()
+  expect(await ui.find({ key: 'folder' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the arrows along the tab bar walk Status in, and wrap from Alerts to it and back', () => {
+  expect(['tab:alerts', 'tab:summary', 'tab:beating'].map((from, i) => tabBeside(from, i === 0 ? 1 : i === 1 ? -1 : 1).id)).toEqual(['summary', 'alerts', 'limits'])
+  expect(tabBeside('tab:summary', 1).id).toBe('beating')
+})
+
+test('Status counts on while beating is off and nothing else redraws it: the cold time moves each step', async ($: Engine, on: On) => {
+  const { clock, sleep } = await coldSetup($, on)
+  await cmd($, '')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect((await statusOf(ui)).Cache).toBe('cold for 2h 14m (1h TTL, last read 3h 14m ago)')
+  sleep(10 * M)
+  await clock.advance(STEP)
+  expect((await statusOf(ui)).Cache).toBe('cold for 2h 25m (1h TTL, last read 3h 25m ago)')
+  await ui.unmount()
 })
