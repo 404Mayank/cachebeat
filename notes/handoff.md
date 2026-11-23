@@ -51,7 +51,12 @@ The next agent raises these with the user before anything else. The user said on
 - **Leftover fork session files from the GIF takes** are under ~/.claude/projects/-home-zyrus-Desktop-Projects/: `5fae1024-…`, `6d96bcd6-…`, `6bae1637-…`, `eae6b2e8-…` and `896b9994-…` (all .jsonl, 2026-11-23 12:31–12:43), plus the final take's fork. They were left in place; delete them if you like. The demo source `adb66a7d-…` was refreshed with one Sonnet turn at 12:51 ("ok, thanks").
 - **Your Remote Control session disconnected: "Trusted devices now required — run /remote-control to start a new session".** It showed while the demo source was being refreshed, 2026-11-23 12:51. It's an account change, not cachebeat's. It is now in the demo source's transcript, so the GIF's opening screenful may show it. The final take checks scene 0.
 - **Unverified on a real surface (step 6):** Status draws before the pane's `Input` check, so a surface without Input still shows it. It assumes such a surface has `Button`, and nothing at hand could check it. The desktop app hasn't been looked at for Status either.
-- **Fable 5.2 has no row in hooks/prices.ts**, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
+- **Step 7 decisions:**
+  - The "Prompt heart" tab is renamed **Heart**, so seven tabs fit 76 cells. The settings keep their full names.
+  - A cold send is counted whether or not the guard asked, but the "sent on a cold cache" line is logged only where the guard logs it today. With the guard off it counts silently.
+  - A full plugin store costs only records and Stats; beating goes on.
+- **Live checks left probe `session:<id>` records in the real plugin store** (steps 4 and 7). They are pruned 30 days after their last write.
+- **Fable 5.2 (and Mythos 5.2) now have rows in hooks/prices.ts** (step 7, checked against the pricing in the claude-api skill). This line was:, though it is the user's default model, so the Stats net would use the common ratios for it. Step 7 adds the row from the published rates. If the rates can't be found, this goes to the user.
 
 ## Paused for usage (2026-11-23 09:48)
 
