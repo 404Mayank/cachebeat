@@ -956,7 +956,7 @@ Each step is finished, tested and merged into `dev` before the next starts.
   - `lastMessageMinutesAgo` counts from the later of a turn's end and its start: since the latest turn ended, or since its message while it runs. The item's `s.lastReal` was that already, and the description says so.
   - The description's `nextBeat` wording follows the request-start fix (counted from when the request was sent), which the item's text, written before it, didn't.
   - The live checks were run after the build, not before, because C1, C2 and C4 read through `state`'s `context` section; nothing was committed until they passed.
-  - Not done: the item's "a rewind is noticed" clears the set only where `beat()` notices it (between turns, when a beat is due).
+  - **Changed after the review:** a rewind clears the set at the next turn's start, not in `beat()` (which missed a rewind with beating off or a turn before the next beat); `shadowed` lists every saved setting this folder has its own of, changed or not; a subagent's own compaction clears its entry; `usageLimits` says `resetsAt` is UTC and may be absent; the description's wording was tightened (`compactions` is what cachebeat has seen in this conversation; `lastMessageMinutesAgo` is since the current turn began, between turns since the last ended; the nulls clause was cut to "null when Claude Code has none"); the README tip names `mcp__cachebeat__state` with `only: ["context"]`.
 
 
 ### Step 4: resume (item 2)
