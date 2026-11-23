@@ -3,7 +3,7 @@ export type Pulse = 'hidden' | 'waiting' | 'armed'
 /** What survives a reload of the module (a file save). */
 export type Saved = {
   enabled: boolean
-  idle: number | null // this session's interval in ms; null follows the settings
+  keepUntil: number | null // wall ms until which beats keep the cache warm, then this session turns off; null: no time limit
   lastReal: number | null
   lastWarm: number | null
   lastRead: number | null // tokens the last beat read from the cache
@@ -18,7 +18,27 @@ export type Saved = {
   tail: string | null // how the conversation ended after the last turn: another ending means /rewind took it back
   asked: number | null // when the user last sent a message (a turn's start): Stop after idle counts from it
   turns: number // turns this conversation has had: after its first, Claude Code can cache it anew out of a beat's reach
+  compactions: number // the main conversation's compactions cachebeat has seen; /clear and /resume start the count again
+  lastCompactAt: number | null // when the latest was
+  guard: boolean | null // this session's own Cold guard, over the setting's; null follows the setting
+  stats: Days // this conversation's counts, by day, for the Stats page
 }
+
+/** One day's counts for a conversation. `beatCost` and `avoided` are weighed when counted, by the request's own model and lifetime. */
+export type Day = {
+  beats: number
+  read: number // tokens beats read from the cache
+  wrote: number // and wrote to it
+  beatCost: number // what beats read and wrote, in input-token equivalents
+  kept: number // turns that came back to a cache only beats kept warm
+  avoided: number // and the re-cache they avoided, in input-token equivalents
+  cold: number // messages sent on a cold cache: answered Send, sent unanswered, or from where nobody is asked
+  coldTokens: number // and the tokens they cached again
+  held: number // messages the cold guard asked about, whatever the answer
+  common: boolean // some figure was weighed by the common ratios: a model the price table lacks
+}
+/** Days by local date, `2026-11-23`: at most the last 30. */
+export type Days = Record<string, Day>
 
 /** How long the main conversation's prompt cache lives. */
 export type Ttl = '5m' | '1h'
@@ -42,6 +62,9 @@ export type BeatSettings = {
   onCold: 'wait' | 'stop' // the cache went cold before a beat reached it (a sleeping computer, retries): wait for the next turn, or stop
   skipSmall: boolean
   skipSmallTokens: number
+  coldGuard: boolean // ask before sending a message to a session whose cache has gone cold
+  coldGuardTokens: number // the smallest chat it asks about
+  coldGuardUnanswered: 'drop' | number // a question left unanswered: the message isn't sent, or is after this many minutes
   // the heart under the prompt
   heartPlacement: 'tail' | 'line'
   variant: string
@@ -79,7 +102,7 @@ declare module 'claude-code' {
   interface McpToolInputs {
     mcp__cachebeat__state: Record<string, never>
     mcp__cachebeat__set: {
-      session?: { enabled?: boolean; intervalMinutes?: number | null }
+      session?: { enabled?: boolean; keepAliveMinutes?: number | null; coldGuard?: boolean | null }
       settings?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } // null resets to the default
       folder?: { [K in keyof BeatSettings]?: BeatSettings[K] | null } | null // null follows all folders; the whole null drops every one
     }

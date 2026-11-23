@@ -1,6 +1,9 @@
 import type { BeatSettings, Look, Ttl } from '../types'
 import { STATUS_HEARTS, VARIANTS } from './animations'
 
+/** The chat size, in tokens, under which beating can be skipped and the cold guard doesn't ask: cheap to cache again. */
+export const SMALL_CHAT = 20_000
+
 export const DEFAULTS: BeatSettings = {
   defaultOn: false,
   interval: 'auto',
@@ -8,7 +11,10 @@ export const DEFAULTS: BeatSettings = {
   stopAtUsage: 90,
   onCold: 'wait',
   skipSmall: false,
-  skipSmallTokens: 20_000,
+  skipSmallTokens: SMALL_CHAT,
+  coldGuard: true,
+  coldGuardTokens: SMALL_CHAT,
+  coldGuardUnanswered: 'drop',
   heartPlacement: 'tail',
   variant: 'classic',
   showCount: true,
@@ -67,7 +73,7 @@ export function normalize(stored: unknown): BeatSettings {
   }
   for (const [k, v] of Object.entries(from)) {
     const isNumberFor = (...keys: string[]) => keys.includes(k) && typeof v === 'number'
-    if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval'))) s[k] = v
+    if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval', 'coldGuardUnanswered'))) s[k] = v
   }
   const out = s as BeatSettings
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
@@ -79,6 +85,10 @@ export function normalize(stored: unknown): BeatSettings {
   if (out.interval !== 'auto' && (typeof out.interval !== 'number' || parseMinutes(`${out.interval}`) === undefined)) out.interval = DEFAULTS.interval
   if (!['wait', 'warm'].includes(out.onModelSwitch)) out.onModelSwitch = DEFAULTS.onModelSwitch
   if (!['wait', 'stop'].includes(out.onCold)) out.onCold = DEFAULTS.onCold
+  if (parseTokens(`${out.coldGuardTokens}`) === undefined) out.coldGuardTokens = DEFAULTS.coldGuardTokens
+  if (out.coldGuardUnanswered !== 'drop' && (typeof out.coldGuardUnanswered !== 'number' || parseWait(`${out.coldGuardUnanswered}`) === undefined)) {
+    out.coldGuardUnanswered = DEFAULTS.coldGuardUnanswered
+  }
   return out
 }
 
@@ -193,9 +203,30 @@ function reader(unit: string, units: Record<string, number>, min: number, max: n
 
 export const parseTokens = reader('tokens', { '': 1, k: 1e3, m: 1e6 }, 1_000, 1_000_000, true)
 export const parseMinutes = reader('minutes', { '': 1, m: 1, min: 1 }, 1, 55, true) // under the hour the cache lives
+
+/** A beat interval or a keep-alive time in words: 5m, 2h, 1h 30m. */
+export const minutesText = (m: number) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`)
+
+/** A time still to come, in words, rounded up to the minute and never under one: 1m, 38m, 1h 52m. */
+export const fmt = (ms: number) => minutesText(Math.max(1, Math.ceil(ms / 60_000)))
+
+const DURATION_PART = '(\\d+(?:\\.\\d+)?)\\s*'
+const DURATION = new RegExp(`^(?:${DURATION_PART}(?:h|hr|hrs|hour|hours))?\\s*(?:${DURATION_PART}(?:m|min|mins|minute|minutes))?$`)
+
+/**
+ * A keep-alive time, in minutes: `30m`, `2h`, `1h30m`, `1.5h`, `90min`. The unit is required (a bare number is
+ * the old per-session interval, which a number alone no longer sets), and the time lands within 5 minutes to 48 hours.
+ */
+export const parseDuration = Object.assign((text: string): number | undefined => {
+  const m = DURATION.exec(text.trim().toLowerCase().replaceAll(',', ''))
+  if (!m || (m[1] === undefined && m[2] === undefined)) return undefined
+  const minutes = Math.round(Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0))
+  return minutes >= 5 && minutes <= 2880 ? minutes : undefined
+}, { unit: 'minutes', min: 5, max: 2880 }) satisfies Reader
 export const parseHours = reader('hours', { '': 1, h: 1, m: 1 / 60, min: 1 / 60 }, 0.5, 48, false)
 export const parsePercent = reader('percent', { '': 1, '%': 1 }, 10, 100, true)
 export const parseFrameMs = reader('ms a frame', { '': 1, ms: 1 }, 20, 500, true)
+export const parseWait = reader('minutes', { '': 1, m: 1, min: 1 }, 1, 15, true) // a cold guard's question left unanswered
 
 /** 184000 → 184k, 1250000 → 1.3M. */
 export const tokens = (n: number) =>
@@ -287,13 +318,29 @@ export const TABS: readonly Tab[] = [
     rows: [
       {
         key: 'stopAfterHours', label: 'Stop after idle', values: [1, 4, 8, 24], fmt: v => `${v}h`,
-        help: 'Beating stops after this long without a message from you.',
+        help: 'Beating stops after this long without a message from you. A session with its own keep-alive time (/cachebeat 2h) keeps to that instead.',
         custom: { placeholder: 'e.g. 10h or 90m', parse: parseHours },
       },
       {
         key: 'onCold', label: 'Cache gone cold', values: ['wait', 'stop'],
         fmt: v => (v === 'wait' ? 'start on your next message' : 'stop'),
         help: 'If the cache goes cold before a beat reaches it, as when your computer sleeps: start beating again on your next message, or stop.',
+      },
+      {
+        key: 'coldGuard', label: 'Cold guard', values: [true, false], fmt: onOff,
+        help: 'Asks before sending a message to a session whose cache has gone cold, and says how many tokens sending it caches again.',
+      },
+      {
+        key: 'coldGuardTokens', label: '  chats from', values: [10_000, 20_000, 50_000, 100_000], show: s => s.coldGuard,
+        fmt: v => `${tokens(Number(v))} tokens`,
+        help: 'The smallest chat the guard asks about: a smaller one is cheap to cache again.',
+        custom: { placeholder: 'e.g. 35k', parse: parseTokens },
+      },
+      {
+        key: 'coldGuardUnanswered', label: '  if unanswered', values: ['drop', 2, 5, 10], show: s => s.coldGuard,
+        fmt: v => (v === 'drop' ? "don't send (closes after 5m)" : `send after ${v}m`),
+        help: "What happens to a held message when the question isn't answered: it isn't sent (the question closes after 5m, so other incoming messages wait at most 5m), or it's sent after this long.",
+        custom: { placeholder: 'e.g. 3m', parse: parseWait },
       },
       {
         key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,
@@ -310,7 +357,7 @@ export const TABS: readonly Tab[] = [
     ],
   },
   {
-    id: 'heart', title: 'Prompt heart', preview: 'heart',
+    id: 'heart', title: 'Heart', preview: 'heart',
     rows: [
       {
         key: 'heartPlacement', label: 'Placement', name: 'Prompt heart placement', values: ['tail', 'line'], fmt: v => (v === 'tail' ? 'hint line · dim' : 'own line'),
@@ -332,7 +379,7 @@ export const TABS: readonly Tab[] = [
         fmt: v => ({ spaced: 'after a blank line', below: 'right below the turn row', off: 'off' })[v as string]!,
         help: 'Where the line goes under your latest turn, or off. In the desktop app it sits above the prompt.',
       },
-      { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows the time to the next beat.' },
+      { key: 'showCountdown', label: 'Countdown', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows the time to the next beat, and the time left on a keep-alive time.' },
       { key: 'showTokens', label: 'Tokens kept', values: [true, false], show: s => s.statusLine !== 'off', fmt: onOff, help: 'Shows how much the last beat kept warm, as · 347k cached.' },
       {
         key: 'statusHeart', label: 'Its heart', name: 'Turn line heart', values: STATUS_HEARTS, show: s => s.statusLine !== 'off' && s.lineAnimate,
@@ -350,6 +397,18 @@ export const TABS: readonly Tab[] = [
     ],
   },
 ]
+
+/** A tab of the pane with no settings, only a page drawn from the session's figures. */
+export type ReadOnlyPage = { id: string; title: string }
+
+/** The read-only tabs, ahead of the settings tabs: a new one is one entry here and a page for it in the pane. */
+export const READ_ONLY: readonly ReadOnlyPage[] = [{ id: 'summary', title: 'Status' }, { id: 'stats', title: 'Stats' }]
+
+/** Every tab the pane walks: the tab bar, the hotkeys and the arrows. `TABS` stays settings alone, which is what `rowOf`, `accept` and the tool read. */
+export const PAGES: readonly ReadOnlyPage[] = [...READ_ONLY, ...TABS]
+
+/** The tab an arrow on the tab bar reaches from the one holding the focus (`tab:<id>`): `by` along the tabs, round at either end. */
+export const tabBeside = (focus: string, by: number) => PAGES[(PAGES.findIndex(p => `tab:${p.id}` === focus) + by + PAGES.length) % PAGES.length]!
 
 export const rowOf = (key: keyof BeatSettings) => {
   for (const tab of TABS) for (const row of tab.rows) if (row.key === key) return { tab, row }

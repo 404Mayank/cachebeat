@@ -2,7 +2,11 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { BeatSettings, PanePage } from '../types'
 import { previewFrame, statusFrame, variant } from './animations'
 import type { Preview, Row, Span, Value } from './settings'
-import { DEFAULTS, HEX_OF, SESSION_HELP, TABS, isFlip, isHex, isLit, lookOf, rowOf, spans, tokens } from './settings'
+import { DEFAULTS, HEX_OF, PAGES, READ_ONLY, SESSION_HELP, TABS, isFlip, isHex, isLit, lookOf, rowOf, spans, tokens } from './settings'
+import { STATUS_NOTE, statusRows } from './status'
+import type { StatusFacts } from './status'
+import { statsLines } from './stats'
+import type { StatsFacts } from './stats'
 
 export const PANE = 'cachebeat-settings'
 
@@ -19,7 +23,8 @@ export type Actions = {
   reset: () => void
   refuse: (text: string) => void // a typed value the setting doesn't take: says why in the footer
   resetRow: (key: keyof BeatSettings) => void // one setting back to its default; one of this folder's own dropped
-  dropSession: () => void // this session's own interval dropped: it follows the settings
+  dropKeep: () => void // this session's keep-alive time dropped: it beats with no time limit
+  dropGuard: () => void // this session's own Cold guard dropped: it follows the setting
   toggleFolder: () => void // menu changes save for this folder alone, or all folders
 }
 /** What the pane draws from, besides the settings. */
@@ -28,8 +33,11 @@ export type View = {
   tick: number
   focus: string
   columns: number
+  status: StatusFacts | null // what the Status tab draws, read when it is on show
+  stats: StatsFacts | null // and the Stats tab
   isOn: boolean // this session beats
-  sessionMinutes: number | null // this session's own interval, set by /cachebeat <minutes>
+  keepUntil: string | null // when this session's keep-alive time is up, as the clock reads it (/cachebeat 2h); null: no time limit
+  guard: boolean | null // this session's own Cold guard (/cachebeat guard on|off), over the setting; null: none
   autoMinutes: number // what `auto` beats at for this session's cache
   isTerminal: boolean // the terminal's keys walk the pane; a desktop's Tab and clicks move its own focus
   notice: string // the last action's outcome, shown in the footer
@@ -65,14 +73,20 @@ export function paint(Text: Els['Text'], list: Span[]) {
 
 /**
  * The status line from the session's figures: its beats, what the last one read, the time to the
- * next (`next` is its words, `in 42m` or `due now`); before the first beat, the time to it alone. '' when there is nothing to say.
+ * next (`next` is its words, `in 42m` or `due now`) and the time left on a keep-alive time (`left`, `1h 52m left`); before
+ * the first beat, those alone. '' when there is nothing to say.
  */
-export function statusText(s: BeatSettings, beats: number, read: number | null, next: string | null) {
+export function statusText(s: BeatSettings, beats: number, read: number | null, next: string | null, left: string | null = null) {
   const countdown = s.showCountdown && next
-  if (beats === 0) return countdown ? `♡ next beat ${next}` : ''
+  const remaining = s.showCountdown && left
+  if (beats === 0) {
+    if (!countdown && !remaining) return ''
+    return `♡${countdown ? ` next beat ${next}` : ''}${remaining ? `${countdown ? ' ·' : ''} ${remaining}` : ''}`
+  }
   let text = `♥ cache kept warm ×${beats}`
   if (s.showTokens && read) text += ` · ${tokens(read)} cached`
   if (countdown) text += ` · next ${next}`
+  if (remaining) text += ` · ${remaining}`
   return text
 }
 
@@ -192,8 +206,61 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
     return { tree, ring }
   }
 
-  const tab = TABS.find(t => t.id === v.page.tab) ?? TABS[0]!
-  const rows = tab.rows.filter(r => !r.show || r.show(s))
+  // a read-only tab has no settings: it draws its page, and its ring is empty
+  const isReadOnly = READ_ONLY.some(p => p.id === v.page.tab)
+  const tab = isReadOnly ? undefined : TABS.find(t => t.id === v.page.tab) ?? TABS[0]!
+  const shownTab = tab?.id ?? v.page.tab
+  const keys = `1-${PAGES.length}`
+  const bar = (
+    <Box columnGap={1} flexWrap="wrap">
+      {PAGES.map((t, i) => (
+        <Button
+          plain
+          hotkey={`${i + 1}`}
+          key={`tab:${t.id}`}
+          dimColor={t.id !== shownTab}
+          onPress={() => act.tab(t.id)}
+        >
+          {t.title}
+        </Button>
+      ))}
+    </Box>
+  )
+  if (!tab && v.page.tab === 'stats') {
+    const lines = v.stats ? statsLines(v.stats) : null
+    const tree = (
+      <Box flexDirection="column">
+        {bar}
+        {rule}
+        {lines && <Text>{lines.header}</Text>}
+        {lines?.rows.map(r => <Text>{r}</Text>)}
+        {lines && <Text>{lines.strip}</Text>}
+        {lines && <Text dimColor>{lines.note}</Text>}
+        <Text dimColor>{v.isTerminal ? `↑↓ tabs · enter or ${keys} opens · esc closes` : `tab moves · ${keys} tabs · esc closes`}</Text>
+      </Box>
+    )
+    return { tree, ring }
+  }
+  if (!tab) {
+    const tree = (
+      <Box flexDirection="column">
+        {bar}
+        {rule}
+        {(v.status ? statusRows(v.status) : []).map(r => (
+          // the value wraps under its own column, not under the label
+          <Box>
+            <Box width={LABEL} flexShrink={0}><Text>{r.label}</Text></Box>
+            <Box flexShrink={1}><Text>{r.value}</Text></Box>
+          </Box>
+        ))}
+        <Text dimColor>{STATUS_NOTE}</Text>
+        <Text dimColor>{v.isTerminal ? `↑↓ tabs · enter or ${keys} opens · esc closes` : `tab moves · ${keys} tabs · esc closes`}</Text>
+      </Box>
+    )
+    return { tree, ring }
+  }
+  // the cold guard's own rows follow the guard in effect: this session's own while it has one
+  const rows = tab.rows.filter(r => !r.show || r.show(v.guard === null ? s : { ...s, coldGuard: v.guard }))
   // the tab's own ring: the tab bar above it is a level of its own, reached by Esc
   if (tab.id === 'beating') ring.push('session')
   ring.push('folder')
@@ -207,26 +274,25 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
   const focusedRow = rows.find(r => v.focus === `row:${r.key}` || v.focus === hexOf(r))
   const isOwn = (r: Row) => v.own[r.key] !== undefined
   const owned = Object.keys(v.own).length
-  const sessionNow = focusedRow?.key === 'interval' && v.sessionMinutes !== null ? v.sessionMinutes : null
-  const help = v.focus === 'session' ? SESSION_HELP
+  const help = v.focus === 'session' ? (v.keepUntil === null ? SESSION_HELP : `${SESSION_HELP} It keeps the cache warm until ${v.keepUntil}, then turns off. r drops that time.`)
     : v.focus === 'folder' ? (v.editsFolder
       ? `Menu changes save for ${v.path} only. Rows marked · this folder are set here; the rest follow all folders. Enter: back to all folders.`
       : `Menu changes save for all folders.${owned ? ` Rows marked here: show what ${v.path} sets for itself.` : ''} Enter: save them for ${v.path} only.`)
-    : sessionNow !== null ? `${sessionNow}m for this session only; otherwise ${shown(focusedRow!, s.interval, s)}. r drops it.`
     : v.focus === 'reset' && v.editsFolder ? `Drops ${v.path}'s own settings, so each follows all folders; press twice.`
     : focusedRow?.help ?? BUTTON_HELP[v.focus] ?? ''
-  // r takes the focused setting back: this session's own interval first; in this folder's settings,
+  // r takes the focused row back: this session's keep-alive time dropped; in this folder's settings,
   // one of its own back to all folders'; in all folders', a setting to its default, its custom value
   // kept in its list
-  const back = !focusedRow ? undefined
-    : sessionNow !== null ? { label: `back to ${shown(focusedRow, s.interval, s)}`, run: act.dropSession }
+  const back = v.focus === 'session' && v.keepUntil !== null ? { label: 'drop the time limit', run: act.dropKeep }
+    : !focusedRow ? undefined
+    : focusedRow.key === 'coldGuard' && v.guard !== null ? { label: 'follow the setting in this session', run: act.dropGuard }
     : v.editsFolder ? (isOwn(focusedRow) ? { label: `back to ${shown(focusedRow, v.allFolders[focusedRow.key], s)} (all folders)`, run: () => act.resetRow(focusedRow.key) } : undefined)
     : s[focusedRow.key] !== DEFAULTS[focusedRow.key] ? { label: `back to ${shown(focusedRow, DEFAULTS[focusedRow.key], s)}`, run: () => act.resetRow(focusedRow.key) }
     : undefined
-  const keys = `1-${TABS.length}`
-  // a row's value, and where it comes from when not the settings on show: this session, or this folder
+  // a row's value, and where it comes from when not the settings on show: this folder's
   const valueOf = (r: Row) => {
-    if (r.key === 'interval' && v.sessionMinutes !== null) return `${v.sessionMinutes}m · this session`
+    // this session's own Cold guard is what applies here: the row shows it, and the setting's value once it's dropped
+    if (r.key === 'coldGuard' && v.guard !== null) return `${shown(r, v.guard, s)} · this session (settings: ${shown(r, s.coldGuard, s)})`
     const mark = !isOwn(r) ? '' : v.editsFolder ? ' · this folder' : ` · here: ${shown(r, v.own[r.key]!, s)}`
     return shown(r, s[r.key], s) + (r.key === 'interval' ? intervalTail(s, v) : '') + mark
   }
@@ -234,22 +300,10 @@ export function settingsPane(els: Els, s: BeatSettings, v: View, act: Actions): 
   const line = (label: string, value: string, more = '') => `${label.padEnd(LABEL)}${value}${more}`
   const tree = (
     <Box flexDirection="column">
-      <Box columnGap={1} flexWrap="wrap">
-        {TABS.map((t, i) => (
-          <Button
-            plain
-            hotkey={`${i + 1}`}
-            key={`tab:${t.id}`}
-            dimColor={t.id !== tab.id}
-            onPress={() => act.tab(t.id)}
-          >
-            {t.title}
-          </Button>
-        ))}
-      </Box>
+      {bar}
       {rule}
       {tab.id === 'beating' && (
-        <Button plain key="session" onPress={() => (act.at('session'), act.toggleSession())}>{line('This session', v.isOn ? 'on' : 'off')}</Button>
+        <Button plain key="session" onPress={() => (act.at('session'), act.toggleSession())}>{line('This session', v.isOn ? `on${v.keepUntil === null ? '' : ` · until ${v.keepUntil}`}` : 'off')}</Button>
       )}
       <Button plain dimColor={!v.editsFolder} key="folder" onPress={() => (act.at('folder'), act.toggleFolder())}>
         {line('Settings for', v.editsFolder ? `this folder · ${v.path}` : 'all folders')}
