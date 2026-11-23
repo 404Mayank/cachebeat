@@ -117,7 +117,7 @@ Each beat is one small request to the Anthropic API, made the way Claude Code ma
 
 - cachebeat collects no personal data and has no telemetry. It sends nothing to its author or anyone else.
 - A beat is a request to Anthropic's API, made by Claude Code with your account, the same way your own messages are sent.
-- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
+- Your settings stay on your machine, in cachebeat's own file in Claude Code's config folder, with the path of each folder you gave settings of its own. So does each conversation's on or off, keep-alive time and beat count, by its session id, for 30 days from its last change, so that a resumed conversation picks up as you left it. What it reads to time beats (your cache settings, three environment variables, your usage limits) is read there and never sent anywhere.
 
 ## Commands
 
@@ -278,7 +278,7 @@ It tells you why, the way you chose under **Alerts**. On auto, a cache that's go
 - Sending a message restarts the countdown, and so does each request Claude makes during a turn. A turn gets a beat once it has gone quiet for a whole interval, counted from its last request. A conversation's first turn gets none.
 - The countdown runs from when a request was sent, not from when its answer ended, since that's when the cache's lifetime starts. So a long answer brings the next beat sooner, and one that streams for longer than the cache lasts leaves it cold.
 - After `/compact`, after `/rewind`, and after `/model` unless **After /model** is set to warm the new model, beats wait for your next message: there's no cache for it yet.
-- A resumed conversation (`claude --resume`, `--continue`, or `/resume`) waits for your next message too, and says so. Nothing of it is cached in this session yet, so no beat re-reads it before you decide to carry on.
+- A resumed conversation (`claude --resume`, `--continue`, or `/resume`) picks up as you left it: on or off, and any time you gave it. What it was is kept for 30 days from its last change; without it, the conversation starts as **New sessions start** says. Beats start after your next message, since nothing of it is cached in this session yet, and a line says whether the cache is likely still warm.
 - After a conversation's first turn, Claude Code can cache the conversation anew where a beat can't reach it. A beat that finds this says so once, and beats wait for your next message rather than paying to write the cache again each time.
 - If the cache goes cold before a beat reaches it, as when your computer sleeps, beats wait for your next message too, and say so (unless **Cache gone cold** is set to stop).
 - `/clear` starts a fresh conversation: the count goes back to zero, and beats resume after your first message.

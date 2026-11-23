@@ -61,6 +61,11 @@ let cached = 0 // tokens the main conversation's last request read from the cach
 let resent = false // that turn's last request sent the conversation anew, caching it where a beat can't reach
 let beating = false
 let isResumeUnsaid = false // a /resume paused beats, to be said once the resumed conversation is in place
+let conv: string | null = null // the conversation this session's record is kept under; none while /clear or /resume hands over
+let lastKept = '' // the record as last written or read, so a save writes only what changed
+let keeping: Promise<unknown> = Promise.resolve() // record writes, one after another
+let resumeHint: ResumeHint | null = null // Claude Code's figures for the resumed conversation, until they're applied
+let isRestored = false // session.start put the resumed conversation's own state in place: a hint arriving later applies at once
 let rowPending = false // the turn just ended: its closing row is the next new one drawn
 let isStatusOnBand = false // the desktop draws no closing row: the band above the prompt carries the countdown
 let paneSurface = 'terminal' // where the settings pane last drew: the terminal's keys are walked here, a desktop's its own
@@ -109,9 +114,93 @@ async function cacheTtl($: EngineInterface): Promise<Ttl> {
   return rateLimits.length > 0 && rateLimits.every(l => l.percentUsed < 100) ? '1h' : '5m'
 }
 
-function save($: EngineInterface) {
+async function save($: EngineInterface) {
   const copy = { ...s }
   void update($, saved, () => copy)
+  await keepRecord($)
+}
+
+/** A conversation's own on/off, keep-alive time and beat count, in the store by its id, for a resume to pick up. */
+type Kept = { v: 1; at: number; enabled: boolean; keepUntil: number | null; beats: number }
+
+/** What Claude Code says about a resumed conversation as it comes back: the time since its last response. */
+type ResumeHint = { id: string | undefined; secondsSince: number | undefined; at: number }
+
+const DAY = 24 * 60 * MIN
+const KEEP_DAYS = 30 // a record not written for this long is dropped
+const keyOf = () => JSON.stringify([conv, s.enabled, s.keepUntil, s.beats])
+
+/** The record stored under a key, if it is one this version reads. */
+const keptOf = (x: unknown): Kept | null =>
+  isObject(x) && x.v === 1 && typeof x.at === 'number' && typeof x.enabled === 'boolean' && typeof x.beats === 'number'
+    && (x.keepUntil === null || typeof x.keepUntil === 'number') ? x as Kept : null
+
+/** From here, this session's record is `id`'s; it is written at the next change, not now. */
+function keepAs(id: string | null) {
+  conv = id
+  lastKept = keyOf()
+}
+
+/** Writes this conversation's record when its on/off, keep-alive time or beat count changed since it was last written. */
+async function keepRecord($: EngineInterface) {
+  if (conv === null) return
+  const kept = keyOf()
+  if (kept === lastKept) return
+  lastKept = kept
+  const key = `session:${conv}`
+  const record = { enabled: s.enabled, keepUntil: s.keepUntil, beats: s.beats }
+  // in order: two saves close together would otherwise race, and the earlier could land last
+  const writing = keeping.then(async () => $.store.set(key, { v: 1, at: await $.clock.now(), ...record }))
+  keeping = writing.catch(() => undefined)
+  await writing
+}
+
+/** Drops the records of conversations not written for 30 days. */
+async function pruneRecords($: EngineInterface) {
+  const now = await $.clock.now()
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith('session:')) continue
+    const value = await $.store.get(key)
+    if (!isObject(value) || typeof value.at !== 'number' || now - value.at > KEEP_DAYS * DAY) await $.store.delete(key)
+  }
+}
+
+/**
+ * A resumed conversation's own state, from the record of the session that last held it: on or off, the keep-alive
+ * time (off once it has passed) and the beat count. With no record, it starts as New sessions start says. Beats wait
+ * for the next message either way: nothing of it is cached in this process yet.
+ */
+async function restoreConversation($: EngineInterface, id: string | null) {
+  const kept = id === null ? null : keptOf(await $.store.get(`session:${id}`))
+  const now = await $.clock.now()
+  const isOver = kept?.keepUntil != null && kept.keepUntil <= now
+  s = {
+    ...fresh, isCacheShort: s.isCacheShort, paused: RESUMED,
+    ...(kept ? { enabled: kept.enabled && !isOver, keepUntil: isOver ? null : kept.keepUntil, beats: kept.beats } : { enabled: cfg.defaultOn }),
+  }
+  keepAs(id)
+  if (id === null) return
+  isRestored = true
+  if (resumeHint?.id === id) seedFromResume(resumeHint)
+}
+
+/**
+ * The cache as Claude Code found it on resuming: last read when its last response came. Its first request's answer
+ * then counts from when it was sent, as any request's does.
+ */
+function seedFromResume(hint: ResumeHint) {
+  resumeHint = null
+  if (hint.secondsSince !== undefined) warmFrom(hint.at - hint.secondsSince * 1000)
+}
+
+/** The resume line: when beats start, and whether the cache is likely still warm, as far as the resume hint said. */
+async function sayResumed($: EngineInterface) {
+  if (!s.enabled) return
+  ttl = await cacheTtl($)
+  const view = viewOf(cacheFacts(null), await $.clock.now())
+  const cache = view.state === 'warm' ? ` · cache likely warm for ${fmt(view.expiresAt! - view.at)} more`
+    : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
+  $.ui.log(`beats resume after your next message${cache}`)
 }
 
 /**
@@ -187,7 +276,7 @@ async function changeSettings($: EngineInterface, change: Change) {
   cfg = merged()
   await publish($)
   restartClocks($)
-  save($)
+  await save($)
   if (s.enabled && !stepping && !beating) await schedule($)
   else await refreshLine($)
 }
@@ -395,7 +484,7 @@ async function wallCheck($: EngineInterface, call: number) {
   if (call !== scheduling || (s.nextAt === null && s.keepUntil === null)) return
   if (s.keepUntil !== null && now >= s.keepUntil) {
     if (busy) await refreshLine($) // the line says the time is up, not the minute it last counted
-    else endKeep($, now)
+    else await endKeep($, now)
     return
   }
   if (s.nextAt !== null && now >= s.nextAt) return scheduledBeat($)
@@ -447,13 +536,13 @@ async function schedule($: EngineInterface): Promise<number | undefined> {
     const now = await $.clock.now()
     if (call !== scheduling) return undefined
     if (now >= s.keepUntil && !busy) {
-      endKeep($, now)
+      await endKeep($, now)
       return undefined
     }
     if (!timer) armStep($, call, now)
   }
   setPulse($, p)
-  save($)
+  await save($)
   await refreshLine($)
   return ms
 }
@@ -529,9 +618,9 @@ async function resumeIfWarmed($: EngineInterface) {
   await schedule($)
 }
 
-function stop($: EngineInterface, why?: string) {
+async function stop($: EngineInterface, why?: string) {
   s.enabled = false
-  void schedule($)
+  await schedule($) // and the conversation's record says it's off
   if (!why) return 'off'
   announce($, `stopped: ${why}`)
   return `stopped: ${why}`
@@ -742,7 +831,7 @@ async function turnOn($: EngineInterface, change?: () => Promise<void>, keep?: n
   // on until 4:30 PM (2h); with no time limit once one was dropped
   const lead = s.keepUntil !== null ? `on until ${clockText(s.keepUntil, now)} (${fmt(s.keepUntil - now)})` : limit !== null ? 'on with no time limit' : 'on'
   if (stepping) {
-    save($)
+    await save($)
     return `${lead}, ${every()}; ${when(undefined)}`
   }
   if (wasOn && idle() === before && limit === s.keepUntil) {
@@ -779,7 +868,7 @@ async function scoped($: EngineInterface, to: Target, word: string | undefined) 
   const patch: Partial<BeatSettings> = isMinutes ? { interval: minutesOf(word) } : { defaultOn: word === 'on' }
   if (word === 'off') {
     await setSettings($, patch, to)
-    if (s.enabled) stop($)
+    if (s.enabled) await stop($)
   } else await turnOn($, () => setSettings($, patch, to))
   const key = isMinutes ? 'interval' : 'defaultOn'
   // what this folder sets for itself, that a change for all folders doesn't reach here
@@ -953,12 +1042,20 @@ export const register: Register = on => {
     await load($)
     await publish($)
     const prev = await read($, saved)
-    // a reload keeps this session's choice; a new session starts as its folder's settings say
-    s = prev ? restored(prev) : { ...fresh, enabled: cfg.defaultOn }
+    const id = await $.session.id()
+    await pruneRecords($)
     const messages = prev ? [] : await $.session.messages()
-    // a new process with a conversation already in it: --resume, --continue
-    if (messages.length) await pause($, RESUMED, RESUMED)
-    else await schedule($)
+    if (messages.length) {
+      // a new process with a conversation already in it: --resume, --continue. Claude Code's hint on it may come before
+      // this or after, and is applied once both are in. The line waits for it, and is said once the conversation is drawn
+      await restoreConversation($, id)
+      $.clock.after(SETTLE, () => void sayResumed($))
+    } else {
+      // a reload keeps this session's choice; a new session starts as its folder's settings say
+      s = prev ? restored(prev) : { ...fresh, enabled: cfg.defaultOn }
+      keepAs(id)
+    }
+    await schedule($)
     await $.command.register({
       name: 'cachebeat',
       description: 'Keep the prompt cache warm while idle',
@@ -974,6 +1071,7 @@ export const register: Register = on => {
   // conversation, so it starts its count afresh, keeping whether this session beats and how often
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     const r = await next(e)
+    keepAs(null) // the record left behind keeps what it had: the new conversation's id comes with its start
     await anotherConversation($)
     await schedule($)
     return r
@@ -983,6 +1081,7 @@ export const register: Register = on => {
   // would land in the conversation left behind: the resumed one's start says it
   on('session.end', { reason: 'resume' }, async ($, e, next) => {
     const r = await next(e)
+    keepAs(null) // the record left behind keeps what it had: the resumed conversation's own is read at its start
     await anotherConversation($)
     s.paused = RESUMED
     isResumeUnsaid = true
@@ -990,11 +1089,27 @@ export const register: Register = on => {
     return r
   })
 
+  // a conversation's start. Its id comes from the event: in this hook after /resume, $.session.id() is still the one left behind
   on('classic.SessionStart', async ($, e, next) => {
-    if (e.source === 'resume' && isResumeUnsaid) {
-      isResumeUnsaid = false
-      // the resumed conversation is drawn once this hook settles: a line logged before that is drawn over
-      if (s.enabled) $.clock.after(SETTLE, () => $.ui.log(`beats wait for your next turn: ${RESUMED}`))
+    const id = e.session_id ?? null
+    if (e.source === 'clear') {
+      // the new conversation has this session's on/off and keep-alive time: its record says so from the start
+      keepAs(id)
+      lastKept = ''
+      await keepRecord($)
+    }
+    if (e.source === 'resume' || e.source === 'fork') {
+      const hint = { id: e.session_id, secondsSince: e.seconds_since_last_response, at: await $.clock.now() }
+      if (isResumeUnsaid) {
+        // /resume within this session: no session.start comes, so its state is put in place here
+        isResumeUnsaid = false
+        await restoreConversation($, id)
+        seedFromResume(hint)
+        await schedule($)
+        // the resumed conversation is drawn once this hook settles: a line logged before that is drawn over
+        $.clock.after(SETTLE, () => void sayResumed($))
+      } else if (isRestored && id === conv) seedFromResume(hint)
+      else resumeHint = hint // --resume, --continue: session.start is still restoring, and applies it
     }
     return next(e)
   })
@@ -1016,7 +1131,7 @@ export const register: Register = on => {
     }
     if (words[0] === 'now') return { text: await beatNow($) }
     if (words[0] === 'global' || words[0] === 'local') return { text: await scoped($, words[0] === 'local' ? 'folder' : 'global', words[1]) }
-    if (words[0] === 'off') return { text: `this session: ${s.enabled ? stop($) : 'already off'}` }
+    if (words[0] === 'off') return { text: `this session: ${s.enabled ? await stop($) : 'already off'}` }
     // `on` (no time limit), a keep-alive time (`2h`, `1h 30m`), or both
     const rest = words[0] === 'on' ? words.slice(1) : words
     if (words[0] === 'on' && !rest.length) return { text: `this session: ${await turnOn($, undefined, null)}` }
@@ -1125,7 +1240,7 @@ export const register: Register = on => {
       s.compactions++
       s.lastCompactAt = await $.clock.now()
       fullReads.clear() // the conversation Claude read cachebeat's state in is gone
-      save($)
+      await save($)
     }
     if (isDone && !busy && s.lastWarm !== null) await pause($, 'compaction replaced the conversation', 'compaction replaced the conversation')
     return r
@@ -1357,7 +1472,7 @@ export const register: Register = on => {
         say($, `menu changes now save for ${editsFolder ? `${where} only` : 'all folders'}`)
       },
       back: () => void goTo($, { ...page, picker: null }, `row:${page.picker}`),
-      toggleSession: () => void (s.enabled ? Promise.resolve(stop($)) : turnOn($)).then(t => say($, `this session: ${t}`)),
+      toggleSession: () => void (s.enabled ? stop($) : turnOn($)).then(t => say($, `this session: ${t}`)),
       beatNow: () => void beatNow($).then(t => say($, t)),
       reset: () => {
         if (!isResetArmed) {
