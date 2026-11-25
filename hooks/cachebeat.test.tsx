@@ -940,6 +940,11 @@ const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unkno
     : { tool_use_id: 'u1', tool, output: '{}', isErrored: false },
 }) as never
 
+test('each tool\'s description fits the 4096 characters the model reads before tool search', () => {
+  // $.tool.register warns at load, on every user's screen, past this
+  for (const spec of [STATE, SET]) expect(spec.description.length).toBeLessThanOrEqual(4096)
+})
+
 test('both tools register, every setting in the schema with the pane\'s ranges', async ($: Engine, on: On) => {
   const { specs } = await setup($, on)
   expect(specs).toEqual([STATE, SET])

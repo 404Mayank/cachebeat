@@ -591,7 +591,7 @@ Cache                 nothing cached yet (1h TTL)
 
 **Choices for the user** (the mock-ups draw the recommended option):
 1. **The Cache row's wording:** `/usage`'s form, `warm (1h TTL, last read 12m ago) · 48m left`, or cachebeat's own, `warm · read 12m ago · about 48m left (1-hour cache)`. Recommended: `/usage`'s, since the user reads both.
-2. **The Size row's weighed figure** (`as 368k input tokens to cache again`): keep it, or show the bare size the way the guard's question speaks. Recommended: keep it. It is the one figure that says a re-cache costs more than its size (2× on a one-hour cache), which the dollar figure used to say.
+2. **The Size row's weighed figure** (`as 368k input tokens to cache again`): keep it, or show the bare size the way the guard's question speaks. Recommended: keep it. It is the one figure that says a re-cache costs more than its size (2× on a one-hour cache), which the dollar figure used to say. **Reversed by the user on 2026-11-25:** the row shows only `<n> tokens`. `state` still reports `recacheInputTokens`.
 3. **The Usage row with no limits reported** (an API key, a cloud provider): hide the row, or show `none reported`. Recommended: hide it.
 4. **This session's total read:** show the last beat's figures (what cachebeat has now), or a session total, which step 6 can't have before step 7's record. Recommended: the last beat's. Stats' This session column has the totals.
 5. **Stats' spans:** columns side by side, or `/stats`' range switch. Recommended: columns.
