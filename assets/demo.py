@@ -154,7 +154,7 @@ def read() -> list[str]:
         subprocess.run(['ffmpeg', '-v', 'error', '-i', str(RAW), '-vf', f'fps={FPS},crop=iw:ih*{1 - BOTTOM}:0:0', f'{d}/%05d.png'], check=True)
         frames = sorted(Path(d).glob('*.png'))
         env = {**os.environ, 'OMP_THREAD_LIMIT': '1'}  # one thread each, as the pool runs them side by side
-        with ThreadPoolExecutor() as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:  # a few at a time, to spare the machine's memory
             return list(pool.map(lambda f: subprocess.run(['tesseract', str(f), '-', '--psm', '6'], capture_output=True, text=True, env=env).stdout, frames))
 
 
@@ -268,9 +268,10 @@ def render(parts: list[Part], at: tuple[np.ndarray, np.ndarray]) -> None:
     # the margin goes transparent by geometry, not by colour: yuv420p shifts the margin's colour and rings inside the card.
     # The strip below starts transparent, and the caption brings its own alpha
     graph.append(f'[1:v]format=gray[m];[v][m]alphamerge,pad=w=iw:h=ih+{STRIP}:x=0:y=0:color=black@0[card]')
-    graph.append('[2:v]format=rgba[c];[card][c]overlay=0:0:format=auto:alpha=straight,format=rgba,split[x][y]')
-    graph.append('[x]palettegen=max_colors=128:stats_mode=full:reserve_transparent=1[pal]')  # diff mode greys the orange line
-    graph.append('[y][pal]paletteuse=dither=none:diff_mode=rectangle:alpha_threshold=128')  # flat terminal colors: no dither keeps text crisp
+    graph.append('[2:v]format=rgba[c];[card][c]overlay=0:0:format=auto:alpha=straight,format=rgba')
+    # two passes, the palette first: in one, every frame waits in memory for the palette made at the end
+    palette = ';'.join(graph) + ',palettegen=max_colors=128:stats_mode=full:reserve_transparent=1'  # diff mode greys the orange line
+    use = ';'.join(graph) + '[f];[f][3:v]paletteuse=dither=none:diff_mode=rectangle:alpha_threshold=128'  # no dither keeps text crisp
     length = sum((b - a) / speed for a, b, speed, _ in parts)
     m, r, x1, y1 = MARGIN, RADIUS, w - MARGIN - 1, h - MARGIN - 1
     inside = (f"if(between(X,{m},{x1})*between(Y,{m},{y1}),"
@@ -282,11 +283,17 @@ def render(parts: list[Part], at: tuple[np.ndarray, np.ndarray]) -> None:
         subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f"color=black:s={w}x{h}:d=1,format=gray,geq=lum='{inside}'",
                         '-frames:v', '1', mask], check=True)
         # the mask is bounded: unbounded, palettegen never sees an end
-        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(RAW), '-loop', '1', '-t', f'{length:.3f}', '-i', mask,
-                        '-framerate', str(OUT_FPS), '-i', f'{d}/c/%05d.png', '-filter_complex', ';'.join(graph), full], check=True)
+        inputs = ['-i', str(RAW), '-loop', '1', '-t', f'{length:.3f}', '-i', mask, '-framerate', str(OUT_FPS), '-i', f'{d}/c/%05d.png']
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', *inputs, '-filter_complex', palette, '-frames:v', '1', f'{d}/palette.png'], check=True)
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', *inputs, '-i', f'{d}/palette.png', '-filter_complex', use, full], check=True)
         # ffmpeg writes whole frames once there is alpha: ImageMagick keeps only what changes. No -fuzz: any of it leaves
-        # faint ghosts of text that scrolls away
-        subprocess.run(['magick', full, '-coalesce', '-layers', 'Optimize', str(GIF)], check=True)
+        # faint ghosts of text that scrolls away. Unlimited, it held 9.5 GB for 260 frames: the limits spill the rest to a
+        # disk folder, not /tmp, which can be memory itself (tmpfs)
+        spill = Path.home() / '.cache'
+        spill.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=spill, prefix='cachebeat-demo-') as cache:
+            subprocess.run(['magick', '-limit', 'memory', '1GiB', '-limit', 'map', '2GiB', full, '-coalesce', '-layers', 'Optimize', str(GIF)],
+                           check=True, env={**os.environ, 'MAGICK_TEMPORARY_PATH': cache})
 
 
 if __name__ == '__main__':
