@@ -589,3 +589,7 @@ How `/cachebeat 2h` came out, and what differs from the plan. Nothing here was r
 - **Running 2.1.287 in a cloud session:** `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder ran without the install-script approval step, and its `claude plugin test` and `validate` work there.
 - **Running 2.1.287 on a desktop with npm's install-script gate (2026-11-09):** `npm install` of the package added it and the platform package (`@anthropic-ai/claude-code-linux-x64`) but left `node_modules/.bin/claude` a stub ("claude native binary not installed"). `npm install-scripts approve @anthropic-ai/claude-code` and a rebuild didn't change that. The native binary is there to run directly: `node_modules/@anthropic-ai/claude-code-linux-x64/claude --version` printed `2.1.287 (Claude Code)`. The auto-mode classifier refused the first `npm install` ("Code from External") until the user approved it.
 - **CI already checks the oldest supported version.** It runs on 2.1.287 and latest, so a passing CI run means the API works on 2.1.287. That's how `$.tool.register` was confirmed there.
+
+## The demo GIF (`assets/demo.py`, 2026-11-26)
+
+- **ffmpeg's `drawtext` takes one font file and falls back to no other,** so a glyph that file lacks draws as a box. FiraCode Nerd Font Mono Regular has no `▸` (U+25B8), `⏵` or `⏩`; it has `»`, `›` and `▶`. Check every caption glyph before rendering: `python3 -c "from fontTools.ttLib import TTFont; print(ord('▸') in TTFont('<the fc-match file>').getBestCmap())"`. That's why the fast-forward caption is `» 50 min idle`.
