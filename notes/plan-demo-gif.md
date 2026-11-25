@@ -92,8 +92,13 @@ The footer's agent count is accepted. The builder runs T1 itself, with no fleet 
 - **The wall clock is gone:** the minutes-idle counter carries the time.
   - So there's no reason to record at midday. The real time still shows in the reply's `on until 3:50 AM`, but nothing points at it.
 - **The minutes** are `180 − left`, from the turn line's `left`. They're read by the same 2 fps tesseract pass `status()` makes, and mapped to each output frame through `plan()`'s parts.
-  - **On fast parts:** a fixed slope, `SPEED / 60` = 5 shown minutes per raw second, plus the part's median offset.
-  - **On ×1 parts:** the median.
+  - **The model:** interpolate over the OCR'd reads, as the prototype does, but over outlier-filtered reads.
+    1. Drop any read that breaks monotonicity by more than 2 minutes from its neighbours' trend.
+    2. Then `np.maximum.accumulate`, then `np.interp`.
+  - **Not a fixed slope with a per-part median:** that rule, in an earlier draft, was wrong for the hold after beat 1 (found by the builder, 2026-11-26).
+    - The demo mod goes fast again as soon as the beat's fork returns (`fast = forks < BEATS`), so the line's `left` keeps racing through that ×1 hold, by about 7 shown minutes.
+    - A median there would freeze the caption beside a moving line.
+    - Only after beat 2 does the clock run at real speed.
   - The prototype used plain interpolation kept monotone. Its numbers matched the line: `+34m` beside `2h 27m left` (read a moment earlier), and `1h 40m` beside `1h 20m left`.
   - **The format is cachebeat's own,** as in the turn line's `1h 20m left`: `34m` under an hour, `1h 40m` from an hour (the user, 2026-11-26).
 - **`▶`** (U+25B6) is in FiraCode Nerd Font Mono; `▸` isn't.
