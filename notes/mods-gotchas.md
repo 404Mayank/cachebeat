@@ -515,6 +515,8 @@ How `/cachebeat 2h` came out, and what differs from the plan. Nothing here was r
 
 ## Old versions (found in 0.7.0's CI)
 
+> **History since 2026-11-25:** the floor is now the installed Claude Code at each release (the user's call, to stop supporting old versions), and no old engine is tested. What follows is what testing them found; the rules that bound only on 2.1.287 no longer do.
+
 - **On 2.1.287 a `Button` needs a `label` or a single string child.** Newer builds also accept `Text` children ("a chip, a dim part"). For a dim button, use `<Button dimColor>` with a string. The test kit on the current build accepts both, so only CI's 2.1.287 leg catches it.
 - **A `Button` with a `hotkey` draws its own `r: ` before its label.** Don't write the key into the label too.
 - **On 2.1.287, a function handed `$` must have a name used nowhere else in the file,** not even as a local `const` in another function. The loader refuses the whole module: "the function handed $ "warmed" is declared more than once in this file". That broke 112 of 125 tests on 2.1.287 only (0.9.0's `warmed($)` helper against a `const warmed` message in `beat()`). Newer versions accept it, and only CI's 2.1.287 leg or the local 2.1.287 install catches it.
