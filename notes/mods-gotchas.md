@@ -600,3 +600,13 @@ How `/cachebeat 2h` came out, and what differs from the plan. Nothing here was r
 - **ffmpeg's `drawtext` takes one font file and falls back to no other,** so a glyph that file lacks draws as a box. FiraCode Nerd Font Mono Regular has no `▸` (U+25B8), `⏵` or `⏩`; it has `»`, `›` and `▶`. Check every caption glyph before rendering: `python3 -c "from fontTools.ttLib import TTFont; print(ord('▸') in TTFont('<the fc-match file>').getBestCmap())"`. That's why the fast-forward caption is `» 50 min idle`.
 - **VHS can't start its headless browser with `TMPDIR` set to a Claude Code session's scratchpad** ("browser exited unexpectedly before its debugging endpoint was ready"). Run demo.py with the default `TMPDIR`; `--launch` can take a scratchpad `TMPDIR`, since it runs no VHS.
 - **A real take's GIF is 1.6 MB where the mock's was 0.25 MB:** h264 noise lands on other palette colors from frame to frame, so ImageMagick's frame optimizer rewrites most of the card every frame. A temporal denoise (`hqdn3d`, `atadenoise`) before the palette made it larger (1.9–2.0 MB). Any `-fuzz` in the optimizer, even 1%, leaves faint ghosts of text that scrolls away (H1b's last frame, seen with the contrast raised; a pixel-diff threshold of 60 missed them). `-coalesce` before `-layers Optimize`, lossless, brought H1b's GIF from about 1.6 to 1.12 MB with no drift. Check any size trick by eye at 2×, contrast raised, on a frame after a scroll.
+- **The render's memory (H1c, 2026-11-26).** Claude Code's low-memory reaper killed H1c's demo.py after the recording, during the render. Measured per child on H1b's raw (260 frames, 1100×704):
+  - `magick -coalesce -layers Optimize`: **9.5 GB.** ImageMagick holds every frame at 16 bits per channel.
+  - ffmpeg in one pass: 1.0 GB, because every frame waits for the palette made at the end.
+  - Fixed in demo.py, with the same GIF byte for byte:
+    - ImageMagick gets `-limit memory 1GiB -limit map 2GiB`, with `MAGICK_TEMPORARY_PATH` in a folder under `~/.cache`: 3.2 GB.
+    - The palette is made in a first ffmpeg pass: 0.2 GB per pass.
+    - The OCR pool runs four tesseracts at a time.
+    - The render takes about 108s.
+  - **Don't spill to `/tmp`:** it's a 7.3G tmpfs here, which is memory, and it ran out of quota.
+  - **Measuring needs Python:** GNU `time` isn't installed. Use `os.wait4` on each child, or `resource.getrusage(RUSAGE_CHILDREN)`.
