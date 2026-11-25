@@ -14,8 +14,11 @@ a real request, run at real speed. The mod also pins cachebeat's settings: its d
 off, the ECG heart and the flow effects, and keeps cachebeat from writing its settings to your store.
 
 The model is sonnet; CACHEBEAT_DEMO_MODEL overrides it, for a dry run. CACHEBEAT_DEMO_GIF overrides where the GIF
-is written. CACHEBEAT_DEMO_BACK (for example "1h 40m") captions the last FINAL seconds "back <it> later · cache still
-warm"; unset, there is no such caption.
+is written.
+
+The GIF gets a caption in a pill below the card, in the transparent margin, with nothing drawn inside the card:
+"▶▶ fast-forward · +34m idle" on the fast parts, "+52m idle" on the beats' holds, "back after 1h 40m · cache still warm"
+over the closing hold. The minutes come from the turn line's "left", read in the same OCR pass as the beat count.
 
 Pass --skip-record to re-render the GIF from the last recording; CACHEBEAT_DEMO_RAW then reads another one.
 Pass --launch to build the two folders, keep them, and print the tape's claude command with them filled in.
@@ -29,22 +32,27 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
 
 TAPE = Path('assets/demo.tape')
 RAW = Path(os.environ.get('CACHEBEAT_DEMO_RAW') or 'assets/demo-raw.mp4')
 GIF = Path(os.environ.get('CACHEBEAT_DEMO_GIF') or 'assets/demo.gif')
-BACK = os.environ.get('CACHEBEAT_DEMO_BACK')
 FONT = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Regular'], capture_output=True, text=True).stdout
+BOLD = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Bold'], capture_output=True, text=True).stdout
 BOTTOM = 0.12  # the share of the frame at the bottom, the hint row, left out of what is read
 FPS = 2  # how often the status line is read
 LEAD, HOLD = 0.6, 1.5  # seconds each beat plays at full speed, before and after
 SETTLE = 2.0  # seconds the status line shows at full speed before the first fast-forward
 FF = 3  # how much faster the idle stretches play
 FINAL = 2.5  # the tape's closing hold, in seconds, which carries the payoff caption
-MARGIN, PADDING, RADIUS = 16, 20, 10  # the tape's Margin, Padding and BorderRadius
-COLS, ROWS = 77, 23  # the terminal's size inside them
-CAPTION_SIZE = 20  # the tape's FontSize, in native pixels
-IDLE = '» 50 min idle'  # FiraCode has no ▸, and drawtext falls back to no other font
+OUT_FPS = 12
+KEEP = 180  # the tape's /cachebeat 3h, in minutes: idle minutes are this less the turn line's "left"
+MARGIN, RADIUS = 16, 10  # the tape's Margin and BorderRadius
+STRIP = 64  # transparent rows added below the card for the caption
+SIZE = 24  # the caption's font size in native pixels: about 18px in GitHub's 830px column
+PILL, TEXT, DIM = (48, 54, 61, 255), (240, 246, 252, 255), (183, 189, 200, 255)  # Primer #30363d, #f0f6fc, #b7bdc8
 
 CLOCK_MOD = {
     '.claude-plugin/plugin.json': '{ "name": "cachebeat-demo-clock", "version": "0.0.0", "description": "Runs cachebeat\'s clock fast and pins its settings for the demo", "license": "MIT" }',
@@ -140,15 +148,19 @@ def probe(entry: str) -> str:
                           capture_output=True, text=True, check=True).stdout.strip()
 
 
-def status() -> list[tuple[float, int | None]]:
-    """Reads the status line every half second: the highest beat count a matching line shows, or None while there is none.
-    The /cachebeat 3h reply is a matching line too, with no count: the highest is the turn line's."""
+def read() -> list[str]:
+    """The text of the frame every half second, the hint row left out."""
     with tempfile.TemporaryDirectory() as d:
         subprocess.run(['ffmpeg', '-v', 'error', '-i', str(RAW), '-vf', f'fps={FPS},crop=iw:ih*{1 - BOTTOM}:0:0', f'{d}/%05d.png'], check=True)
         frames = sorted(Path(d).glob('*.png'))
         env = {**os.environ, 'OMP_THREAD_LIMIT': '1'}  # one thread each, as the pool runs them side by side
         with ThreadPoolExecutor() as pool:
-            texts = list(pool.map(lambda f: subprocess.run(['tesseract', str(f), '-', '--psm', '6'], capture_output=True, text=True, env=env).stdout, frames))
+            return list(pool.map(lambda f: subprocess.run(['tesseract', str(f), '-', '--psm', '6'], capture_output=True, text=True, env=env).stdout, frames))
+
+
+def status(texts: list[str]) -> list[tuple[float, int | None]]:
+    """The highest beat count a matching line shows, or None while there is none.
+    The /cachebeat 3h reply is a matching line too, with no count: the highest is the turn line's."""
     out = []
     for i, text in enumerate(texts):
         lines = [l for l in text.splitlines() if ('next beat in' in l or 'kept warm' in l) and 'cachebeat' not in l]
@@ -157,9 +169,27 @@ def status() -> list[tuple[float, int | None]]:
     return out
 
 
-def plan(seen: list[tuple[float, int | None]], duration: float) -> list[tuple[float, float, float, str | None]]:
-    """(start, end, speed, caption) on the recording's clock: fast and captioned from the status line's
-    first appearance to the last beat, each beat at full speed, and the payoff caption over the last FINAL seconds."""
+def idle(texts: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Idle minutes on the recording's clock, KEEP less the turn line's "left", as (times, minutes) to interpolate.
+    They only grow, so a read more than 2 minutes off the median of it and its neighbours is a misread, dropped; the
+    rest is made monotone."""
+    reads = []
+    for i, text in enumerate(texts):
+        for l in text.splitlines():
+            if 'cachebeat' not in l and (m := re.search(r'(?:(\d+)h\s*)?(\d+)\D?m left', l)):
+                reads.append((i / FPS, KEEP - int(m.group(1) or 0) * 60 - int(m.group(2))))
+    t, v = np.array(reads).T
+    near = np.array([np.median(v[max(0, k - 1):k + 2]) for k in range(len(v))])
+    keep = np.abs(v - near) <= 2
+    return t[keep], np.maximum.accumulate(v[keep])
+
+
+Part = tuple[float, float, float, str]  # start and end on the recording's clock, speed, and what plays: lead, fast, hold, payoff, final
+
+
+def plan(seen: list[tuple[float, int | None]], duration: float) -> list[Part]:
+    """Fast from the status line's first appearance to the last beat, each beat at full speed, then the payoff,
+    with the tape's closing hold split off by time."""
     start = next(t for t, n in seen if n is not None) + SETTLE
     # the line is unreadable for a moment as a beat lands ("next beat due now" matches nothing), so a count is compared
     # with the last one read, not with the frame before it
@@ -171,32 +201,74 @@ def plan(seen: list[tuple[float, int | None]], duration: float) -> list[tuple[fl
             beats.append(t)
         last = n
     beats = beats[:2]
-    parts, t = [(0.0, start, 1, None)], start
+    parts, t = [(0.0, start, 1, 'lead')], start
     for x in beats:
-        parts.append((t, x - LEAD, FF, IDLE))
-        parts.append((x - LEAD, x + HOLD, 1, None))
+        parts.append((t, x - LEAD, FF, 'fast'))
+        parts.append((x - LEAD, x + HOLD, 1, 'hold'))
         t = x + HOLD
-    # the payoff reads ×2 again, so no beat marks it: the tape's closing hold is cut off by time
-    if BACK:
-        parts.append((t, duration - FINAL, 1, None))
-        t = duration - FINAL
-    parts.append((t, duration, 1, f'back {BACK} later · cache still warm' if BACK else None))
+    # the payoff reads ×2 again, so no beat marks it
+    parts.append((t, duration - FINAL, 1, 'payoff'))
+    parts.append((duration - FINAL, duration, 1, 'final'))
     return parts
 
 
-def render(parts: list[tuple[float, float, float, str | None]]) -> None:
+def span(minutes: float) -> str:
+    """Minutes as cachebeat writes them, as in the turn line's "1h 20m left"."""
+    m = round(minutes)
+    return f'{m}m' if m < 60 else f'{m // 60}h {m % 60}m'
+
+
+def captions(parts: list[Part], at: tuple[np.ndarray, np.ndarray], d: Path, w: int, h: int) -> None:
+    """One transparent PNG per output frame, w by h + STRIP, holding the caption's pill under the card, or nothing."""
+    regular, bold = ImageFont.truetype(FONT, SIZE), ImageFont.truetype(BOLD, SIZE)
+    measure = ImageDraw.Draw(Image.new('RGBA', (1, 1)))
+    width = lambda segs: sum(measure.textlength(text, font=font) for text, font, _ in segs)
+
+    def caption(kind: str, raw: float) -> list | None:
+        m = span(float(np.interp(raw, *at)))
+        if kind == 'final':
+            return [(f'back after {m}', bold, TEXT), (' · cache still warm', regular, DIM)]
+        if kind in ('fast', 'hold'):
+            lead = [('▶▶ fast-forward', bold, TEXT), (' · ', regular, DIM)] if kind == 'fast' else []
+            return lead + [(f'+{m} idle', regular, TEXT)]
+        return None
+
+    # one pill for every caption, the widest's, so it doesn't jitter as the text changes
+    pw = max(width([('▶▶ fast-forward', bold, 0), (' · ', regular, 0), ('+1h 40m idle', regular, 0)]),
+             width([('back after 1h 40m', bold, 0), (' · cache still warm', regular, 0)])) + 2 * 22
+    ph = SIZE + 2 * 10
+    x0, y0 = (w - pw) / 2, h + (STRIP - ph) / 2 - 4
+    def raw(tau: float) -> tuple[str, float]:
+        """The part playing at tau, seconds into the GIF, and the recording's time it shows."""
+        o = 0.0
+        for a, b, speed, kind in parts:
+            if tau < o + (b - a) / speed:
+                return kind, a + (tau - o) * speed
+            o += (b - a) / speed
+        return parts[-1][3], parts[-1][1]
+
+    for k in range(int(sum((b - a) / s for a, b, s, _ in parts) * OUT_FPS) + 1):
+        im = Image.new('RGBA', (w, h + STRIP), (0, 0, 0, 0))
+        if segs := caption(*raw(k / OUT_FPS)):
+            draw = ImageDraw.Draw(im)
+            draw.rounded_rectangle([x0, y0, x0 + pw, y0 + ph], radius=8, fill=PILL)
+            x = (w - width(segs)) / 2
+            for text, font, color in segs:
+                draw.text((x, y0 + 9), text, font=font, fill=color)
+                x += draw.textlength(text, font=font)
+        im.save(d / f'{k:05d}.png')
+
+
+def render(parts: list[Part], at: tuple[np.ndarray, np.ndarray]) -> None:
     w, h = map(int, probe('stream=width,height').split(','))
-    inner = MARGIN + PADDING
-    row, cell = (h - 2 * inner) / ROWS, (w - 2 * inner) / COLS
-    # the prompt row, 4th from the card's bottom, right-aligned inside the input box's edge
-    caption = (f"drawtext=fontfile='{FONT}':fontsize={CAPTION_SIZE}:fontcolor=0x9198a1"
-               f":x=w-tw-{inner + 2 * cell:.0f}:y={h - inner - 4 * row:.1f}+({row:.1f}-th)/2:text='{{}}'")
     graph = [f'[0:v]split={len(parts)}' + ''.join(f'[s{i}]' for i in range(len(parts)))]
-    for i, (a, b, speed, text) in enumerate(parts):
-        graph.append(f'[s{i}]trim=start={a}:end={b},setpts=(PTS-STARTPTS)/{speed}' + (',' + caption.format(text) if text else '') + f'[p{i}]')
-    graph.append(''.join(f'[p{i}]' for i in range(len(parts))) + f'concat=n={len(parts)}:v=1:a=0,fps=12,format=rgba[v]')
-    # the margin goes transparent by geometry, not by colour: yuv420p shifts the margin's colour and rings inside the card
-    graph.append('[1:v]format=gray[m];[v][m]alphamerge,split[x][y]')
+    for i, (a, b, speed, _) in enumerate(parts):
+        graph.append(f'[s{i}]trim=start={a}:end={b},setpts=(PTS-STARTPTS)/{speed}[p{i}]')
+    graph.append(''.join(f'[p{i}]' for i in range(len(parts))) + f'concat=n={len(parts)}:v=1:a=0,fps={OUT_FPS},format=rgba[v]')
+    # the margin goes transparent by geometry, not by colour: yuv420p shifts the margin's colour and rings inside the card.
+    # The strip below starts transparent, and the caption brings its own alpha
+    graph.append(f'[1:v]format=gray[m];[v][m]alphamerge,pad=w=iw:h=ih+{STRIP}:x=0:y=0:color=black@0[card]')
+    graph.append('[2:v]format=rgba[c];[card][c]overlay=0:0:format=auto:alpha=straight,format=rgba,split[x][y]')
     graph.append('[x]palettegen=max_colors=128:stats_mode=full:reserve_transparent=1[pal]')  # diff mode greys the orange line
     graph.append('[y][pal]paletteuse=dither=none:diff_mode=rectangle:alpha_threshold=128')  # flat terminal colors: no dither keeps text crisp
     length = sum((b - a) / speed for a, b, speed, _ in parts)
@@ -205,11 +277,13 @@ def render(parts: list[tuple[float, float, float, str | None]]) -> None:
               f"if(gt(hypot(max(0,max({m + r}-X,X-{x1 - r})),max(0,max({m + r}-Y,Y-{y1 - r}))),{r}),0,255),0)")
     with tempfile.TemporaryDirectory() as d:
         mask, full = f'{d}/mask.png', f'{d}/full.gif'
+        (Path(d) / 'c').mkdir()
+        captions(parts, at, Path(d) / 'c', w, h)
         subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f"color=black:s={w}x{h}:d=1,format=gray,geq=lum='{inside}'",
                         '-frames:v', '1', mask], check=True)
         # the mask is bounded: unbounded, palettegen never sees an end
         subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(RAW), '-loop', '1', '-t', f'{length:.3f}', '-i', mask,
-                        '-filter_complex', ';'.join(graph), full], check=True)
+                        '-framerate', str(OUT_FPS), '-i', f'{d}/c/%05d.png', '-filter_complex', ';'.join(graph), full], check=True)
         # ffmpeg writes whole frames once there is alpha: ImageMagick keeps only what changes. No -fuzz: any of it leaves
         # faint ghosts of text that scrolls away
         subprocess.run(['magick', full, '-coalesce', '-layers', 'Optimize', str(GIF)], check=True)
@@ -223,8 +297,9 @@ if __name__ == '__main__':
         if 'CACHEBEAT_DEMO_RAW' in os.environ:
             sys.exit('CACHEBEAT_DEMO_RAW is read with --skip-record only: a recording always writes assets/demo-raw.mp4')
         record()
-    parts = plan(status(), float(probe('format=duration')))
-    for a, b, speed, text in parts:
-        print(f'{a:6.1f}–{b:6.1f}s  ×{speed:.1f}{f"  {text}" if text else ""}')
-    render(parts)
+    texts = read()
+    parts = plan(status(texts), float(probe('format=duration')))
+    for a, b, speed, kind in parts:
+        print(f'{a:6.1f}–{b:6.1f}s  ×{speed:.1f}  {kind}')
+    render(parts, idle(texts))
     print(f'wrote {GIF} ({GIF.stat().st_size / 1e6:.2f} MB, {sum((b - a) / s for a, b, s, _ in parts):.1f}s)')
