@@ -210,10 +210,9 @@ def render(parts: list[tuple[float, float, float, str | None]]) -> None:
         # the mask is bounded: unbounded, palettegen never sees an end
         subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(RAW), '-loop', '1', '-t', f'{length:.3f}', '-i', mask,
                         '-filter_complex', ';'.join(graph), full], check=True)
-        # ffmpeg writes whole frames once there is alpha: ImageMagick keeps only what changes. h264 noise lands on other
-        # palette colors from frame to frame, and 1% fuzz counts most of it as unchanged; from 1.5% up, text that scrolls
-        # away leaves faint ghosts on the card
-        subprocess.run(['magick', full, '-coalesce', '-fuzz', '1%', '-layers', 'Optimize', str(GIF)], check=True)
+        # ffmpeg writes whole frames once there is alpha: ImageMagick keeps only what changes. No -fuzz: any of it leaves
+        # faint ghosts of text that scrolls away
+        subprocess.run(['magick', full, '-coalesce', '-layers', 'Optimize', str(GIF)], check=True)
 
 
 if __name__ == '__main__':
