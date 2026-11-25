@@ -108,7 +108,7 @@ Drafted on 2026-11-23 in step 9, revised on 2026-11-26 against `main` (0.9.3); n
   - what they saved
   - the net, in input tokens
   - cold sends
-- **Claude can read its context:** ask it how full the context window is, when it will compact, and whether the cache is still warm.
+- **Claude can read its context:** ask it how full the context window is and when it will compact. (Not whether the cache is warm: asking sends a request that warms it, so the answer is always warm. Status and the turn line show it without a request.)
 - **A command typed while Claude is working** answers at once in a toast.
 
 ## Findings worth knowing before you touch anything
