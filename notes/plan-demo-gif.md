@@ -42,7 +42,7 @@ You're building the new README GIF from this plan. The orchestrator is `cachebea
    - demo.py's printed parts and the GIF's length
    - frames of the opening, ×2, and the payoff's end
    - every H1 check that failed, and what you changed
-6. **Before T1** ⏸: ask for the fleet to be closed (§8), and for the account's usage figure. Your own session counts as a running agent too, so the footer may still read `← 1 agent`. Say what H1's footer showed, and let the orchestrator decide: accept it, or have the user run T1's command with every session closed.
+6. **Before T1** ⏸: ask for the account's usage figure, and for the go-ahead on the Revision's overlay. `← N agents` in the footer is accepted, so you run T1 yourself, with no fleet closing (Revision).
 7. **T1** (§6): Sonnet. Run the frame check and the payoff sanity check, then the final render with `CACHEBEAT_DEMO_BACK`. **T2 only if a frame check fails.** ⏸ Before any third take.
 8. **Wrap-up:**
    - Write "Results" under §6: F1–T2, the forks' session files, and the Haiku runs' count.
@@ -50,6 +50,97 @@ You're building the new README GIF from this plan. The orchestrator is `cachebea
    - Put the README line (§7) in its own commit.
 
    ⏸ Send the commit list and the final GIF's path, size and length for review.
+
+## Revision (2026-11-26): the user's animations, and time made visible
+
+**What this supersedes.** Where it disagrees with the sections below, it wins:
+- the `» 50 min idle` and `back … later · cache still warm` drawtext captions (§2 scenes 3 and 4, §3 "The fast-forward", §5's `render()` row)
+- `CACHEBEAT_DEMO_BACK`
+- §8 items 4 and 6
+
+Both decisions are the user's, through the orchestrator. The overlay is a proposal, waiting on the user's OK; the builder doesn't build it before then.
+
+### The user's animations in the GIF (decided)
+
+The demo mod's `PINNED` becomes:
+
+```ts
+const PINNED = { coldGuard: false, stopAtUsage: 100, variant: 'ecg', heartEffect: 'flow', lineEffect: 'flow' }
+```
+
+- **What it shows:** the prompt heart (the hint row) plays ECG, and both the heart and the turn line take the flow shimmer.
+- **Everything else stays at cachebeat's defaults.** The plugin's own defaults don't change.
+
+### `← N agents` (decided)
+
+The footer's agent count is accepted. The builder runs T1 itself, with no fleet closing. The brief's step 6 is changed to match.
+
+### Time made visible (proposed)
+
+The racing countdown and a dim `» 50 min idle` didn't read as time passing at a glance. Replace them with two overlays drawn from the take's own figures.
+
+**1. A running clock** in the empty prompt row, right-aligned: `» away 34m  1:24 AM`.
+- **Shown** from the `/cachebeat 3h` reply to the end of the ×2 hold.
+- **`»`** in Claude's orange `#d77757`, on fast parts only.
+- **`away 34m`** in Primer's muted `#9198a1`.
+- **The time** in `#e6edf3`, FiraCode Bold 20px.
+- **Through the payoff's final hold:** `back at 2:30 AM · cache still warm`. The time is bold, and the rest is muted.
+- **Hidden** while the payoff is typed and answered, since the prompt row is in use then.
+
+**2. A fill bar** on the prompt box's top border: a 3px orange line, `#d77757`.
+- It fills left to right with the time since the cache was last read, over the 50-minute interval.
+- It snaps back to empty as each beat lands, so the bar filling and the heart beating read together.
+- Hidden after the ×2 hold.
+
+**Where the figures come from** is the take itself, read by OCR. It's the same 2 fps tesseract pass `status()` already makes, so no fiction is added:
+- **The start** is the `/cachebeat 3h` reply's `on until 3:50 AM (3h)`, minus 3h.
+- **Minutes away** are `180 − left`, from the turn line's `… 2h 27m left`.
+- **The bar** is `(50 − next) / 50`, from `next (beat) in Nm`, with `due now` counting as 0.
+- **Map each frame:**
+  - Each output frame (12 fps) maps back to raw time through `plan()`'s parts.
+  - On fast parts, take the minutes from a fixed slope, `SPEED / 60` = 5 shown minutes per raw second, with the median offset of that part's samples. On ×1 parts, use the part's median.
+  - This absorbs OCR misreads: H1b read `2h 1Im left` once.
+  - The prototype used plain interpolation kept monotone, and matched cachebeat's own line in every frame checked.
+- **The clock shows the take's real time.** H1b ran at 12:50 AM. A fixed fiction can't work, because the reply on screen states the real `on until`.
+  - **Suggested:** run T1 around midday, so the GIF reads like the README's "back from lunch". It's the user's call.
+
+**How it's drawn:**
+- Python draws one transparent PNG per output frame (Pillow, FiraCode Regular and Bold at 20px).
+- ffmpeg composites them with `overlay` after the concat, before the `alphamerge`.
+- This replaces the drawtext captions, `IDLE` and `CACHEBEAT_DEMO_BACK`. The `FINAL` split stays, to mark the final hold.
+
+**What it can't break:**
+- It's drawn after OCR, so OCR never sees it.
+- It sits only in the prompt row and on the prompt box's top border, so it never covers the turn line, which stays above the box: under the setup turn, then under the payoff's answer.
+
+**Checked free, on H1b's raw** (`--skip-record`'s input; the prototype is this session's scratchpad `ff/proto.py`, run against the builder's `demo.py`):
+- The output is 21.5s and 1.17 MB, against the builder's 1.12 MB.
+- **Frame 72,** in a fast part: `» away 34m  1:24 AM` beside the line's `next beat in 17m · 2h 27m left` (180 − 147 = 33, read a moment earlier). The bar is at 66% (33 of 50).
+- **Frame 100,** the ×1 hold: `away 51m  1:41 AM`, with the bar almost empty after the beat.
+- **Frame 250,** the final hold: `back at 2:30 AM · cache still warm`, beside `1h 20m left` (100 minutes after 12:50).
+- The mask still matched, and the corners were unchanged.
+
+**For the builder,** once approved:
+- **Port the overlay into `render()`:** the OCR parse into `status()` (or a sibling that reuses its texts), the fixed-slope model, the PNG frames, and the `overlay` input.
+- **F2-style check:** in 5 grabbed frames, the clock's minutes away equal `180 − left` within a minute, and the bar matches `next`.
+
+### The flow shimmer and OCR (flagged)
+
+**What flow does** (`spans()`, hooks/settings.ts): a three-glyph highlight in the theme's lighter `claudeShimmer` tone sweeps across the turn line, one glyph per tick.
+- Both tones are light orange on `#161b22`, so tesseract's binarization should hold (inferred).
+- **The risk** is a frame where the highlight sits on the count, read as something other than `×2`.
+  - `plan()` skips unread frames, since it compares a count with the last one read, so a miss costs nothing.
+  - A misread *higher* count would add a false beat.
+  - The clock overlay's `left` and `next` reads go through the fixed-slope model, which absorbs outliers.
+- **Evidence it's likely fine:** step 8's final take OCR'd the user's own ECG-and-flow line, on Catppuccin, and `plan()` found both beats.
+- **The ECG heart** is in the hint row, which `BOTTOM` crops out.
+
+**Free check, F1b** (the printf mock can't do it: it would need the shimmer's colors per glyph per tick):
+- A VHS tape launches the fork with `--launch`'s command, with nothing typed. It runs `/cachebeat settings`, opens the turn line's look tab, and records 6s.
+  - That tab's live preview draws `♥ cache kept warm ×3 · 184k cached · next in 42m` through the same `spans()` and `paint()` as the real line, at the pinned flow.
+- Run `status()`'s tesseract on every frame at 12 fps, with the crop as in `status()`.
+- **Pass:** at least 90% of frames read `kept warm … 3` and `next in 42m`, and none reads another count.
+- Typing `/cachebeat settings` writes a fork session file (F3): list it with the others.
 
 **The floor is the installed Claude Code, 2.1.332** (the user, 2026-11-25). Record and check with the installed `claude` only, with no old binaries.
 
@@ -207,7 +298,7 @@ The `--plugin-dir` copy reads that same store (B2). Changing them through `set` 
 **How:** the demo mod (the clock mod, extended; rename its `description` to "Runs cachebeat's clock fast and pins its settings for the demo") adds three op hooks:
 
 ```ts
-const PINNED = { coldGuard: false, stopAtUsage: 100 } // everything else: cachebeat's DEFAULTS, as a new install has them
+const PINNED = { coldGuard: false, stopAtUsage: 100, variant: 'ecg', heartEffect: 'flow', lineEffect: 'flow' } // the user's animations (Revision); everything else: cachebeat's DEFAULTS
 const KEPT = ['settings', 'folders', 'customs'] // the user's own: read pinned, never written
 on('store.get', async ($, e, next) => {
   if (next.origin.plugin !== 'cachebeat') return next(e)
@@ -384,7 +475,7 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
 - **VHS 0.12.1 does honour `Margin`, `MarginFill` and `BorderRadius`** (checked), though `vhs manual` doesn't list them.
 
 **Real takes: Sonnet, two at most.**
-- **T1:** `CACHEBEAT_DEMO_GIF=<scratch>/t1.gif python3 assets/demo.py`, with no `CACHEBEAT_DEMO_BACK`. Before it: account usage under 90% (`clear` reports it), the fleet closed (§8), and the source untouched since F3. After:
+- **T1:** `CACHEBEAT_DEMO_GIF=<scratch>/t1.gif python3 assets/demo.py`, with no `CACHEBEAT_DEMO_BACK`. Before it: account usage under 90% (`clear` reports it), and the source untouched since F3. After:
   - Check every frame against §2's "On screen" column, and `git diff` the tape and demo.py against what H1 ran.
   - **A sanity check on the payoff** (§2: it can't prove the beats worked). Read the fork's transcript, the newest `.jsonl` in the ProgLang project folder. The payoff turn's first assistant `usage` should show `cache_read_input_tokens` near the conversation's size, and `cache_creation_input_tokens` small (the turn's own new text). If it doesn't, something is badly off: drop the payoff caption and report it.
   - **The final render,** the only one that writes the tracked GIF: `CACHEBEAT_DEMO_BACK="<3h minus the last frame's left>" python3 assets/demo.py --skip-record`, with `CACHEBEAT_DEMO_GIF` unset.
@@ -443,7 +534,7 @@ The user confirmed the source and the release, and told the orchestrator (`cache
    - The release branch is refreshed after them. Commit the GIF and README line as `cachebeat 0.10.0 (gif): …`.
 3. **Dark only.** §7's `<picture>` variant isn't built.
 4. **Chrome from this machine:**
-   - **The fleet closes before T1:** the orchestrator and the builder's sessions are closed, so `← 2 agents` doesn't show. The builder asks the orchestrator to arrange this, and checks the footer at T1's first frame.
+   - **`← N agents` is accepted** (the user, 2026-11-26, replacing "close the fleet"). The builder runs T1 itself.
    - **The mode label:** the demo runs with `--permission-mode auto`, in place of `default` (the user, 2026-11-25). The hint row shows auto mode's label, and that's accepted. The tape's `--permission-mode` flag and §5 change together.
 5. **The payoff stays if H1's gate passes;** otherwise it's cut, as §1 says.
 6. **The `▸▸ 50 min idle` caption stays,** made legible (the orchestrator, from the review): the terminal's size, Primer's muted foreground, in the prompt row (§3).
