@@ -214,7 +214,7 @@ Every change, with its risk and the check that clears it. The check IDs are in t
 | --- | --- | --- |
 | The `Set` block (§3) replaces size, padding, theme and typing | OCR misses the new colors or size; the bottom crop (`BOTTOM`) eats the turn line at 640 rows | F1 (mock), H1 |
 | `--settings`: drop `"verbose":true`; add `"theme":"dark"`, `"showTurnDuration":false`, `"spinnerTipsEnabled":false` | `theme` doesn't override from `--settings`; a value is written back to ~/.claude/settings.json; the turn line dies with `showTurnDuration` | F3, H1 |
-| `--permission-mode default` | It shows `⏸ manual mode on` in the hint row (inferred: because the user's default mode differs). Try the launch without the flag and see which footer is quieter. Keep the flag if dropping it shows a mode that runs tools unasked, because the setup and payoff turns must not run tools. | F3 |
+| `--permission-mode default` becomes `--permission-mode auto` (the user, §8) | The hint row shows auto mode's label in place of `⏸ manual mode on`; that's accepted. Auto mode runs tools without asking, so a turn that reaches for a tool shows it in frame. The setup and payoff turns must answer from context: the source reads `demo.sh` first (§4). | F3 (how the hint row looks), H1 (no tool line in either turn) |
 | `cd "$CACHEBEAT_DEMO_DIR"` points at the ProgLang folder; `CACHEBEAT_DEMO_SESSION` is the new source | none new | F3 |
 | `--settings` also gains `"remoteControlAtStartup":false` (and `"awaySummaryEnabled":false` if F3 shows a summary) | the keys aren't honoured from `--settings`; a notice prints at the bottom of the opening frame | F3 |
 | Scene 0 rewritten: no `/cachebeat` + Escape trick, no guard question; the setup message and its `● demo\.sh` wait | the answer doesn't start with `demo.sh`, and the wait times out | H1 (Haiku follows it too, or rephrase) |
@@ -256,7 +256,7 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
   - the theme is `dark` (orange accent, grey user-message bars)
   - the debug log (`--debug-file`) names `cachebeat-demo-clock@inline` first and one `cachebeat@inline`, with no `@cachebeat` or `@synced`
   - `/cachebeat settings` (local, sends nothing) shows the pinned values: Classic heart, Steady effects, Cold guard off, Skip small off, Stop at usage 100%. Escape, then quit with no message. **If it shows ECG, the `store.get` pin failed: stop and report it.**
-  - the footer, with and without `--permission-mode default`, and whether `← N agents` shows while the fleet runs
+  - the footer under `--permission-mode auto`: auto's label, and where the heart sits beside it, for the caption's place (§3)
   - the source's tail on screen: nothing private, no welcome header
   - no notice at the launch (Remote Control, an away summary, an update): the bottom of the screen is the opening frame
 
@@ -266,7 +266,7 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
   2. the `● demo\.sh` wait fired after the answer, with no spinner at `Show`
   3. no `∴` thinking line, no tip, no token readout, no `agent type available`
   4. both beats, the `3h` countdown kept after ×2, and `plan()` printing two beats with no fast-forward before `/cachebeat 3h`
-  5. the payoff: no cachebeat log line, the line moving under the new answer, and the wait matching only after the answer
+  5. the payoff: no tool line in it or in the setup turn (auto mode would run one unasked), no cachebeat log line, the line moving under the new answer, and the wait matching only after the answer
   6. the caption only on fast parts, not overlapping
   7. the length, trimmed per §2
 
@@ -301,7 +301,7 @@ The user confirmed the source and the release, and told the orchestrator (`cache
 3. **Dark only.** §7's `<picture>` variant isn't built.
 4. **Chrome from this machine:**
    - **The fleet closes before T1:** the orchestrator and the builder's sessions are closed, so `← 2 agents` doesn't show. The builder asks the orchestrator to arrange this, and checks the footer at T1's first frame.
-   - **The mode label:** if F3 shows that the launch without `--permission-mode default` has a quieter hint row, and the mode it falls back to doesn't run tools unasked, drop the flag. Otherwise keep it and accept `⏸ manual mode on`.
+   - **The mode label:** the demo runs with `--permission-mode auto`, in place of `default` (the user, 2026-11-25). The hint row shows auto mode's label, and that's accepted. The tape's `--permission-mode` flag and §5 change together.
 5. **The payoff stays if H1's gate passes;** otherwise it's cut, as §1 says.
 6. **The `▸▸ 50 min idle` caption stays.**
 7. **The typed lines stay as written:** `in one line, what does demo.sh open?` and `back. where did we leave off, in one line?`.
