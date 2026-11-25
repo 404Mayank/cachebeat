@@ -34,7 +34,7 @@ The next agent raises these with the user before anything else. The user said on
   5. Delete this file, or rewrite it.
 - **The Status and Stats mock-ups** (plan items 5 and 7, redrawn in tokens on 2026-11-23) were approved by the orchestrator, which took the recommended option on all eight choices under "What steps 6 and 7 wait on":
   1. the Cache row in `/usage`'s form
-  2. the weighted size kept
+  2. ~~the weighted size kept~~ **reversed by the user on 2026-11-25:** Status's Size row shows the plain size (`184k tokens`); `state` still reports `recacheInputTokens`
   3. the Usage row hidden when no limits are reported
   4. the last beat's figures on Status
   5. columns, not a range switch
@@ -51,7 +51,7 @@ The next agent raises these with the user before anything else. The user said on
   - **G4:** does the question reach a Remote Control client, and can it be answered there? Until then, `bridge` messages pass unasked.
   - **G5:** does `$.ui.ask` draw in the desktop app? Two outcomes would matter. If it rejects at once, every cold send there drops until the guard is turned off. If its ask doesn't go through the AskUserQuestion `tool.call`, the 5m close can't close it, and queued messages wait until it's answered.
   - **P6:** does dropping a skill's prompt undo its `command.run`?
-- **After `/model`, the cold guard reads the cache as warm** (step 5 review), though the new model's cache is empty. The first message after a switch re-caches the whole conversation without asking. Left as is: `state` judges it the same way, and the user just chose the switch. Say if the guard should ask there too.
+- **Resolved 2026-11-25 (change 4, the user's request): after `/model` the cache reads cold, and the cold guard asks.** It was read as warm (step 5 review), so the first message after a switch re-cached the whole conversation without asking. Now the guard asks once, until a message or a beat on the new model caches it; Status, bare `/cachebeat` and `state` say cold too. A new Limits sub-row, **after /model** (on), turns the asking off. Accepted gaps are in mods-gotchas.
 - **The demo GIF (step 8): the orchestrator took the storyboard's recommendations** (plan, item 8):
   - the cold question first
   - stop at the second beat
@@ -83,7 +83,7 @@ The next agent raises these with the user before anything else. The user said on
   - The GIF has its new alt text.
   - "Beat after idle" was left as it is, because the Good to know bullet on the request start reads true against the code.
   - No shipped text was wrong. Every field `state` returns (`sessionOf`, `cacheOf`, `contextOf`, `whole`) is described in `STATE`, and every field described is returned.
-- **A wording mismatch, seen in the GIF:** with a keep-alive time that the cache outlasts, bare `/cachebeat` says `no more beats needed`, while Status's Beating row says `no beat needed`. It's small; one wording could be picked in 0.10.1.
+- **Closed 2026-11-25 (change 1):** the wording mismatch seen in the GIF. Bare `/cachebeat` said `no more beats needed` where Status's Beating row said `no beat needed`; both now say `no beat needed`, in 0.10.0.
 - **The tsc check:** every engine's type-check ran through `validate --strict`. `tsc -p .` ran against the main checkout's types.
 
 ## 0.10.0 release notes (draft)
@@ -92,6 +92,8 @@ Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. 
 
 > [!IMPORTANT]
 > **`/cachebeat <time>` changed.** It now sets how long to keep the cache warm, and it needs a unit: `/cachebeat 2h` keeps the cache warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global 30`.
+>
+> **Claude Code 2.1.332 or later is now required.** Update with `claude update`. From this release, each release requires the Claude Code current when it's made.
 
 **Changed**
 
@@ -100,10 +102,13 @@ Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. 
 - **Bare `/cachebeat` opens the new Status page.** It still answers with its line, which now ends with whether the cache is warm or cold.
 - **The "Prompt heart" tab is now "Heart".** Its settings are the same.
 - **The prompt heart shows during a turn too.** It holds still while a request of the turn is on its way.
+- **Cache gone cold set to stop now stops in one more case.** On the auto interval, a beat that finds the cache lasts five minutes rather than an hour used to switch to beating every 4 minutes. With **Cache gone cold** set to stop, it now stops there instead. The default (start on your next message) still switches to 4 minutes.
+- **Status's Size row is the plain size,** in tokens.
 - **After `/model`, the cache reads as cold** (change 4, 2026-11-25). The new model has none of the conversation cached, so Status, bare `/cachebeat` and Claude's `state` (`coldBecause: model`) say cold until a message or a beat on the new model caches it, and switching back to the first model reads warm again. The cold guard asks before that first message ("The model changed, and this chat has no cache on it yet…"); **after /model** under Cold guard turns this off. Stats now counts that first message as a cold send, asked or not. Before, all of these read the cache as warm after a switch.
 
 **New**
 
+- **Notices** under Alerts: log, toast, both or nothing for cachebeat's other lines (beats waiting for your next message, resuming, skipping or going on, a new model's cache, beats every 4 minutes on a five-minute cache, a message sent on a cold cache). The default, log, keeps them as they were.
 - **Keep-alive time:** `/cachebeat 2h`, `45m` or `1h30m` (5 minutes to 48 hours) keeps the cache warm for that long, then turns the session off. Your messages don't extend it, and the turn line shows the time left.
 - **The Status page** (`/cachebeat`) shows the cache as it stands: warm or cold, its size, the next beat, the cold guard and your usage limits.
 - **The Stats page** (`/cachebeat stats`) shows, for today, 7 days, 30 days and this session:
