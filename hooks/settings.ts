@@ -36,6 +36,7 @@ export const DEFAULTS: BeatSettings = {
   lineTiming: 'lubdub',
   onBeat: 'none',
   onStop: 'log',
+  notices: 'log',
   onModelSwitch: 'wait',
 }
 
@@ -76,6 +77,11 @@ export function normalize(stored: unknown): BeatSettings {
     if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval', 'coldGuardUnanswered'))) s[k] = v
   }
   const out = s as BeatSettings
+  // a setting with a fixed list (no typed value) takes only one of its choices: a value from a hand edit or a newer version falls back
+  for (const key of Object.keys(DEFAULTS) as (keyof BeatSettings)[]) {
+    const row = rowOf(key)?.row
+    if (row && !row.custom && !row.values.includes(out[key])) (out as Record<string, unknown>)[key] = DEFAULTS[key]
+  }
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
   if (!STATUS_HEARTS.includes(out.statusHeart)) out.statusHeart = DEFAULTS.statusHeart
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
@@ -394,6 +400,7 @@ export const TABS: readonly Tab[] = [
     rows: [
       { key: 'onBeat', label: 'On a beat', values: ALERTS, fmt: alert, help: 'How a beat landing is told: a line in the transcript (log), a toast, both, or nothing.' },
       { key: 'onStop', label: 'On stop', values: ALERTS, fmt: alert, help: 'How beating stopping on its own is told, and why.' },
+      { key: 'notices', label: 'Notices', values: ALERTS, fmt: alert, help: 'How the rest is told: beats waiting, skipping or going on, a new model\'s cache, a cold send.' },
     ],
   },
 ]

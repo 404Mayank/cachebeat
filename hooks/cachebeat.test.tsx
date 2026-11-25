@@ -290,6 +290,9 @@ test('smaller than takes a custom count', async ($: Engine, on: On) => {
 test('settings from an older store fall back to the defaults one by one', () => {
   expect(normalize({ interval: 5, variant: 'gone', speed: 3, extra: 1, statusLine: 'inline' })).toEqual({ ...DEFAULTS, interval: 5 })
   expect(normalize(undefined)).toEqual(DEFAULTS)
+  // a fixed list's setting takes only its choices; one with a typed value keeps its own checks
+  expect(normalize({ notices: 'loud', onBeat: 'toast', onStop: 'shout', lineTiming: 'swing', heartEffect: 'glow', heartPlacement: 'line' }))
+    .toEqual({ ...DEFAULTS, onBeat: 'toast', heartPlacement: 'line' })
 })
 
 test('flow sweeps a highlight across the text; flash lights it on a full heart', () => {
@@ -507,6 +510,59 @@ test('a beat can toast', async ($: Engine, on: On) => {
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
+})
+
+test('Notices on toast: a small chat\'s skip is a toast, not a line', async ($: Engine, on: On) => {
+  const { logs, toasts } = await setup($, on, { contextTokens: 8_000, settings: { skipSmall: true, interval: 3, notices: 'toast' } })
+  await $.turn.complete(turn)
+  await cmd($, 'on')
+  expect(toasts).toEqual(['cachebeat beats will skip: this chat is 8k tokens, under your 20k minimum'])
+  expect(logs).toEqual([])
+})
+
+test('Notices on both: the new model\'s cache is told as a line and a toast, before and after the beat writes it', async ($: Engine, on: On) => {
+  const { clock, logs, toasts, switchTo } = await setup($, on, {
+    settings: { onModelSwitch: 'warm', notices: 'both' }, fork: [{ ...ok, usage: usage(0, 90_000) }],
+  })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(IDLE)
+  const said = ["the next beat writes the new model's cache", "♥ warmed the new model's cache (90,000 written)"]
+  expect(logs).toEqual(said)
+  expect(toasts).toEqual([`cachebeat ${said[0]}`, said[1]]) // the heart's line reads as a beat's toast
+})
+
+test('Notices on none: beats wait for a new model and go on after a switch back, and nothing says so', async ($: Engine, on: On) => {
+  const { clock, logs, toasts, switchTo } = await setup($, on, { settings: { notices: 'none' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe('the model changed')
+  switchTo(OPUS)
+  await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe(null)
+  expect([...logs, ...toasts]).toEqual([])
+})
+
+test('Notices, not On stop, tells of beats every 4m once auto finds a five-minute cache', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }, ok], settings: { onStop: 'none', notices: 'toast' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(logs).toEqual([])
+  expect(toasts).toEqual(["cachebeat the cache was not served (0 read, 90,000 written): this session's cache lasts 5 minutes, so beats come every 4m"])
+})
+
+test('Notices on none: a resumed conversation comes back without its line', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { settings: { defaultOn: true, notices: 'none' }, chat: [said('user', 'hi'), said('assistant', 'ok')] })
+  await clock.advance(1000)
+  expect((await stateNow($)).session.paused).toBe('this conversation was resumed')
+  expect([...logs, ...toasts]).toEqual([])
 })
 
 test('at a fixed interval, stops when the fork was not served from cache', async ($: Engine, on: On) => {
@@ -3344,6 +3400,15 @@ const coldSetup = async ($: Engine, on: On, world: World = {}) => {
   await kit.clock.advance(3 * 60 * M + 14 * M)
   return kit
 }
+
+test('Notices on none: a send on a cold cache goes and is counted, unsaid', async ($: Engine, on: On) => {
+  const { answers, sent, logs, toasts } = await coldSetup($, on, { settings: { notices: 'none' } })
+  answers.push('Send')
+  await submit($)
+  expect(sent).toEqual(['go on'])
+  expect([...logs, ...toasts]).toEqual([])
+  expect((await stateNow($)).session.coldSends).toBe(1)
+})
 
 test('cold and big: the question says how long it has been cold and the tokens; Send sends it, saying so', async ($: Engine, on: On) => {
   const { questions, answers, sent, logs } = await coldSetup($, on)

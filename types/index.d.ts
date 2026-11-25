@@ -88,6 +88,7 @@ export type BeatSettings = {
   lineTiming: Timing
   onBeat: Alert
   onStop: Alert
+  notices: Alert
   onModelSwitch: 'wait' | 'warm' // after /model while idle: wait for the next turn, or have the next beat write the new model's cache
 }
 
