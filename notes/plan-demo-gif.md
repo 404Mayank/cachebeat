@@ -42,7 +42,7 @@ You're building the new README GIF from this plan. The orchestrator is `cachebea
    - demo.py's printed parts and the GIF's length
    - frames of the opening, ×2, and the payoff's end
    - every H1 check that failed, and what you changed
-6. **Before T1** ⏸: ask for the account's usage figure, and for the go-ahead on the Revision's overlay. `← N agents` in the footer is accepted, so you run T1 yourself, with no fleet closing (Revision).
+6. **Before T1** ⏸: ask for the account's usage figure. `← N agents` in the footer is accepted, so you run T1 yourself, with no fleet closing (Revision).
 7. **T1** (§6): Sonnet. Run the frame check and the payoff sanity check, then the final render with `CACHEBEAT_DEMO_BACK`. **T2 only if a frame check fails.** ⏸ Before any third take.
 8. **Wrap-up:**
    - Write "Results" under §6: F1–T2, the forks' session files, and the Haiku runs' count.
@@ -58,7 +58,7 @@ You're building the new README GIF from this plan. The orchestrator is `cachebea
 - `CACHEBEAT_DEMO_BACK`
 - §8 items 4 and 6
 
-Both decisions are the user's, through the orchestrator. The overlay is a proposal, waiting on the user's OK; the builder doesn't build it before then.
+All three are the user's decisions, through the orchestrator: the animations, the agents count, and the caption below the card.
 
 ### The user's animations in the GIF (decided)
 
@@ -75,54 +75,67 @@ const PINNED = { coldGuard: false, stopAtUsage: 100, variant: 'ecg', heartEffect
 
 The footer's agent count is accepted. The builder runs T1 itself, with no fleet closing. The brief's step 6 is changed to match.
 
-### Time made visible (proposed)
+### Time made visible: a caption below the card (the user's choice)
 
-The racing countdown and a dim `» 50 min idle` didn't read as time passing at a glance. Replace them with two overlays drawn from the take's own figures.
+**First tried and rejected by the user:** a clock in the prompt row and a fill bar on the prompt box's border, which read as cachebeat features. **The rule now:** the card stays exactly as Claude Code draws it, with nothing drawn inside it. The caption is the video's own annotation, in the margin below the card.
 
-**1. A running clock** in the empty prompt row, right-aligned: `» away 34m  1:24 AM`.
-- **Shown** from the `/cachebeat 3h` reply to the end of the ×2 hold.
-- **`»`** in Claude's orange `#d77757`, on fast parts only.
-- **`away 34m`** in Primer's muted `#9198a1`.
-- **The time** in `#e6edf3`, FiraCode Bold 20px.
-- **Through the payoff's final hold:** `back at 2:30 AM · cache still warm`. The time is bold, and the rest is muted.
-- **Hidden** while the payoff is typed and answered, since the prompt row is in use then.
+**What shows,** centered in a pill under the card:
 
-**2. A fill bar** on the prompt box's top border: a 3px orange line, `#d77757`.
-- It fills left to right with the time since the cache was last read, over the 50-minute interval.
-- It snaps back to empty as each beat lands, so the bar filling and the heart beating read together.
-- Hidden after the ×2 hold.
+| When | Caption |
+| --- | --- |
+| before the first fast part | nothing |
+| fast parts | **`▶▶ fast-forward`** `· +34 min idle`, the minutes ticking up |
+| the ×1 holds, beats included, up to the end of the ×2 hold | `+52 min idle` |
+| while the payoff is typed and answered | nothing |
+| the final hold (`FINAL`) | **`back after 1 h 40 min`** `· cache still warm` |
 
-**Where the figures come from** is the take itself, read by OCR. It's the same 2 fps tesseract pass `status()` already makes, so no fiction is added:
-- **The start** is the `/cachebeat 3h` reply's `on until 3:50 AM (3h)`, minus 3h.
-- **Minutes away** are `180 − left`, from the turn line's `… 2h 27m left`.
-- **The bar** is `(50 − next) / 50`, from `next (beat) in Nm`, with `due now` counting as 0.
-- **Map each frame:**
-  - Each output frame (12 fps) maps back to raw time through `plan()`'s parts.
-  - On fast parts, take the minutes from a fixed slope, `SPEED / 60` = 5 shown minutes per raw second, with the median offset of that part's samples. On ×1 parts, use the part's median.
-  - This absorbs OCR misreads: H1b read `2h 1Im left` once.
-  - The prototype used plain interpolation kept monotone, and matched cachebeat's own line in every frame checked.
-- **The clock shows the take's real time.** H1b ran at 12:50 AM. A fixed fiction can't work, because the reply on screen states the real `on until`.
-  - **Suggested:** run T1 around midday, so the GIF reads like the README's "back from lunch". It's the user's call.
+- **The wall clock is gone:** the minutes-idle counter carries the time.
+  - So there's no reason to record at midday. The real time still shows in the reply's `on until 3:50 AM`, but nothing points at it.
+- **The minutes** are `180 − left`, from the turn line's `left`. They're read by the same 2 fps tesseract pass `status()` makes, and mapped to each output frame through `plan()`'s parts.
+  - **On fast parts:** a fixed slope, `SPEED / 60` = 5 shown minutes per raw second, plus the part's median offset.
+  - **On ×1 parts:** the median.
+  - The prototype used plain interpolation kept monotone. Its numbers matched the line: `+34 min` beside `2h 27m left` (read a moment earlier), and `1 h 40 min` beside `1h 20m left`.
+  - **The format:** `34 min` under an hour, `1 h 40 min` from an hour.
+- **`▶`** (U+25B6) is in FiraCode Nerd Font Mono; `▸` isn't.
+
+**The look:**
+- **The pill:** Primer `#30363d`, fully rounded, 44px tall.
+  - Its text is `#f0f6fc`, with the bold lead in FiraCode Bold and the rest in Regular at 24px. The ` · ` and `cache still warm` take `#b7bdc8`.
+  - At GitHub's ~830px, the text shows at about 18px.
+- **Contrast:**
+  - Inside the pill, `#f0f6fc` on `#30363d` is about 11:1.
+  - The pill itself stands out clearly on white, and softly on `#0d1117`, where it reads as a lighter chip under the card.
+  - It's the same on both page themes, so no light variant is needed.
+- **One width for every caption:** the widest text's, so the pill doesn't jitter as the text changes. The text is centered in it.
+
+**The canvas:**
+- **It grows by `STRIP = 64` transparent rows** below VHS's 1100×640, to 1100×704. The pill is centered in the strip, 4px above its middle.
+- **When no caption shows,** the strip is empty and transparent, so on GitHub it's just space under the card.
+- **The card's rounded mask is unchanged:** the strip has no alpha but the pill's.
 
 **How it's drawn:**
-- Python draws one transparent PNG per output frame (Pillow, FiraCode Regular and Bold at 20px).
-- ffmpeg composites them with `overlay` after the concat, before the `alphamerge`.
-- This replaces the drawtext captions, `IDLE` and `CACHEBEAT_DEMO_BACK`. The `FINAL` split stays, to mark the final hold.
+1. Python draws one transparent PNG per output frame at 12 fps, 1100×704, with Pillow. It holds the pill only.
+2. In ffmpeg, the card goes through `alphamerge` with its mask as now, then `pad=w=iw:h=ih+64:x=0:y=0:color=black@0`.
+3. The PNGs are composited with `overlay=0:0:format=auto:alpha=straight`, then `format=rgba`, and then the palette as now.
+4. This replaces the drawtext captions, `IDLE` and `CACHEBEAT_DEMO_BACK`. The `FINAL` split stays, to mark the final hold.
 
-**What it can't break:**
-- It's drawn after OCR, so OCR never sees it.
-- It sits only in the prompt row and on the prompt box's top border, so it never covers the turn line, which stays above the box: under the setup turn, then under the payoff's answer.
+**Checked free, on H1b's raw** (the prototype is this session's scratchpad `ff/proto2.py`, run against the builder's `demo.py`):
+- The output is 21.5s and 1.22 MB, against the builder's 1.12 MB.
+- The alpha inside the card matched the card's mask in all 260 coalesced frames.
+- Flattened on `#0d1117` and on white at 830px:
+  - frame 72, fast: `▶▶ fast-forward · +34 min idle`
+  - frame 100, the ×1 hold: `+52 min idle`
+  - frame 250, the final hold: `back after 1 h 40 min · cache still warm`
 
-**Checked free, on H1b's raw** (`--skip-record`'s input; the prototype is this session's scratchpad `ff/proto.py`, run against the builder's `demo.py`):
-- The output is 21.5s and 1.17 MB, against the builder's 1.12 MB.
-- **Frame 72,** in a fast part: `» away 34m  1:24 AM` beside the line's `next beat in 17m · 2h 27m left` (180 − 147 = 33, read a moment earlier). The bar is at 66% (33 of 50).
-- **Frame 100,** the ×1 hold: `away 51m  1:41 AM`, with the bar almost empty after the beat.
-- **Frame 250,** the final hold: `back at 2:30 AM · cache still warm`, beside `1h 20m left` (100 minutes after 12:50).
-- The mask still matched, and the corners were unchanged.
+  All three read clearly on both page colours.
 
-**For the builder,** once approved:
-- **Port the overlay into `render()`:** the OCR parse into `status()` (or a sibling that reuses its texts), the fixed-slope model, the PNG frames, and the `overlay` input.
-- **F2-style check:** in 5 grabbed frames, the clock's minutes away equal `180 − left` within a minute, and the bar matches `next`.
+**For the builder:**
+- **Port it into `render()`:** the OCR parse, the fixed-slope model, the PNG frames, `pad`, and `overlay`.
+- **README alt text (§7):** add "with a fast-forward caption" only if it reads naturally. Otherwise leave it.
+- **F2-style check:**
+  - In 5 grabbed frames, the caption's minutes equal `180 − left` within a minute.
+  - The card's alpha matches the mask in every frame.
+  - Flatten one frame on white and one on `#0d1117`, and look at both.
 
 ### The flow shimmer and OCR (flagged)
 
