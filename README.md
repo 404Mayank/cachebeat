@@ -16,12 +16,17 @@ When a Claude Code session sits idle, its prompt cache goes cold, and your next 
 
 You come back from lunch, type your next message, and it picks up right where you left off.
 
+| Command | What it does |
+| --- | --- |
+| `/cachebeat on` | Keeps this session's cache warm, with no time limit |
+| `/cachebeat 2h` | Keeps it warm for a set time, then turns off |
+
 > [!IMPORTANT]
-> **Changed in 0.10.0:** `/cachebeat <time>` now sets how long to keep the cache warm, and needs a unit: `/cachebeat 2h` keeps it warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global <minutes>`.
+> **Changed in 0.10.0:** `/cachebeat on` works as before. `/cachebeat <time>` now sets how long to keep the cache warm, and needs a unit: `/cachebeat 2h` keeps it warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global <minutes>`.
 
 ## Features
 
-- **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation
+- **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation. `/cachebeat on` starts them
 - **A keep-alive time**: `/cachebeat 2h` keeps the cache warm through a break of that long, then turns itself off
 - **A cold guard** asks before your message goes to a cache that's gone cold, with how many tokens sending it would cache again. It's on from the start, even with beating off
 - **A live heart** under the prompt, with 19 animations to choose from
