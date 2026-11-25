@@ -84,22 +84,22 @@ The footer's agent count is accepted. The builder runs T1 itself, with no fleet 
 | When | Caption |
 | --- | --- |
 | before the first fast part | nothing |
-| fast parts | **`▶▶ fast-forward`** `· +34 min idle`, the minutes ticking up |
-| the ×1 holds, beats included, up to the end of the ×2 hold | `+52 min idle` |
+| fast parts | **`▶▶ fast-forward`** `· +34m idle`, the minutes ticking up |
+| the ×1 holds, beats included, up to the end of the ×2 hold | `+52m idle` |
 | while the payoff is typed and answered | nothing |
-| the final hold (`FINAL`) | **`back after 1 h 40 min`** `· cache still warm` |
+| the final hold (`FINAL`) | **`back after 1h 40m`** `· cache still warm` |
 
 - **The wall clock is gone:** the minutes-idle counter carries the time.
   - So there's no reason to record at midday. The real time still shows in the reply's `on until 3:50 AM`, but nothing points at it.
 - **The minutes** are `180 − left`, from the turn line's `left`. They're read by the same 2 fps tesseract pass `status()` makes, and mapped to each output frame through `plan()`'s parts.
   - **On fast parts:** a fixed slope, `SPEED / 60` = 5 shown minutes per raw second, plus the part's median offset.
   - **On ×1 parts:** the median.
-  - The prototype used plain interpolation kept monotone. Its numbers matched the line: `+34 min` beside `2h 27m left` (read a moment earlier), and `1 h 40 min` beside `1h 20m left`.
-  - **The format:** `34 min` under an hour, `1 h 40 min` from an hour.
+  - The prototype used plain interpolation kept monotone. Its numbers matched the line: `+34m` beside `2h 27m left` (read a moment earlier), and `1h 40m` beside `1h 20m left`.
+  - **The format is cachebeat's own,** as in the turn line's `1h 20m left`: `34m` under an hour, `1h 40m` from an hour (the user, 2026-11-26).
 - **`▶`** (U+25B6) is in FiraCode Nerd Font Mono; `▸` isn't.
 
 **The look:**
-- **The pill:** Primer `#30363d`, fully rounded, 44px tall.
+- **The pill:** Primer `#30363d`, 44px tall, with an 8px corner radius, a little under the card's 10px. The user found a fully rounded pill too round (2026-11-26).
   - Its text is `#f0f6fc`, with the bold lead in FiraCode Bold and the rest in Regular at 24px. The ` · ` and `cache still warm` take `#b7bdc8`.
   - At GitHub's ~830px, the text shows at about 18px.
 - **Contrast:**
@@ -119,13 +119,13 @@ The footer's agent count is accepted. The builder runs T1 itself, with no fleet 
 3. The PNGs are composited with `overlay=0:0:format=auto:alpha=straight`, then `format=rgba`, and then the palette as now.
 4. This replaces the drawtext captions, `IDLE` and `CACHEBEAT_DEMO_BACK`. The `FINAL` split stays, to mark the final hold.
 
-**Checked free, on H1b's raw** (the prototype is this session's scratchpad `ff/proto2.py`, run against the builder's `demo.py`):
-- The output is 21.5s and 1.22 MB, against the builder's 1.12 MB.
+**Checked free, on H1b's raw** (the prototype is this session's scratchpad `ff/proto2.py`, run against the builder's `demo.py`; its GIF is `ff/demo-caption.gif`, which the user approved):
+- The output is 21.5s and 1.21 MB, against the builder's 1.12 MB. The pill is 576×44.
 - The alpha inside the card matched the card's mask in all 260 coalesced frames.
 - Flattened on `#0d1117` and on white at 830px:
-  - frame 72, fast: `▶▶ fast-forward · +34 min idle`
-  - frame 100, the ×1 hold: `+52 min idle`
-  - frame 250, the final hold: `back after 1 h 40 min · cache still warm`
+  - frame 72, fast: `▶▶ fast-forward · +34m idle`
+  - frame 100, the ×1 hold: `+52m idle`
+  - frame 250, the final hold: `back after 1h 40m · cache still warm`
 
   All three read clearly on both page colours.
 
