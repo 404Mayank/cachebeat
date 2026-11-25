@@ -577,6 +577,42 @@ Checks:
   - The caption's minutes against `180 − left`: 18/17, 53/52 (inside the hold after beat 1), 79/79, 100/100 and 100/100.
 - **Length and size:** 21.5s, 1.59 MB. The ECG heart and the shimmer change every frame (inferred as the size's cause).
 
+**T1, the Sonnet take (2026-11-26, 03:2x IST, at `444150c`; the tape and demo.py unchanged since H1c).** Fork `b626a422-2ef2-45e1-af07-d4fe1a4cac53.jsonl`. It ran in the foreground, which keeps the session busy so the reaper leaves it alone.
+- **Parts:**
+
+  | Raw seconds | Speed | Part |
+  | --- | --- | --- |
+  | 0–4.5 | ×1 | lead |
+  | 4.5–12.4 | ×3 | fast |
+  | 12.4–14.5 | ×1 | hold |
+  | 14.5–23.4 | ×3 | fast |
+  | 23.4–25.5 | ×1 | hold |
+  | 25.5–29.5 | ×1 | payoff |
+  | 29.5–32.0 | ×1 | final |
+
+  The GIF is 20.8s and 1.45 MB, with 251 frames.
+- **The frame check (§2):**
+  - The opening is the source's tail, then the setup answer in two lines (`It opens Neo4j Browser at localhost:7474, starting the Docker container first if needed, and opens Gephi Desktop with ProgLang_Influence.gephi.`), an empty prompt, and the footer.
+  - Two beats, the turn line at `×2 · 53k cached · next in 50m · 1h 20m left`.
+  - The ECG heart plays in the hint row.
+  - Nothing unwanted in any frame (OCR at 2 fps): only the payoff's own spinner.
+  - The caption's minutes against `180 − left`: 18/17, 54/53 (the hold after beat 1), 82/81, 100/100 and 100/100.
+- **The payoff answer ran four lines**, despite "in one line": `I walked through what demo.sh does, and two things are still open: …`. It's readable and picks up the thread, and the frame isn't crowded, so it was kept.
+- **The payoff sanity check:**
+  - The payoff turn's first response read 52,523 tokens from the cache and wrote 175.
+  - The setup turn wrote the 52,523: the cold source re-cached, out of frame, as planned.
+- **The final render:** `--skip-record` of T1's raw, with `CACHEBEAT_DEMO_GIF` unset. `assets/demo.gif` is byte-identical to the checked `t1.gif`. No T2.
+
+**Runs in all:** 3 Haiku (H1, H1b, H1c) and 1 Sonnet (T1).
+
+**Session files the runs left,** in `~/.claude/projects/-home-zyrus-Desktop-Projects-ProgLang-Influence-Graph/`. The user deleted the first three on 2026-11-26.
+- `3e592b42-…` (F3), `c4dde58b-…` (H1) and `30ce0154-…` (H1b): deleted
+- `9bc732df-7b17-4057-b730-f3618c6e4563` (F1b, first attempt)
+- `21c495ec-6b0c-4beb-8491-c5ceb59f0960` (F1b)
+- `5579f610-fbb6-4bed-adc8-8a1721887e2f` (H1c)
+- `b626a422-2ef2-45e1-af07-d4fe1a4cac53` (T1)
+- the source itself, `3c20ee7b-45e3-4161-b166-5297bc12c231`: keep it while the GIF might be retaken
+
 ## 7. How the README embeds it
 
 On `main`, the README is for users. The image stays where it is (line 9, under the tagline), as plain Markdown, with no width attribute: GitHub scales it to the column.

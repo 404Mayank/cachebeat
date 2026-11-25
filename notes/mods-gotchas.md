@@ -610,3 +610,14 @@ How `/cachebeat 2h` came out, and what differs from the plan. Nothing here was r
     - The render takes about 108s.
   - **Don't spill to `/tmp`:** it's a 7.3G tmpfs here, which is memory, and it ran out of quota.
   - **Measuring needs Python:** GNU `time` isn't installed. Use `os.wait4` on each child, or `resource.getrusage(RUSAGE_CHILDREN)`.
+- **Another mod can pin cachebeat's settings through op hooks on `store.*`** (checked in F3 and every take, 2.1.332).
+  - **How:** the demo mod's `store.get` hook returns `{ value: PINNED }` for `settings` and `{ value: {} }` for `folders` when `next.origin.plugin === 'cachebeat'`, and `normalize` fills the rest from `DEFAULTS`.
+  - **Writes:** `store.set` and `store.delete` return `{ value: undefined }` for `settings`, `folders` and `customs`, so a change in the demo session can't reach the user's store. They type-check, but no change was made to exercise them.
+  - **The user's own values stay put:** the user's ECG heart showed as Classic under the first pin, and as ECG once it was pinned.
+- **`"showTurnDuration": false` hides `✻ Cooked for 2s · done 3:18 PM` but keeps the `TurnDuration` row,** so cachebeat's turn line, hung on that component, still draws.
+  - **Checked:** under a resumed turn (P1), and under live-ended turns in every take.
+  - **Why it's needed:** Claude Code's `done` time runs on real time, while the demo's cachebeat clock is sped up.
+- **Transparent corners need a geometric mask, not a colour key.** VHS writes yuv420p, so the margin decodes a shade off (`#0c0f16` for `#0d1117`), and h264 ringing keys out specks inside the card.
+  - **What works:** a mask image from the frame's geometry (`Margin`, `BorderRadius`), `alphamerge`, then `palettegen … reserve_transparent=1` and `paletteuse … alpha_threshold=128`.
+  - **ImageMagick is needed after ffmpeg:** once there's alpha, ffmpeg's GIF encoder writes whole frames (3 MB), and `magick -coalesce -layers Optimize` brings it back (render memory: above).
+- **`palettegen stats_mode=diff` greys a small static colour:** the orange turn line came out `#7b7e85`. Use `stats_mode=full`. `single` keeps it too, but at 3.8 MB.
