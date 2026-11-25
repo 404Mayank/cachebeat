@@ -43,6 +43,6 @@ Sleep 1500ms
 
 # Scene 4: the next message. The turn line comes back under the answer only once the turn has ended.
 Sleep 500ms
-Type "back. where were we?" Sleep 400ms Enter
-Wait+Screen@40s /(?s)where were we\?.*kept warm ×2/
+Type "back. where were we, in one line?" Sleep 400ms Enter
+Wait+Screen@40s /(?s)in one line\?.*kept warm ×2/
 Sleep 2500ms
