@@ -22,7 +22,8 @@ Set Theme {"name":"cachebeat-gh","background":"#161b22","foreground":"#e6edf3","
 # the source has already read demo.sh, and the pattern starts at the typed question, not at the source's own lines.
 Hide
 Type `cd "$CACHEBEAT_DEMO_DIR" && for v in $(compgen -e | grep ^CLAUDE); do unset $v; done; clear && claude --resume "$CACHEBEAT_DEMO_SESSION" --fork-session --plugin-dir "$CACHEBEAT_DEMO_CLOCK" --plugin-dir "$CACHEBEAT_DEMO_PLUGIN" --model "${CACHEBEAT_DEMO_MODEL:-sonnet}" --permission-mode auto --settings '{"verbose":false,"theme":"dark","showTurnDuration":false,"spinnerTipsEnabled":false,"showThinkingSummaries":false,"awaySummaryEnabled":false,"remoteControlAtStartup":false,"crossSessionInbound":"refuse","promptSuggestionEnabled":false,"advisorModel":"","statusLine":{"type":"command","command":"true"},"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false}}'` Enter
-Sleep 9s
+# Long enough for the usage notice Claude Code may show about 11s after launch to come and go (about 8s).
+Sleep 22s
 Type "in one line, what does demo.sh open?" Sleep 400ms Enter
 Wait+Screen@60s /(?s)demo\.sh open\?.*●/
 Sleep 3s
