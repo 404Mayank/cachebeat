@@ -9,7 +9,7 @@
 ![cachebeat asking before a message goes to a cold cache, keeping the cache warm for two hours as beats land on their own, then its Status page](assets/demo.gif)
 
 [![CI](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml/badge.svg)](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml)
-[![Claude Code 2.1.287+](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
+[![Claude Code 2.1.332+](https://img.shields.io/badge/Claude_Code-2.1.332%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 When a Claude Code session sits idle, its prompt cache goes cold, and your next message has to rebuild it from scratch. That's slower, and it uses more of your usage limits. cachebeat gives the session a heartbeat: shortly before the cache would go cold, it sends a tiny background request that reads the conversation and keeps the cache alive. Your transcript never sees it.
@@ -34,7 +34,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 
 ## Requirements
 
-- **Claude Code 2.1.287 or later.** Check your version with `claude --version` and update with `claude update`.
+- **Claude Code 2.1.332 or later.** Check your version with `claude --version` and update with `claude update`.
 - **Claude Code in the terminal**, which cachebeat is built for. In the Claude desktop app, beating works the same: the turn line sits above the prompt, and the settings menu opens beside the chat. The wider heart animations and the menu's keyboard controls are rougher there, so you can just ask Claude to change settings for you. Nothing is drawn in `claude -p`.
 
 ## Install

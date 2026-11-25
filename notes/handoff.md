@@ -119,9 +119,9 @@ All are recorded in full in mods-gotchas.md or the plan; this is the index.
 
 - **The cache's lifetime counts from a request's start.** Anthropic's docs say so, and one trial with a control confirmed it on the forced five-minute cache (mods-gotchas, "The lifetime counts from a request's start": the table, and how to script such a trial with `claude -p`). Not checked: the one-hour cache, an interactive session.
 - **A command typed mid-turn runs at once, but its reply is drawn only when the turn ends** (3 of 3 runs, 2.1.322), against what the declarations say. A `$.ui.toast` and a `$.ui.log` from `command.run` both draw at once. The engine draws `PromptHint` while working, with props `{ isDraft, isWorking, hint }`. (mods-gotchas, "A command typed mid-turn")
-- **2.1.287 runs locally without approving npm's install script:** `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder, then run `node_modules/@anthropic-ai/claude-code-linux-x64/claude plugin test <a copy of the repo>` (`git archive HEAD | tar -x -C <scratch>`). Run every step's suite there before merging. (mods-gotchas, "Old versions")
+- **Retired 2026-11-25 (the floor is now the installed version):** 2.1.287 runs locally without approving npm's install script: `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder, then run `node_modules/@anthropic-ai/claude-code-linux-x64/claude plugin test <a copy of the repo>` (`git archive HEAD | tar -x -C <scratch>`). Run every step's suite there before merging. (mods-gotchas, "Old versions")
 - **Which coding rules still bind** (plan, "For every step, these bite", revised after a probe on 2.1.287 and 2.1.322 under `plugin validate` and `plugin test`; none of it ran in a live session):
-  - Still binding: a function handed `$` is declared at the top of the file, and on 2.1.287 its name is used nowhere else in the file.
+  - Still binding: a function handed `$` is declared at the top of the file (current `validate` checks it). Retired with the 2.1.287 floor (2026-11-25): its name used nowhere else in the file.
   - Directory-only, no longer binding: cast constants in `$` calls, non-literal matchers, non-plain `$` calls, and naming something `h` or `Fragment`. New code may use these shapes; existing code isn't rewritten.
 - **Two hooks on one event with the same matcher are accepted on 2.1.287** (the test kit; a live load wasn't tried). Step 3b registers `command.run` twice.
 - **Known and accepted, from the request-start review:**
@@ -152,7 +152,7 @@ The user's preferences are in the orchestrator's memory (`agent-fleet`, `one-cha
 - **Each step:**
   1. Build in its own worktree (`git worktree add ../cachebeat-<step> -b step-<name> dev`, then copy `.claude-plugin/types` in).
   2. Every change gets a test that fails without it, and builders mutation-check.
-  3. Run check.sh on a fresh clone. It runs the tests and `validate --strict` on 2.1.287, 2.1.322, 2.1.329 and 2.1.330; the binaries live in a session scratchpad, and mods-gotchas "Old versions" says how to get them.
+  3. Run check.sh on a fresh clone. It runs the tests and `validate --strict` (the release files only) on the installed `claude`. Since 2026-11-25 the floor is the installed version and no old engines are tested (the user); before that, check.sh ran 2.1.287, 2.1.322, 2.1.329 and 2.1.330. check.sh lives in a session scratchpad: a fresh clone of the branch, `claude plugin test` failing unless `^ 0 fail`, and `validate --strict` on `.claude-plugin hooks types README.md LICENSE .github` and the marketplace.
   4. Run `tsc`.
   5. Have it reviewed: findings ranked, with file:line, a sequence of events and a fix.
   6. Fix, re-review by diff range, then merge `--no-ff`.

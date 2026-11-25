@@ -30,7 +30,8 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 ### When to ship
 
-- **A release is a version bump.** Every push to `main` runs CI, which validates on Claude Code 2.1.287 and the latest version and runs the tests. CI only releases when `version` in `.claude-plugin/plugin.json` names a version that isn't released yet.
+- **The floor is the installed Claude Code at each release** (the user, 2026-11-25: cachebeat no longer supports or tests old versions). A release raises the README's badge and Requirements line to `claude --version`; CI's floor job reads the badge. Work is checked on the installed version only. Before that, the floor stayed at 2.1.287 from 0.7.0 to 0.10.0, and steps were checked on several old engines.
+- **A release is a version bump.** Every push to `main` runs CI, which validates on the floor (the version in the README's badge) and the latest version and runs the tests. CI only releases when `version` in `.claude-plugin/plugin.json` names a version that isn't released yet.
 - **Bump `version` for every change users should get:**
   - patch (`0.6.1`) for fixes and small changes
   - minor (`0.7.0`) for a new feature
@@ -39,7 +40,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 ### Releasing, step by step
 
-1. On `dev`, bump `version` in `.claude-plugin/plugin.json`, and check `plugin test` and `tsc` pass.
+1. On `dev`, bump `version` in `.claude-plugin/plugin.json`, raise the floor in README.md (the badge and the Requirements line) to `claude --version`, and check `plugin test` and `tsc` pass.
 2. Cut the release branch off `main`, and take the plugin's files from `dev`:
 
    ```sh
@@ -57,7 +58,7 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
    claude plugin validate --strict .
    ```
 
-4. Commit with the version first in the message (`cachebeat 0.8.0: …`), push the branch, and open a PR into `main`. CI runs on it, on 2.1.287 and the latest version, without releasing.
+4. Commit with the version first in the message (`cachebeat 0.8.0: …`), push the branch, and open a PR into `main`. CI runs on it, on the floor and the latest version, without releasing.
 5. Once CI passes, fast-forward `main` to the branch (`git switch main && git merge --ff-only v<version> && git push origin main`). GitHub marks the PR merged.
 6. CI tags `v<version>` and creates the GitHub release with generated notes. Put a short summary and any changed defaults or removed settings on top with `gh release edit`.
 7. Bring `dev` up to date (`git switch dev && git merge main`), push it, and delete the local release branch.

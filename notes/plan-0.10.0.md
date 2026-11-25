@@ -1026,8 +1026,8 @@ Each step is finished, tested and merged into `dev` before the next starts.
 
 **For every step, these bite:**
 
-- **On 2.1.287, a function handed `$` must have a name used nowhere else in the file,** not even as a local `const`. The loader refuses the whole module. Grep for each new name.
-- **A function handed `$` is declared at the top of the file,** not as an arrow inside `register`. `claude plugin validate` fails on it, on 2.1.287 and 2.1.322 alike: `$ is passed to "inner", which is not a function declared at the top of this file` (and "No digest").
+- ~~**On 2.1.287, a function handed `$` must have a name used nowhere else in the file,** not even as a local `const`. The loader refuses the whole module. Grep for each new name.~~ **Retired 2026-11-25:** the floor is now the installed Claude Code (the user's call, to stop supporting old versions), which accepts it.
+- **A function handed `$` is declared at the top of the file,** not as an arrow inside `register`. `claude plugin validate` fails on it, on 2.1.287 and 2.1.322 alike, and still binds on the installed version: `$ is passed to "inner", which is not a function declared at the top of this file` (and "No digest").
 - **Three older rules were the directory's alone, and no longer bind** (checked 2026-11-14; the directory is dropped):
   - a `$` call given a constant whose value is a cast (`$.ui.open(OPEN)` with `OPEN = {…} as const`)
   - a matcher that isn't a literal (`{ tool: SOME.constant }`, hooks registered in a loop)
