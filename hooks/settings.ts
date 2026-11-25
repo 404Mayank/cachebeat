@@ -346,11 +346,11 @@ export const TABS: readonly Tab[] = [
       {
         key: 'coldGuardUnanswered', label: '  if unanswered', values: ['drop', 2, 5, 10], show: s => s.coldGuard,
         fmt: v => (v === 'drop' ? "don't send (closes after 5m)" : `send after ${v}m`),
-        help: "What happens to a held message when the question isn't answered: it isn't sent (the question closes after 5m, so other incoming messages wait at most 5m), or it's sent after this long.",
+        help: "A question left unanswered: don't send the message (it closes after 5m, so other incoming messages wait at most 5m), or send it after this long.",
         custom: { placeholder: 'e.g. 3m', parse: parseWait },
       },
       {
-        key: 'coldGuardModel', label: '  after /model', values: [true, false], show: s => s.coldGuard, fmt: onOff,
+        key: 'coldGuardModel', label: '  after /model', name: 'Cold guard after /model', values: [true, false], show: s => s.coldGuard, fmt: onOff,
         help: 'Asks too after /model, while the new model has no cache of this chat: its first message caches it all again.',
       },
       {
