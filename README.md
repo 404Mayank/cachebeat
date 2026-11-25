@@ -33,7 +33,7 @@ You come back from lunch, type your next message, and it picks up right where yo
 - **A turn line** under your latest turn shows the beats so far and the time until the next one
 - **A Status page and a Stats page**: the cache as it stands, and what beats cost and saved over the last 30 days
 - **A settings menu** with live previews, driven by keyboard or mouse
-- **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words, or ask it how full its context is and whether the cache is still warm
+- **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words, or ask it how full its context is and when it will compact
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
 - **This session, this folder or all folders**: turn it on for one session, or have new sessions start with it in one folder or everywhere
 
@@ -113,7 +113,7 @@ Beats fit your cache by themselves: every 50 minutes on a Claude subscription's 
 
 Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript. The request's last line is cachebeat's own: it starts with `[cachebeat]` and says it isn't from you, so a request log or a proxy can tell beats from your own messages.
 
-- A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would. Ask Claude, and it can tell you how much the last beat read and wrote, whether the cache is likely still warm, how big the conversation is, how full the context window is and when it will compact.
+- A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would. Ask Claude, and it can tell you how much the last beat read and wrote, how big the conversation is, how full the context window is and when it will compact.
 - Beats happen only while nothing else keeps the cache warm: while the session is idle, or while a turn sits waiting on a long tool run or a permission prompt. They come at most once per interval.
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
 - To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
