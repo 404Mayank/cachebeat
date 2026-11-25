@@ -1,8 +1,8 @@
 # Recorded by assets/demo.py, which turns this into assets/demo.gif.
 # It forks the session it is pointed at, so the original transcript is left as it was.
 # It loads this checkout's cachebeat (CACHEBEAT_DEMO_PLUGIN) and a demo mod (CACHEBEAT_DEMO_CLOCK) that runs
-# cachebeat's clock fast and pins its settings to a new install's, with both installed copies off. Its settings
-# pin Claude Code's dark theme and hide your status line, the advisor, turn durations, tips, thinking summaries,
+# cachebeat's clock fast and pins its settings (the ECG heart, flow effects, the cold guard off), with both
+# installed copies off. Its settings pin Claude Code's dark theme and hide your status line, the advisor, turn durations, tips, thinking summaries,
 # prompt suggestions and the away summary, so the frame shows Claude Code and cachebeat alone.
 Output assets/demo-raw.mp4
 

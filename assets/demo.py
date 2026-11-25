@@ -10,8 +10,8 @@ The recording forks that session, so its transcript is left as it was. The fork 
 HEAD (a scratch copy of it, not the working tree) beside a small mod, written to a temporary folder,
 and both installed copies of cachebeat are switched off. The mod runs cachebeat's clock 300× faster from
 its first one-minute step after /cachebeat 3h until its second beat has been answered. Each beat is still
-a real request, run at real speed. The mod also pins cachebeat's settings to a new install's, with the cold
-guard off, and keeps cachebeat from writing its settings to your store.
+a real request, run at real speed. The mod also pins cachebeat's settings: its defaults, with the cold guard
+off, the ECG heart and the flow effects, and keeps cachebeat from writing its settings to your store.
 
 The model is sonnet; CACHEBEAT_DEMO_MODEL overrides it, for a dry run. CACHEBEAT_DEMO_GIF overrides where the GIF
 is written. CACHEBEAT_DEMO_BACK (for example "1h 40m") captions the last FINAL seconds "back <it> later · cache still
@@ -55,7 +55,7 @@ import type { EngineInterface, Register } from 'claude-code'
 const SPEED = 300
 const STEP = 60_000 // cachebeat's step timer: the first one after /cachebeat 3h starts the fast stretch
 const BEATS = 2 // once this many beats have been answered, the clock runs at real speed again
-const PINNED = { coldGuard: false, stopAtUsage: 100 } // everything else: cachebeat's defaults, as a new install has them
+const PINNED = { coldGuard: false, stopAtUsage: 100, variant: 'ecg', heartEffect: 'flow', lineEffect: 'flow' } // everything else: cachebeat's defaults
 const KEPT = ['settings', 'folders', 'customs'] // the person's own: read pinned, never written
 let from = 0 // real time the fast stretch last began
 let ahead = 0 // how far cachebeat's clock runs ahead of the real one
