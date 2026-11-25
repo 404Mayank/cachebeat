@@ -9,6 +9,7 @@ export type StatusFacts = {
     lastReadMinutesAgo: number | null
     leftMs: number | null // while warm, rounded up as the turn line does
     coldForMinutes: number | null
+    coldBecause: 'time' | 'model' | null
     contextTokens: number | null
     recacheInputTokens: number | null
   }
@@ -44,14 +45,13 @@ function cacheRow(c: StatusFacts['cache']) {
   const life = `${c.ttl === '1h' ? '1h' : '5m'} TTL`
   if (c.state === 'unknown') return `nothing cached yet (${life})`
   const read = `last read ${span(c.lastReadMinutesAgo ?? 0)} ago`
-  if (c.state === 'cold') return `cold for ${span(c.coldForMinutes ?? 0)} (${life}, ${read})`
+  if (c.state === 'cold') return `${c.coldBecause === 'model' ? 'cold since the model changed' : `cold for ${span(c.coldForMinutes ?? 0)}`} (${life}, ${read})`
   return `warm (${life}, ${read}) · ${fmt(c.leftMs ?? 0)} left`
 }
 
 function sizeRow(c: StatusFacts['cache']) {
   if (c.contextTokens === null) return 'not counted yet'
-  const weighed = c.recacheInputTokens === null ? '' : ` · as ${tokens(c.recacheInputTokens)} input tokens to cache again`
-  return `${tokens(c.contextTokens)} tokens${weighed}`
+  return `${tokens(c.contextTokens)} tokens`
 }
 
 function beatingRow(s: StatusFacts['session']) {

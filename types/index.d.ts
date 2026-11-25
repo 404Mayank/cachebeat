@@ -65,6 +65,7 @@ export type BeatSettings = {
   coldGuard: boolean // ask before sending a message to a session whose cache has gone cold
   coldGuardTokens: number // the smallest chat it asks about
   coldGuardUnanswered: 'drop' | number // a question left unanswered: the message isn't sent, or is after this many minutes
+  coldGuardModel: boolean // the guard asks after /model too, while the new model has no cache of the chat
   // the heart under the prompt
   heartPlacement: 'tail' | 'line'
   variant: string
@@ -88,6 +89,7 @@ export type BeatSettings = {
   lineTiming: Timing
   onBeat: Alert
   onStop: Alert
+  notices: Alert
   onModelSwitch: 'wait' | 'warm' // after /model while idle: wait for the next turn, or have the next beat write the new model's cache
 }
 

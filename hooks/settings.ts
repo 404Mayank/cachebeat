@@ -15,6 +15,7 @@ export const DEFAULTS: BeatSettings = {
   coldGuard: true,
   coldGuardTokens: SMALL_CHAT,
   coldGuardUnanswered: 'drop',
+  coldGuardModel: true,
   heartPlacement: 'tail',
   variant: 'classic',
   showCount: true,
@@ -36,6 +37,7 @@ export const DEFAULTS: BeatSettings = {
   lineTiming: 'lubdub',
   onBeat: 'none',
   onStop: 'log',
+  notices: 'log',
   onModelSwitch: 'wait',
 }
 
@@ -76,6 +78,11 @@ export function normalize(stored: unknown): BeatSettings {
     if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval', 'coldGuardUnanswered'))) s[k] = v
   }
   const out = s as BeatSettings
+  // a setting with a fixed list (no typed value) takes only one of its choices: a value from a hand edit or a newer version falls back
+  for (const key of Object.keys(DEFAULTS) as (keyof BeatSettings)[]) {
+    const row = rowOf(key)?.row
+    if (row && !row.custom && !row.values.includes(out[key])) (out as Record<string, unknown>)[key] = DEFAULTS[key]
+  }
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
   if (!STATUS_HEARTS.includes(out.statusHeart)) out.statusHeart = DEFAULTS.statusHeart
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine
@@ -324,7 +331,7 @@ export const TABS: readonly Tab[] = [
       {
         key: 'onCold', label: 'Cache gone cold', values: ['wait', 'stop'],
         fmt: v => (v === 'wait' ? 'start on your next message' : 'stop'),
-        help: 'If the cache goes cold before a beat reaches it, as when your computer sleeps: start beating again on your next message, or stop.',
+        help: 'If the cache goes cold before a beat (your computer slept, or auto found it lasts 5m): start again on your next message, or every 4m on auto; or stop.',
       },
       {
         key: 'coldGuard', label: 'Cold guard', values: [true, false], fmt: onOff,
@@ -339,8 +346,12 @@ export const TABS: readonly Tab[] = [
       {
         key: 'coldGuardUnanswered', label: '  if unanswered', values: ['drop', 2, 5, 10], show: s => s.coldGuard,
         fmt: v => (v === 'drop' ? "don't send (closes after 5m)" : `send after ${v}m`),
-        help: "What happens to a held message when the question isn't answered: it isn't sent (the question closes after 5m, so other incoming messages wait at most 5m), or it's sent after this long.",
+        help: "A question left unanswered: don't send the message (it closes after 5m, so other incoming messages wait at most 5m), or send it after this long.",
         custom: { placeholder: 'e.g. 3m', parse: parseWait },
+      },
+      {
+        key: 'coldGuardModel', label: '  after /model', name: 'Cold guard after /model', values: [true, false], show: s => s.coldGuard, fmt: onOff,
+        help: 'Asks too after /model, while the new model has no cache of this chat: its first message caches it all again.',
       },
       {
         key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,
@@ -394,6 +405,7 @@ export const TABS: readonly Tab[] = [
     rows: [
       { key: 'onBeat', label: 'On a beat', values: ALERTS, fmt: alert, help: 'How a beat landing is told: a line in the transcript (log), a toast, both, or nothing.' },
       { key: 'onStop', label: 'On stop', values: ALERTS, fmt: alert, help: 'How beating stopping on its own is told, and why.' },
+      { key: 'notices', label: 'Notices', values: ALERTS, fmt: alert, help: 'How the rest is told: beats waiting, skipping or going on, a new model\'s cache, a cold send.' },
     ],
   },
 ]

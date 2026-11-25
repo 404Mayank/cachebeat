@@ -7,7 +7,7 @@ import { cells, loopIndex, slotText, slotWidths, statusFrame, variant } from './
 import { PANE, cut, paint, settingsPane, shown, statusText } from './pane'
 import { AUTO, DEFAULTS, PAGES, READ_ONLY, TABS, changed, fmt, frameMs, glyphs, isLit, isObject, lookOf, minutesText, normalize, normalizeOwn, parseDuration, rowOf, spans, tabBeside, tokens } from './settings'
 import type { Span, Value } from './settings'
-import { ratiosOf } from './prices'
+import { ratiosOf, sameModel } from './prices'
 import { usageName } from './status'
 import type { StatusFacts } from './status'
 import { addTo, beatAdd, daysOf, factsFrom, keptAdd, statsText, sumOf } from './stats'
@@ -248,14 +248,14 @@ async function sayResumed($: EngineInterface) {
   const note = offNote
   offNote = null
   if (!s.enabled) {
-    if (note) $.ui.log(note)
+    if (note) tell($, note)
     return
   }
   ttl = await cacheTtl($)
   const view = viewOf(cacheFacts(null), await $.clock.now())
   const cache = view.state === 'warm' ? ` · cache likely warm for ${fmt(view.expiresAt! - view.at)} more`
     : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
-  $.ui.log(`beats resume after your next message${cache}`)
+  tell($, `beats resume after your next message${cache}`)
 }
 
 /**
@@ -486,21 +486,26 @@ async function chatSize($: EngineInterface) {
 }
 
 /** What `viewOf` works the cache out from, as this session has it. */
-const cacheFacts = (contextTokens: number | null): CacheFacts => ({
-  lastWarm: s.lastWarm, ttl: s.isCacheShort ? '5m' : ttl, contextTokens,
+const cacheFacts = (contextTokens: number | null, isModelNew = false): CacheFacts => ({
+  lastWarm: s.lastWarm, ttl: s.isCacheShort ? '5m' : ttl, contextTokens, isModelNew,
 })
 
 /** Whether the cache is warm, cold or not yet cached, and what re-caching it would send: the one place this is read. */
 async function cacheNow($: EngineInterface): Promise<CacheView> {
   const now = await $.clock.now()
   const size = await chatSize($)
-  return viewOf(cacheFacts(size ?? null), now)
+  // after /model, a message goes to the new model, which has none of this chat cached until a request on it writes it
+  const isModelNew = s.warmModel !== null && !sameModel(await $.session.model(), s.warmModel)
+  return viewOf(cacheFacts(size ?? null, isModelNew), now)
 }
+
+/** Why a cold cache is cold, as a message says it: for how long, or the model changed. */
+const coldText = (view: CacheView) => (view.coldBecause === 'model' ? 'cold since the model changed' : `cold for ${fmt(view.coldFor!)}`)
 
 /** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
 async function checkSmall($: EngineInterface) {
   const small = await smallContext($)
-  if (small && !s.small) $.ui.log(`beats will skip: ${small}`)
+  if (small && !s.small) tell($, `beats will skip: ${small}`)
   s.small = small
   return small !== null
 }
@@ -610,9 +615,15 @@ function announce($: EngineInterface, text: string) {
   if (toasts(cfg.onStop)) $.ui.toast(`cachebeat ${text}`)
 }
 
+/** What cachebeat does along the way that is neither a beat nor a stop (a wait, a skip, a new model's cache), told as Notices says. */
+function tell($: EngineInterface, text: string) {
+  if (logs(cfg.notices)) $.ui.log(text)
+  if (toasts(cfg.notices)) $.ui.toast(text.startsWith('♥') ? text : `cachebeat ${text}`) // a heart's line reads as a beat's toast does
+}
+
 /** Beats wait for the next turn, which will cache what a beat would have to write: says why, once. */
 async function pause($: EngineInterface, why: string, said: string) {
-  if (s.enabled && s.paused !== why) $.ui.log(`beats wait for your next turn: ${said}`)
+  if (s.enabled && s.paused !== why) tell($, `beats wait for your next turn: ${said}`)
   s.paused = why
   await schedule($)
 }
@@ -667,9 +678,9 @@ const SETTLE = 1000 // ms: a /model switch is applied once the hooks on it have 
 async function resumeIfWarmed($: EngineInterface) {
   if (s.paused !== MODEL_CHANGED || busy) return
   const model = await $.session.model()
-  if (model !== s.warmModel) return
+  if (s.warmModel === null || !sameModel(model, s.warmModel)) return
   s.paused = null
-  if (s.enabled) $.ui.log('beats go on: back on the model the cache was warmed on')
+  if (s.enabled) tell($, 'beats go on: back on the model the cache was warmed on')
   await schedule($)
 }
 
@@ -753,7 +764,7 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
   }
   // a beat goes to the current model, whose cache is not the one warmed if the model changed since
   const model = await $.session.model()
-  const isNewModel = s.warmModel !== null && model !== s.warmModel
+  const isNewModel = s.warmModel !== null && !sameModel(model, s.warmModel)
   if (isNewModel && cfg.onModelSwitch === 'wait') {
     await pause($, MODEL_CHANGED, 'the new model has no cache yet')
     return `beats wait for your next turn: ${MODEL_CHANGED}`
@@ -816,7 +827,7 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
     warmFrom(sentAt)
     await countDay($, beatAdd(model, lifetime(), got, wrote, false)) // it paid for the write, though it is no beat of the count
     const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written)`
-    $.ui.log(warmed)
+    tell($, warmed)
     await schedule($)
     return warmed
   }
@@ -826,11 +837,11 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
     const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
     await countDay($, beatAdd(model, lifetime(), got, wrote, false)) // what it cost, though no beat of the count
     // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
-    // this beat wrote it afresh, so beat at that from here
-    if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m') return stop($, why)
+    // this beat wrote it afresh, so beat at that from here, unless a cache gone cold is to stop beating
+    if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m' || cfg.onCold === 'stop') return stop($, why)
     s.isCacheShort = true
     warmFrom(sentAt)
-    announce($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
+    tell($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
     await schedule($)
     return `${why}; beating every ${AUTO['5m']}m`
   }
@@ -863,7 +874,7 @@ function beatNow($: EngineInterface) {
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
-  : ms === undefined ? (stepping ? 'counts from when the request on its way was sent' : busy ? 'starts after this turn' : isCovered ? 'no more beats needed' : 'starts after your next turn')
+  : ms === undefined ? (stepping ? 'counts from when the request on its way was sent' : busy ? 'starts after this turn' : isCovered ? 'no beat needed' : 'starts after your next turn')
   : `next beat ${untilNext(ms)}`
 
 /** Where the interval comes from: this folder's own, or the settings for all folders. */
@@ -879,10 +890,13 @@ const warmFrom = (at: number) => {
   s.lastWarm = Math.max(s.lastWarm ?? at, at)
 }
 
-/** A request of the main conversation, sent at `sentAt`, read the cache: the count starts again from it. */
-async function markWarm($: EngineInterface, sentAt: number) {
+/**
+ * A request of the main conversation, sent at `sentAt` on `model`, read the cache: the count starts again from it. The
+ * request's own model, not the session's once it is answered: a /model landing while it was on its way names another.
+ */
+function markWarm(sentAt: number, model: string) {
   warmFrom(sentAt)
-  s.warmModel = await $.session.model()
+  s.warmModel = model
   s.paused = null
 }
 
@@ -1002,7 +1016,7 @@ async function cacheOf($: EngineInterface, view?: CacheView) {
     state: view.state, ttl: view.ttl,
     lastReadMinutesAgo: wholeMinutes(view.lastWarm === null ? null : view.at - view.lastWarm),
     minutesLeft: wholeMinutes(view.state === 'warm' ? view.expiresAt! - view.at : null),
-    coldForMinutes: wholeMinutes(view.coldFor), contextTokens: view.contextTokens,
+    coldForMinutes: wholeMinutes(view.coldFor), coldBecause: view.coldBecause, contextTokens: view.contextTokens,
     recacheInputTokens: view.contextTokens === null ? null : Math.round(view.contextTokens * write),
   }
 }
@@ -1239,7 +1253,7 @@ async function noteColdSend($: EngineInterface, how: string, isSaid = true) {
   if (view.state !== 'cold' || view.contextTokens === null) return
   await countDay($, { cold: 1, coldTokens: view.contextTokens })
   await save($)
-  if (isSaid) $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
+  if (isSaid) tell($, `sent on a cold cache${how}: ${coldText(view)}, ${tokens(view.contextTokens)} tokens cached again`)
 }
 
 /** Asks the cold guard's question; resolves the answer, or null when it was dismissed, closed unanswered, or couldn't be asked. */
@@ -1366,11 +1380,12 @@ export const register: Register = on => {
     const view = await cacheNow($)
     if (view.state !== 'cold' || view.contextTokens === null) return next(e)
     // a cold send the guard doesn't ask about still re-caches the chat, and Stats counts it: quietly, as it isn't the guard's to say
-    if (!(s.guard ?? cfg.coldGuard) || view.contextTokens < cfg.coldGuardTokens) {
+    const isModelNew = view.coldBecause === 'model'
+    if (!(s.guard ?? cfg.coldGuard) || view.contextTokens < cfg.coldGuardTokens || (isModelNew && !cfg.coldGuardModel)) {
       await noteColdSend($, '', false)
       return next(e)
     }
-    const coldFor = fmt(view.coldFor!)
+    const why = isModelNew ? 'The model changed' : `The cache has been cold for ${fmt(view.coldFor!)}`
     const size = view.contextTokens
     if (!ASKED_ORIGINS.includes(e.origin.kind)) {
       await noteColdSend($, '')
@@ -1379,12 +1394,12 @@ export const register: Register = on => {
     // a second message can't wait on the open question: a hook waiting with no question of its own is cut at 10s and sent
     if (asking) return { drop: dropped('A question about the cold cache is open: answer it first.') }
     const wait = cfg.coldGuardUnanswered
-    const said = `The cache has been cold for ${coldFor}, so this message caches ${tokens(size)} tokens again. Send it?`
+    const said = `${isModelNew ? `${why}, and this chat has no cache on it yet` : why}, so this message caches ${tokens(size)} tokens again. Send it?`
     const { answer, closed } = await askCold($, said, wait)
     const then = coldOutcome(answer, closed)
     if (then === 'drop-unanswered') return { drop: dropped(`The question went unanswered for ${fmt(DROP_AFTER)}.`) }
     if (then === 'drop-left') return { drop: 'cachebeat: not sent. The conversation changed: send it again.' }
-    if (then === 'drop') return { drop: dropped(`The cache has been cold for ${coldFor}, and sending caches ${tokens(size)} tokens again.`) }
+    if (then === 'drop') return { drop: dropped(`${why}, and sending caches ${tokens(size)} tokens again.`) }
     await noteColdSend($, then === 'send' ? '' : ` after ${wait}m unanswered`)
     return next(e)
   })
@@ -1441,7 +1456,7 @@ export const register: Register = on => {
     if (!busy && e.origin.kind === 'composer') await openSettings($, 'summary')
     // the cache as it stands, on or off: what a message sent now would find
     const view = await cacheNow($)
-    const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
+    const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache ${coldText(view)}` : ''
     if (!s.enabled) return { text: `off${cache}` }
     const now = await $.clock.now()
     const at = s.nextAt
@@ -1522,7 +1537,7 @@ export const register: Register = on => {
         await pause($, MODEL_CHANGED, 'the new model has no cache yet')
         // the switch takes effect once this hook settles: a switch back finds the warmed model then
         $.clock.after(SETTLE, () => void resumeIfWarmed($))
-      } else if (s.enabled) $.ui.log("the next beat writes the new model's cache")
+      } else if (s.enabled) tell($, "the next beat writes the new model's cache")
     }
     return r
   })
@@ -1586,7 +1601,7 @@ export const register: Register = on => {
         resent = got + MISSED < cached
         const wasCached = cached
         cached = got + wrote
-        await markWarm($, sentAt)
+        markWarm(sentAt, e.model)
         isTurnWarmed = true
         if (isFirstStep) await countKept($, e.model, got, wasCached, sentAt)
         isFirstStep = false
@@ -1609,7 +1624,7 @@ export const register: Register = on => {
       // the cache when each was sent, and its end moves nothing later; one whose requests cachebeat didn't see (begun
       // before it loaded) counts from the turn's start, the earliest its last request can have been sent
       if (e.usage) {
-        if (!isTurnWarmed) await markWarm($, now - e.durationMs)
+        if (!isTurnWarmed) markWarm(now - e.durationMs, e.usage.model)
         s.tail = await tailOf($)
         s.turns++
       }

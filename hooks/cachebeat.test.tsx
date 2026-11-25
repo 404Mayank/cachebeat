@@ -29,6 +29,7 @@ const OTHER = '/home/me/code/web'
 // from its start, durationMs before its end: these take no time
 const turn = { answer: 'ok', durationMs: 0, isAborted: false, turnId: 't', reason: 'answer', usage: { ...usage(90_000, 0), model: OPUS } } as const
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
+const onSonnet = { ...turn, usage: { ...turn.usage, model: 'claude-sonnet-5-5' } } // a turn after /model sonnet
 
 type World = {
   fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown
@@ -290,6 +291,9 @@ test('smaller than takes a custom count', async ($: Engine, on: On) => {
 test('settings from an older store fall back to the defaults one by one', () => {
   expect(normalize({ interval: 5, variant: 'gone', speed: 3, extra: 1, statusLine: 'inline' })).toEqual({ ...DEFAULTS, interval: 5 })
   expect(normalize(undefined)).toEqual(DEFAULTS)
+  // a fixed list's setting takes only its choices; one with a typed value keeps its own checks
+  expect(normalize({ notices: 'loud', onBeat: 'toast', onStop: 'shout', lineTiming: 'swing', heartEffect: 'glow', heartPlacement: 'line' }))
+    .toEqual({ ...DEFAULTS, onBeat: 'toast', heartPlacement: 'line' })
 })
 
 test('flow sweeps a highlight across the text; flash lights it on a full heart', () => {
@@ -507,6 +511,59 @@ test('a beat can toast', async ($: Engine, on: On) => {
   await $.turn.complete(turn)
   await clock.advance(3 * M)
   expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
+})
+
+test('Notices on toast: a small chat\'s skip is a toast, not a line', async ($: Engine, on: On) => {
+  const { logs, toasts } = await setup($, on, { contextTokens: 8_000, settings: { skipSmall: true, interval: 3, notices: 'toast' } })
+  await $.turn.complete(turn)
+  await cmd($, 'on')
+  expect(toasts).toEqual(['cachebeat beats will skip: this chat is 8k tokens, under your 20k minimum'])
+  expect(logs).toEqual([])
+})
+
+test('Notices on both: the new model\'s cache is told as a line and a toast, before and after the beat writes it', async ($: Engine, on: On) => {
+  const { clock, logs, toasts, switchTo } = await setup($, on, {
+    settings: { onModelSwitch: 'warm', notices: 'both' }, fork: [{ ...ok, usage: usage(0, 90_000) }],
+  })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(IDLE)
+  const said = ["the next beat writes the new model's cache", "♥ warmed the new model's cache (90,000 written)"]
+  expect(logs).toEqual(said)
+  expect(toasts).toEqual([`cachebeat ${said[0]}`, said[1]]) // the heart's line reads as a beat's toast
+})
+
+test('Notices on none: beats wait for a new model and go on after a switch back, and nothing says so', async ($: Engine, on: On) => {
+  const { clock, logs, toasts, switchTo } = await setup($, on, { settings: { notices: 'none' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe('the model changed')
+  switchTo(OPUS)
+  await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe(null)
+  expect([...logs, ...toasts]).toEqual([])
+})
+
+test('Notices, not On stop, tells of beats every 4m once auto finds a five-minute cache', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }, ok], settings: { onStop: 'none', notices: 'toast' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(logs).toEqual([])
+  expect(toasts).toEqual(["cachebeat the cache was not served (0 read, 90,000 written): this session's cache lasts 5 minutes, so beats come every 4m"])
+})
+
+test('Notices on none: a resumed conversation comes back without its line', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { settings: { defaultOn: true, notices: 'none' }, chat: [said('user', 'hi'), said('assistant', 'ok')] })
+  await clock.advance(1000)
+  expect((await stateNow($)).session.paused).toBe('this conversation was resumed')
+  expect([...logs, ...toasts]).toEqual([])
 })
 
 test('at a fixed interval, stops when the fork was not served from cache', async ($: Engine, on: On) => {
@@ -872,7 +929,7 @@ const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
 const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', keepAliveUntil: null, keepAliveUntilLocal: null, keepAliveMinutesLeft: null, beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, nextBeat: null, skipping: null, paused: null, coldGuard: true, coldGuardFrom: 'settings', coldGuardAsked: 0, coldSends: 0, coldSendTokens: 0 }
-const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null }
+const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, coldBecause: null, contextTokens: null, recacheInputTokens: null }
 const LIMITS = [{ kind: 'five_hour', percentUsed: 10 }] // the stub's usage windows
 const FRESH_CONTEXT = { tokens: null, window: 200_000, percent: null, autoCompactAt: null, compactions: 0, lastCompactionMinutesAgo: null, lastMessageMinutesAgo: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
@@ -882,6 +939,11 @@ const toolRow = (component: 'ToolUse' | 'ToolResult', tool: string, input: unkno
     ? { tool_use_id: 'u1', tool, input, isRunning: false, isErrored: false, isInterrupted: false }
     : { tool_use_id: 'u1', tool, output: '{}', isErrored: false },
 }) as never
+
+test('each tool\'s description fits the 4096 characters the model reads before tool search', () => {
+  // $.tool.register warns at load, on every user's screen, past this
+  for (const spec of [STATE, SET]) expect(spec.description.length).toBeLessThanOrEqual(4096)
+})
 
 test('both tools register, every setting in the schema with the pane\'s ranges', async ($: Engine, on: On) => {
   const { specs } = await setup($, on)
@@ -1261,6 +1323,16 @@ test('under auto, a cache gone before the hour beats every 4m from there, and st
   expect(logs.at(-1)).toContain('stopped: the cache was not served')
 })
 
+test('under auto with Cache gone cold set to stop, a cache gone before the hour stops beating there', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }, ok], settings: { onCold: 'stop' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE + 8 * M)
+  expect(forks).toEqual([IDLE])
+  expect(logs.at(-1)).toBe('stopped: the cache was not served (0 read, 90,000 written)')
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
 const SWITCH = {
   from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5', requested_model: 'sonnet', source: 'command', context_tokens: 90_000,
   prompt_cache_warm: true, cache_ttl: '1h', estimated_cache_write_usd: 0.5, pricing: 'catalog',
@@ -1276,7 +1348,7 @@ test('after /model, beats wait for the next turn', async ($: Engine, on: On) => 
   expect((await stateNow($)).session).toMatchObject({ nextBeat: 'after the next turn', paused: 'the model changed' })
   await clock.advance(IDLE * 2)
   expect(forks.length).toBe(0)
-  await $.turn.complete(turn)
+  await $.turn.complete(onSonnet)
   expect((await stateNow($)).session.paused).toBe(null)
   await clock.advance(IDLE)
   expect(forks.length).toBe(1)
@@ -2533,9 +2605,9 @@ test('state says whether the cache is warm, with beating off too: unknown, warm,
   expect((await stateNow($)).cache).toEqual({ ...FRESH_CACHE, contextTokens: 120_000, recacheInputTokens: 240_000 })
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, contextTokens: 120_000, recacheInputTokens: 240_000 })
+  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, coldBecause: null, contextTokens: 120_000, recacheInputTokens: 240_000 })
   sleep(80 * M) // 90m since the last read
-  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, contextTokens: 120_000, recacheInputTokens: 240_000 })
+  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, coldBecause: 'time', contextTokens: 120_000, recacheInputTokens: 240_000 })
 })
 
 test('state judges a cache found short by its five minutes', async ($: Engine, on: On) => {
@@ -2874,7 +2946,7 @@ test('beats keep the cache warm until the time is up, then this session turns of
   await clock.advance(2 * H - 1)
   expect(forks).toEqual([50 * M, 100 * M]) // the cache at 100m lasts to 160m: the beat that would follow is not needed
   expect((await stateNow($)).session).toMatchObject({ enabled: true, nextBeat: 'none needed' })
-  expect(await cmd($, '')).toBe('on, every 50m idle · 1m left · 2 beats · no more beats needed · cache warm, 41m left')
+  expect(await cmd($, '')).toBe('on, every 50m idle · 1m left · 2 beats · no beat needed · cache warm, 41m left')
   await clock.advance(1)
   expect(logs.filter(l => l.startsWith('stopped'))).toEqual([`stopped: kept warm until ${clockText(2 * H, 2 * H)}, as asked`])
   expect(await cmd($, '')).toBe('off · cache warm, 40m left')
@@ -2887,7 +2959,7 @@ test('beats keep the cache warm until the time is up, then this session turns of
 test('no beat is armed when the cache outlives the time without one', async ($: Engine, on: On) => {
   const { clock, forks, logs } = await setup($, on)
   await $.turn.complete(turn)
-  expect(await cmd($, '55m')).toEndWith('every 50m idle · no more beats needed') // the hour's cache read now lasts past 55m
+  expect(await cmd($, '55m')).toEndWith('every 50m idle · no beat needed') // the hour's cache read now lasts past 55m
   await clock.advance(54 * M)
   expect(forks).toEqual([])
   await clock.advance(1 * M)
@@ -3345,6 +3417,120 @@ const coldSetup = async ($: Engine, on: On, world: World = {}) => {
   return kit
 }
 
+test('Notices on none: a send on a cold cache goes and is counted, unsaid', async ($: Engine, on: On) => {
+  const { answers, sent, logs, toasts } = await coldSetup($, on, { settings: { notices: 'none' } })
+  answers.push('Send')
+  await submit($)
+  expect(sent).toEqual(['go on'])
+  expect([...logs, ...toasts]).toEqual([])
+  expect((await stateNow($)).session.coldSends).toBe(1)
+})
+
+// ---- the cold guard after /model: the new model has none of the chat cached ----
+
+const ASK_MODEL = 'The model changed, and this chat has no cache on it yet, so this message caches 184k tokens again. Send it?'
+/** A 184k-token conversation read 10m ago on Opus, its cache still warm there, then /model to Sonnet while idle. */
+const switchedSetup = async ($: Engine, on: On, world: World = {}) => {
+  const kit = await setup($, on, { contextTokens: 184_000, ...world })
+  await $.turn.complete(turn)
+  await kit.clock.advance(10 * M)
+  kit.switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  return kit
+}
+
+test('after /model the guard asks once, saying the model changed; the first message on the new model makes it warm again', async ($: Engine, on: On) => {
+  const { questions, answers, sent, logs } = await switchedSetup($, on)
+  answers.push('Send')
+  expect((await submit($)).drop).toBe(undefined)
+  expect([questions, sent]).toEqual([[ASK_MODEL], ['go on']])
+  expect(logs.at(-1)).toBe('sent on a cold cache: cold since the model changed, 184k tokens cached again')
+  await $.turn.complete(onSonnet) // the message's turn, on the new model
+  expect((await stateNow($)).cache.state).toBe('warm')
+  expect((await submit($)).drop).toBe(undefined)
+  expect(questions).toHaveLength(1)
+})
+
+test('after /model, Don\'t send drops the message, saying the model changed', async ($: Engine, on: On) => {
+  const { answers } = await switchedSetup($, on)
+  answers.push("Don't send")
+  expect((await submit($)).drop).toBe('cachebeat: not sent. The model changed, and sending caches 184k tokens again. Send it again to be asked, or /cachebeat guard off.')
+})
+
+test('after /model with its toggle off, the guard doesn\'t ask, and the send is counted quietly', async ($: Engine, on: On) => {
+  const { questions, sent, logs } = await switchedSetup($, on, { settings: { coldGuardModel: false } })
+  const before = logs.length
+  expect((await submit($)).drop).toBe(undefined)
+  expect([questions, sent, logs.length]).toEqual([[], ['go on'], before])
+  expect((await stateNow($)).session.coldSends).toBe(1)
+})
+
+test('after /model set to warm, once a beat wrote the new model\'s cache the guard doesn\'t ask', async ($: Engine, on: On) => {
+  const { clock, questions, sent } = await switchedSetup($, on, { settings: { onModelSwitch: 'warm' }, fork: [{ ...ok, usage: usage(0, 184_000) }] })
+  await cmd($, 'on')
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'model' }) // before the beat
+  await clock.advance(IDLE)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+  expect((await submit($)).drop).toBe(undefined)
+  expect([questions, sent]).toEqual([[], ['go on']])
+})
+
+test('after /model, state, Status and /cachebeat say the cache is cold because the model changed; back on the first model it is warm', async ($: Engine, on: On) => {
+  const { switchTo } = await switchedSetup($, on)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'model', coldForMinutes: null, lastReadMinutesAgo: 10 })
+  expect(await cmd($, '')).toBe('off · cache cold since the model changed')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect((await statusOf(ui)).Cache).toBe('cold since the model changed (1h TTL, last read 10m ago)')
+  await ui.unmount()
+  switchTo(OPUS)
+  await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+})
+
+test('a /model landing while a request is on its way: the cache is the request\'s model\'s, so the guard asks after', async ($: Engine, on: On) => {
+  const { clock, questions, answers, switchTo } = await setup($, on, { contextTokens: 184_000 })
+  answers.push('Send')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  switchTo('claude-sonnet-5-5') // the session's model by the time the request on Opus is answered
+  await step($, 't2', 0)
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await clock.advance(10 * M)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'model' })
+  await submit($)
+  expect(questions).toEqual([ASK_MODEL])
+})
+
+test('a model id with a snapshot date or the 1M suffix is the same model: no ask', async ($: Engine, on: On) => {
+  const { clock, questions, switchTo } = await setup($, on, { contextTokens: 184_000 })
+  await $.turn.complete({ ...turn, usage: { ...turn.usage, model: `${OPUS}-20261001` } }) // the id the API reports
+  switchTo(`${OPUS}[1m]`)
+  await clock.advance(10 * M)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+  await submit($)
+  expect(questions).toEqual([])
+})
+
+test('after /model and past the lifetime, the cache is cold for the time: said so, and asked even with after /model off', async ($: Engine, on: On) => {
+  const { clock, questions, answers } = await switchedSetup($, on, { settings: { coldGuardModel: false } })
+  await clock.advance(3 * 60 * M + 4 * M) // read 3h 14m ago in all
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'time', coldForMinutes: 134 })
+  expect(await cmd($, '')).toBe('off · cache cold for 2h 14m')
+  answers.push('Send')
+  await submit($)
+  expect(questions).toEqual([ASK_COLD])
+})
+
+test('a cache known only from a resume hint, with no request seen on any model, is never cold for the model', async ($: Engine, on: On) => {
+  const { switchTo, questions } = await setup($, on, { chat: CHAT, stored: { 'session:s1': on2 }, contextTokens: 184_000 })
+  await $.classic.SessionStart(hintOf(10 * 60))
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+  expect((await submit($)).drop).toBe(undefined)
+  expect(questions).toEqual([])
+})
+
 test('cold and big: the question says how long it has been cold and the tokens; Send sends it, saying so', async ($: Engine, on: On) => {
   const { questions, answers, sent, logs } = await coldSetup($, on)
   answers.push('Send')
@@ -3689,7 +3875,7 @@ test('Status after a sleep says cold for how long, with the conversation\'s size
   const ui = await $.ui.mount(SETTINGS_PANE)
   expect(await statusOf(ui)).toEqual({
     Cache: 'cold for 2h 14m (1h TTL, last read 3h 14m ago)',
-    Size: '184k tokens · as 368k input tokens to cache again',
+    Size: '184k tokens',
     Beating: 'off',
     'This session': 'no beats yet',
     'Cold guard': 'on · asks from 20k tokens',
@@ -3736,7 +3922,7 @@ test('Status hides the Usage row where no limits are reported', async ($: Engine
 
 test('Status rows for a cache never written, a beat or two, a session\'s own guard, and a pause', () => {
   const facts: StatusFacts = {
-    cache: { state: 'unknown', ttl: '5m', lastReadMinutesAgo: null, leftMs: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null },
+    cache: { state: 'unknown', ttl: '5m', lastReadMinutesAgo: null, leftMs: null, coldForMinutes: null, coldBecause: null, contextTokens: null, recacheInputTokens: null },
     session: {
       enabled: true, intervalMinutes: 4, intervalFrom: 'folder', keepAliveLeftMs: null, beats: 1, lastBeatReadTokens: 184_212, lastBeatWrittenTokens: 412,
       nextBeat: 'after the next turn', skipping: null, paused: null, coldGuard: false, coldGuardFrom: 'session', usageLimits: [],
@@ -3826,7 +4012,7 @@ test('Status counts on while beating is off and nothing else redraws it: the col
 const statsTexts = async (ui: { findAll: (q: { type: string }) => Promise<{ text?: string }[]> }) => (await ui.findAll({ type: 'Text' })).map(x => x.text ?? '')
 const columns = (texts: string[], label: string) => {
   const line = texts.find(x => x.startsWith(label))
-  return line === undefined ? undefined : (line.slice(23).match(/.{1,13}/g) ?? []).map(x => x.trim())
+  return line === undefined ? undefined : [[23, 36], [36, 49], [49, 62], [62, 76]].map(([a, b]) => line.slice(a, b).trim())
 }
 const STATS_PANE = SETTINGS_PANE
 const day = (more: Partial<ReturnType<typeof emptyDay>>) => ({ ...emptyDay(), ...more })
@@ -3975,7 +4161,7 @@ test('the Stats page adds up every session\'s days, by span, and this session\'s
   await cmd($, 'stats')
   const ui = await $.ui.mount(STATS_PANE)
   const texts = await statsTexts(ui)
-  expect((texts[1]!.slice(23).match(/.{1,13}/g) ?? []).map(x => x.trim())).toEqual(['Today', '7 days', '30 days', 'This session'])
+  expect(texts[1]).toBe(`${' '.repeat(23)}        Today       7 days      30 days  This session`) // the last column one wider: two cells between 30 days and This session
   expect(columns(texts, 'Beats · cost')).toEqual(['5 · 20k', '15 · 70k', '15 · 70k', '1 · 5k'])
   expect(columns(texts, 'Kept warm · avoided')).toEqual(['1 · 170k', '3 · 510k', '3 · 510k', '0'])
   expect(columns(texts, 'Net')).toEqual(['+150k', '+440k', '+440k', '−5k']) // this session paid for a beat and had no turn back

@@ -6,35 +6,40 @@
 
 **Keep Claude Code's prompt cache warm while you're away.**
 
-![cachebeat asking before a message goes to a cold cache, keeping the cache warm for two hours as beats land on their own, then its Status page](assets/demo.gif)
+![cachebeat keeping an idle session's cache warm: /cachebeat 3h, two beats land on their own while you're away, and the next message picks up warm](assets/demo.gif)
 
 [![CI](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml/badge.svg)](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml)
-[![Claude Code 2.1.287+](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
+[![Claude Code 2.1.332+](https://img.shields.io/badge/Claude_Code-2.1.332%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 When a Claude Code session sits idle, its prompt cache goes cold, and your next message has to rebuild it from scratch. That's slower, and it uses more of your usage limits. cachebeat gives the session a heartbeat: shortly before the cache would go cold, it sends a tiny background request that reads the conversation and keeps the cache alive. Your transcript never sees it.
 
 You come back from lunch, type your next message, and it picks up right where you left off.
 
+| Command | What it does |
+| --- | --- |
+| `/cachebeat on` | Keeps this session's cache warm, with no time limit |
+| `/cachebeat 2h` | Keeps it warm for a set time, then turns off |
+
 > [!IMPORTANT]
-> **Changed in 0.10.0:** `/cachebeat <time>` now sets how long to keep the cache warm, and needs a unit: `/cachebeat 2h` keeps it warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global <minutes>`.
+> **Changed in 0.10.0:** `/cachebeat on` works as before. `/cachebeat <time>` now sets how long to keep the cache warm, and needs a unit: `/cachebeat 2h` keeps it warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global <minutes>`.
 
 ## Features
 
-- **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation
+- **Background beats** keep the cache warm while you're idle or a turn sits waiting, timed to how long your cache lasts, and stay out of the conversation. `/cachebeat on` starts them
 - **A keep-alive time**: `/cachebeat 2h` keeps the cache warm through a break of that long, then turns itself off
 - **A cold guard** asks before your message goes to a cache that's gone cold, with how many tokens sending it would cache again. It's on from the start, even with beating off
 - **A live heart** under the prompt, with 19 animations to choose from
 - **A turn line** under your latest turn shows the beats so far and the time until the next one
 - **A Status page and a Stats page**: the cache as it stands, and what beats cost and saved over the last 30 days
 - **A settings menu** with live previews, driven by keyboard or mouse
-- **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words, or ask it how full its context is and whether the cache is still warm
+- **Ask Claude** to turn it on, keep the cache warm for a while, or change any setting, in your own words, or ask it how full its context is and when it will compact
 - **Safety stops** for long idle stretches, usage limits, errors, and chats too small to bother with
 - **This session, this folder or all folders**: turn it on for one session, or have new sessions start with it in one folder or everywhere
 
 ## Requirements
 
-- **Claude Code 2.1.287 or later.** Check your version with `claude --version` and update with `claude update`.
+- **Claude Code 2.1.332 or later.** Check your version with `claude --version` and update with `claude update`.
 - **Claude Code in the terminal**, which cachebeat is built for. In the Claude desktop app, beating works the same: the turn line sits above the prompt, and the settings menu opens beside the chat. The wider heart animations and the menu's keyboard controls are rougher there, so you can just ask Claude to change settings for you. Nothing is drawn in `claude -p`.
 
 ## Install
@@ -108,12 +113,12 @@ Beats fit your cache by themselves: every 50 minutes on a Claude subscription's 
 
 Each beat is one small request to the Anthropic API, made the way Claude Code makes its own requests: it carries the current conversation and asks for a one-character reply. The reply is thrown away, and nothing is added to your transcript. The request's last line is cachebeat's own: it starts with `[cachebeat]` and says it isn't from you, so a request log or a proxy can tell beats from your own messages.
 
-- A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would. Ask Claude, and it can tell you how much the last beat read and wrote, whether the cache is likely still warm, how big the conversation is, how full the context window is and when it will compact.
+- A beat counts toward your usage like any other request. Because it reads from the cache, it costs far less than rebuilding the cache would. Ask Claude, and it can tell you how much the last beat read and wrote, how big the conversation is, how full the context window is and when it will compact.
 - Beats happen only while nothing else keeps the cache warm: while the session is idle, or while a turn sits waiting on a long tool run or a permission prompt. They come at most once per interval.
 - cachebeat sends nothing anywhere else. It has no telemetry and makes no other network calls.
 - To tell how long your cache lasts, cachebeat reads your `promptCacheTtl` setting, the variables `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and `ENABLE_PROMPT_CACHING_1H`, and whether your usage limits are reported, which they are on a subscription.
 - `/cachebeat` and the two tools Claude uses, `mcp__cachebeat__state` and `mcp__cachebeat__set`, are answered by cachebeat itself. The tools read or change only cachebeat's own state and settings. Claude calls them without a permission prompt, and each call that goes through shows as one line in the transcript.
-- With **Cold guard** on, cachebeat asks before sending your message to a session whose cache has gone cold, whether beating is on or not. Messages nobody can be asked about (scheduled tasks, other sessions, `claude -p`, Slack and other channels) are sent as usual, and so are messages from Remote Control: before sending from your phone or the web to a session that may have gone cold, run `/cachebeat` there to see.
+- With **Cold guard** on, cachebeat asks before sending your message to a session whose cache has gone cold, whether beating is on or not. After `/model` the new model has none of the conversation cached, so it asks then too, until a message or a beat on the new model caches it (turn **after /model** off to skip this). Messages nobody can be asked about (scheduled tasks, other sessions, `claude -p`, Slack and other channels) are sent as usual, and so are messages from Remote Control: before sending from your phone or the web to a session that may have gone cold, run `/cachebeat` there to see.
 - cachebeat also sees `/model` switches, without changing them, so beats can wait for your next message or warm the new model, as **After /model** says.
 
 ## Privacy
@@ -156,7 +161,7 @@ A command typed while Claude is working takes effect at once. Claude Code shows 
   ⏸ manual mode on · ⠀(♥)⠀ ×3
 ```
 
-**The Status page** is the first tab of the menu, and `/cachebeat` opens it. It is read-only, and it shows this session as it stands: whether the cache is warm or cold, with its lifetime, when it was last read and how long it has left, or how long it has been cold; the conversation's size in tokens, and what caching it again would cost in input tokens; whether this session beats, at what interval, and when the next beat is due; the beats so far and what the last one read and wrote; the cold guard; your usage limits and where beats stop; and when you last sent a message. It updates each minute while it is open. Warm or cold is judged by the time since the cache was last read; only the next request confirms it.
+**The Status page** is the first tab of the menu, and `/cachebeat` opens it. It is read-only, and it shows this session as it stands: whether the cache is warm or cold, with its lifetime, when it was last read and how long it has left, or how long it has been cold, or that the model changed since; the conversation's size in tokens; whether this session beats, at what interval, and when the next beat is due; the beats so far and what the last one read and wrote; the cold guard; your usage limits, when Claude Code reports them, and where beats stop; and when you last sent a message. It updates each minute while it is open. Warm or cold is judged by the time since the cache was last read, and the model it was read on; only the next request confirms it.
 
 **The Stats page** is the second tab, and `/cachebeat stats` opens it. It adds up what beats cost and what they saved, for today, the last 7 and 30 days, and this session, across every session on your machine:
 
@@ -215,8 +220,8 @@ A folder is where the session started, or where `/cd` or a worktree move took it
 | Setting | What it does | Default |
 | --- | --- | --- |
 | Stop after idle | Stops beating after this long without a message from you. A session with a keep-alive time (`/cachebeat 2h`) keeps to that instead | 8 hours |
-| Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop | start on your next message |
-| Cold guard | Asks before sending a message to a session whose cache has gone cold, saying how long it's been cold and how many tokens sending it caches again. It asks about chats from a minimum size. A question left unanswered doesn't send the message and closes after 5 minutes, or sends it after a few minutes if you choose. While it's open, other incoming messages (from other sessions, say) wait for it | on, from 20k tokens, don't send (closes after 5m) |
+| Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop. On auto, a beat that finds the cache lasts five minutes: beat every 4 minutes from there, or stop | start on your next message |
+| Cold guard | Asks before sending a message to a session whose cache has gone cold, saying how long it's been cold, or that the model changed, and how many tokens sending it caches again. It asks about chats from a minimum size. A question left unanswered doesn't send the message and closes after 5 minutes, or sends it after a few minutes if you choose. While it's open, other incoming messages (from other sessions, say) wait for it. **after /model** has it ask too while the new model has no cache of the chat yet | on, from 20k tokens, don't send (closes after 5m), after /model on |
 | Stop at usage | Stops once any of your usage limits reaches this percentage | 90% |
 | Skip small chats | Skips beating chats under a minimum size | off, 20k tokens |
 
@@ -267,12 +272,13 @@ Theme colors follow your Claude Code theme, so they change when you switch theme
 </details>
 
 <details>
-<summary><b>Alerts</b>: how beats and stops are announced</summary>
+<summary><b>Alerts</b>: how beats, stops and other notices are announced</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
 | On a beat | Log, toast, both, or nothing when a beat lands | nothing |
 | On stop | Log, toast, both, or nothing when beating stops by itself | log |
+| Notices | Log, toast, both, or nothing for the other lines: beats waiting for your next message, resuming, skipping or going on, a new model's cache, beats every 4 minutes on a five-minute cache, a message sent on a cold cache | log |
 
 </details>
 
@@ -285,10 +291,11 @@ cachebeat turns itself off for the session when:
 - a usage limit reaches **Stop at usage**
 - the API rate-limits it, or returns an error that doesn't clear up (a passing hiccup is retried a minute later)
 - there's no conversation yet to keep warm
+- a beat finds the cache already gone on an interval you set yourself: the interval is longer than the cache lasts, so set a shorter one or use auto
 
 If the cache goes cold before a beat reaches it, as when your computer sleeps, cachebeat waits and starts beating again on your next message. Set **Cache gone cold** to stop to have it turn off instead.
 
-It tells you why, the way you chose under **Alerts**. On auto, a cache that's gone before a 50-minute beat lasts five minutes: instead of stopping, cachebeat says so and beats every 4 minutes from there.
+It tells you why, the way you chose under **Alerts**. On auto, a cache that's gone before a 50-minute beat lasts five minutes: instead of stopping, cachebeat says so and beats every 4 minutes from there, unless **Cache gone cold** is set to stop.
 
 ## Good to know
 
