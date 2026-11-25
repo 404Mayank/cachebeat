@@ -435,6 +435,12 @@ Record F1–T2's results under this plan as "Results", as step 8 did. Put anythi
 - **Failed: a cachebeat load line in every frame,** `cachebeat: $.tool.register: the description of state (4117 characters) reaches the model up to its first 4096 characters…`. Change 4 (`a0d3ff2`, the `coldBecause` sentence) took the `state` tool's description past 4096. A plugin bug, shown to every user at load, not the demo's.
 - **Failed: the payoff answer ran 7 lines,** and Haiku recited cachebeat's state from the `/cachebeat` reply. §2's rule: the payoff becomes `back. where were we, in one line?`, its wait `/(?s)in one line\?.*kept warm ×2/` (done after H1).
 
+**H1b, the second Haiku run (2026-11-26, step-gif after dev's ae52c5b, the state-description fix).** The fork is `30ce0154-3a51-42c6-b1c4-d37d6eafcf0d.jsonl`. Haiku runs in all: 2.
+- **Passed:** no cachebeat load line, and no `∴`, tip, token readout, tool line or weekly-limit notice in any frame (OCR at 2 fps).
+- **The payoff answered in two lines:** `We were summarizing demo.sh, which opens Neo4j Browser and the Gephi project. Cachebeat is on until 3:50 AM.` The turn line moved under it, at `×2 · next in 50m · 1h 20m left`.
+- **Captions:** the same frames as H1 (idle on frames 54–87 and 113–147, payoff on 229–259 of 260).
+- **Length and size:** 21.5s, from a 33.1s raw. 1.12 MB, once the frame optimizer runs lossless after `-coalesce`: about 1.6 MB without it, while 1% fuzz (0.86 MB) ghosted scrolled text (mods-gotchas.md).
+
 ## 7. How the README embeds it
 
 On `main`, the README is for users. The image stays where it is (line 9, under the tagline), as plain Markdown, with no width attribute: GitHub scales it to the column.
