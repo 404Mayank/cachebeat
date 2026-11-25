@@ -161,7 +161,7 @@ A command typed while Claude is working takes effect at once. Claude Code shows 
   ⏸ manual mode on · ⠀(♥)⠀ ×3
 ```
 
-**The Status page** is the first tab of the menu, and `/cachebeat` opens it. It is read-only, and it shows this session as it stands: whether the cache is warm or cold, with its lifetime, when it was last read and how long it has left, or how long it has been cold, or that the model changed since; the conversation's size in tokens; whether this session beats, at what interval, and when the next beat is due; the beats so far and what the last one read and wrote; the cold guard; your usage limits and where beats stop; and when you last sent a message. It updates each minute while it is open. Warm or cold is judged by the time since the cache was last read, and the model it was read on; only the next request confirms it.
+**The Status page** is the first tab of the menu, and `/cachebeat` opens it. It is read-only, and it shows this session as it stands: whether the cache is warm or cold, with its lifetime, when it was last read and how long it has left, or how long it has been cold, or that the model changed since; the conversation's size in tokens; whether this session beats, at what interval, and when the next beat is due; the beats so far and what the last one read and wrote; the cold guard; your usage limits, when Claude Code reports them, and where beats stop; and when you last sent a message. It updates each minute while it is open. Warm or cold is judged by the time since the cache was last read, and the model it was read on; only the next request confirms it.
 
 **The Stats page** is the second tab, and `/cachebeat stats` opens it. It adds up what beats cost and what they saved, for today, the last 7 and 30 days, and this session, across every session on your machine:
 
@@ -291,6 +291,7 @@ cachebeat turns itself off for the session when:
 - a usage limit reaches **Stop at usage**
 - the API rate-limits it, or returns an error that doesn't clear up (a passing hiccup is retried a minute later)
 - there's no conversation yet to keep warm
+- a beat finds the cache already gone on an interval you set yourself: the interval is longer than the cache lasts, so set a shorter one or use auto
 
 If the cache goes cold before a beat reaches it, as when your computer sleeps, cachebeat waits and starts beating again on your next message. Set **Cache gone cold** to stop to have it turn off instead.
 
