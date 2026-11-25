@@ -13,7 +13,7 @@ const ABOUT: Record<keyof BeatSettings, string> = {
     `Minutes idle before a beat; auto beats at ${AUTO['1h']} on a one-hour cache and ${AUTO['5m']} on a five-minute one, reading which the session has (state's cache.ttl).`,
   stopAfterHours: 'Beating stops after this long without a message from the user. A session with a keep-alive time (session.keepAliveMinutes) keeps to that instead.',
   stopAtUsage: 'Beating stops once any usage limit reaches this.',
-  onCold: "If the cache goes cold before a beat reaches it (the computer slept, or retries ran past its lifetime): wait, and beat again after the user's next message, or stop beating.",
+  onCold: "If the cache goes cold before a beat reaches it (the computer slept, or retries ran past its lifetime): wait, and beat again after the user's next message, or stop beating. Under interval auto, a beat the cache didn't serve (it lasts 5 minutes, not an hour) switches to beating every 4m under wait, and stops beating under stop.",
   skipSmall: 'Skips beating chats smaller than skipSmallTokens.',
   skipSmallTokens: "The smallest chat kept warm while skipSmall is on; setting it doesn't turn skipSmall on.",
   coldGuard: "Asks the user before their message is sent to a session whose cache has gone cold, saying how long it's been cold and the tokens sending caches again. Only messages typed at the terminal are asked about; a session can override it (session.coldGuard).",

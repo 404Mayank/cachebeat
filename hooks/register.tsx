@@ -832,8 +832,8 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
     const why = `the cache was not served (${got.toLocaleString()} read, ${wrote.toLocaleString()} written)`
     await countDay($, beatAdd(model, lifetime(), got, wrote, false)) // what it cost, though no beat of the count
     // under auto, a cache gone before an hour's interval lives five minutes, whatever the signs said:
-    // this beat wrote it afresh, so beat at that from here
-    if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m') return stop($, why)
+    // this beat wrote it afresh, so beat at that from here, unless a cache gone cold is to stop beating
+    if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m' || cfg.onCold === 'stop') return stop($, why)
     s.isCacheShort = true
     warmFrom(sentAt)
     tell($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
