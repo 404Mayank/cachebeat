@@ -509,6 +509,50 @@ test('a beat can toast', async ($: Engine, on: On) => {
   expect(toasts).toEqual(['♥ cache kept warm · 90k read'])
 })
 
+test('Notices on toast: a small chat\'s skip is a toast, not a line', async ($: Engine, on: On) => {
+  const { logs, toasts } = await setup($, on, { contextTokens: 8_000, settings: { skipSmall: true, interval: 3, notices: 'toast' } })
+  await $.turn.complete(turn)
+  await cmd($, 'on')
+  expect(toasts).toEqual(['cachebeat beats will skip: this chat is 8k tokens, under your 20k minimum'])
+  expect(logs).toEqual([])
+})
+
+test('Notices on both: the new model\'s cache is told as a line and a toast, before and after the beat writes it', async ($: Engine, on: On) => {
+  const { clock, logs, toasts, switchTo } = await setup($, on, {
+    settings: { onModelSwitch: 'warm', notices: 'both' }, fork: [{ ...ok, usage: usage(0, 90_000) }],
+  })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(IDLE)
+  const said = ["the next beat writes the new model's cache", "♥ warmed the new model's cache (90,000 written)"]
+  expect(logs).toEqual(said)
+  expect(toasts).toEqual(said.map(x => `cachebeat ${x}`))
+})
+
+test('Notices on none: beats wait for a new model and go on after a switch back, and nothing says so', async ($: Engine, on: On) => {
+  const { clock, logs, toasts, switchTo } = await setup($, on, { settings: { notices: 'none' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe('the model changed')
+  switchTo(OPUS)
+  await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
+  await clock.advance(2000)
+  expect((await stateNow($)).session.paused).toBe(null)
+  expect([...logs, ...toasts]).toEqual([])
+})
+
+test('Notices on none: a resumed conversation comes back without its line', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { settings: { defaultOn: true, notices: 'none' }, chat: [said('user', 'hi'), said('assistant', 'ok')] })
+  await clock.advance(1000)
+  expect((await stateNow($)).session.paused).toBe('this conversation was resumed')
+  expect([...logs, ...toasts]).toEqual([])
+})
+
 test('at a fixed interval, stops when the fork was not served from cache', async ($: Engine, on: On) => {
   const { clock, forks, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }], settings: { interval: 50 } })
   await cmd($, 'on')

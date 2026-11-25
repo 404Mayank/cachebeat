@@ -36,6 +36,7 @@ export const DEFAULTS: BeatSettings = {
   lineTiming: 'lubdub',
   onBeat: 'none',
   onStop: 'log',
+  notices: 'log',
   onModelSwitch: 'wait',
 }
 
@@ -394,6 +395,7 @@ export const TABS: readonly Tab[] = [
     rows: [
       { key: 'onBeat', label: 'On a beat', values: ALERTS, fmt: alert, help: 'How a beat landing is told: a line in the transcript (log), a toast, both, or nothing.' },
       { key: 'onStop', label: 'On stop', values: ALERTS, fmt: alert, help: 'How beating stopping on its own is told, and why.' },
+      { key: 'notices', label: 'Notices', values: ALERTS, fmt: alert, help: 'How the rest is told: beats waiting, skipping or going on, a new model\'s cache, a cold send.' },
     ],
   },
 ]

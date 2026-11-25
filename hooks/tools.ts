@@ -40,6 +40,7 @@ const ABOUT: Record<keyof BeatSettings, string> = {
   lineTiming: "The turn line's heart: lubdub beats twice, then rests; linear plays evenly.",
   onBeat: 'How a beat is announced: a transcript line (log), a toast, both, or none.',
   onStop: 'How beating stopping on its own is announced.',
+  notices: "How the other lines are announced: beats waiting for the user's next turn, resuming, skipping a small chat or going on, the next beat writing a new model's cache and doing it, and a message sent on a cold cache.",
   onModelSwitch: "After /model while idle: wait for the user's next turn, or have the next beat write the new model's cache (a full cache write, the one that turn would make).",
 }
 

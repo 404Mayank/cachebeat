@@ -267,12 +267,13 @@ Theme colors follow your Claude Code theme, so they change when you switch theme
 </details>
 
 <details>
-<summary><b>Alerts</b>: how beats and stops are announced</summary>
+<summary><b>Alerts</b>: how beats, stops and other notices are announced</summary>
 
 | Setting | What it does | Default |
 | --- | --- | --- |
 | On a beat | Log, toast, both, or nothing when a beat lands | nothing |
 | On stop | Log, toast, both, or nothing when beating stops by itself | log |
+| Notices | Log, toast, both, or nothing for the other lines: beats waiting for your next message, resuming, skipping or going on, a new model's cache, a message sent on a cold cache | log |
 
 </details>
 

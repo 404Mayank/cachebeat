@@ -248,14 +248,14 @@ async function sayResumed($: EngineInterface) {
   const note = offNote
   offNote = null
   if (!s.enabled) {
-    if (note) $.ui.log(note)
+    if (note) tell($, note)
     return
   }
   ttl = await cacheTtl($)
   const view = viewOf(cacheFacts(null), await $.clock.now())
   const cache = view.state === 'warm' ? ` · cache likely warm for ${fmt(view.expiresAt! - view.at)} more`
     : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
-  $.ui.log(`beats resume after your next message${cache}`)
+  tell($, `beats resume after your next message${cache}`)
 }
 
 /**
@@ -500,7 +500,7 @@ async function cacheNow($: EngineInterface): Promise<CacheView> {
 /** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
 async function checkSmall($: EngineInterface) {
   const small = await smallContext($)
-  if (small && !s.small) $.ui.log(`beats will skip: ${small}`)
+  if (small && !s.small) tell($, `beats will skip: ${small}`)
   s.small = small
   return small !== null
 }
@@ -610,9 +610,15 @@ function announce($: EngineInterface, text: string) {
   if (toasts(cfg.onStop)) $.ui.toast(`cachebeat ${text}`)
 }
 
+/** What cachebeat does along the way that is neither a beat nor a stop (a wait, a skip, a new model's cache), told as Notices says. */
+function tell($: EngineInterface, text: string) {
+  if (logs(cfg.notices)) $.ui.log(text)
+  if (toasts(cfg.notices)) $.ui.toast(`cachebeat ${text}`)
+}
+
 /** Beats wait for the next turn, which will cache what a beat would have to write: says why, once. */
 async function pause($: EngineInterface, why: string, said: string) {
-  if (s.enabled && s.paused !== why) $.ui.log(`beats wait for your next turn: ${said}`)
+  if (s.enabled && s.paused !== why) tell($, `beats wait for your next turn: ${said}`)
   s.paused = why
   await schedule($)
 }
@@ -669,7 +675,7 @@ async function resumeIfWarmed($: EngineInterface) {
   const model = await $.session.model()
   if (model !== s.warmModel) return
   s.paused = null
-  if (s.enabled) $.ui.log('beats go on: back on the model the cache was warmed on')
+  if (s.enabled) tell($, 'beats go on: back on the model the cache was warmed on')
   await schedule($)
 }
 
@@ -816,7 +822,7 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
     warmFrom(sentAt)
     await countDay($, beatAdd(model, lifetime(), got, wrote, false)) // it paid for the write, though it is no beat of the count
     const warmed = `♥ warmed the new model's cache (${wrote.toLocaleString()} written)`
-    $.ui.log(warmed)
+    tell($, warmed)
     await schedule($)
     return warmed
   }
@@ -1239,7 +1245,7 @@ async function noteColdSend($: EngineInterface, how: string, isSaid = true) {
   if (view.state !== 'cold' || view.contextTokens === null) return
   await countDay($, { cold: 1, coldTokens: view.contextTokens })
   await save($)
-  if (isSaid) $.ui.log(`sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
+  if (isSaid) tell($, `sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
 }
 
 /** Asks the cold guard's question; resolves the answer, or null when it was dismissed, closed unanswered, or couldn't be asked. */
@@ -1522,7 +1528,7 @@ export const register: Register = on => {
         await pause($, MODEL_CHANGED, 'the new model has no cache yet')
         // the switch takes effect once this hook settles: a switch back finds the warmed model then
         $.clock.after(SETTLE, () => void resumeIfWarmed($))
-      } else if (s.enabled) $.ui.log("the next beat writes the new model's cache")
+      } else if (s.enabled) tell($, "the next beat writes the new model's cache")
     }
     return r
   })
