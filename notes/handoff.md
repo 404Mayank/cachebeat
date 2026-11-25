@@ -108,7 +108,7 @@ Drafted on 2026-11-23 in step 9, revised on 2026-11-26 against `main` (0.9.3); n
   - what they saved
   - the net, in input tokens
   - cold sends
-- **Claude can read its context:** ask it how full the context window is and when it will compact. (Not whether the cache is warm: asking sends a request that warms it, so the answer is always warm. Status and the turn line show it without a request.)
+- **Claude can read its context:** ask it how full the context window is and when it will compact.
 - **A command typed while Claude is working** answers at once in a toast.
 
 ## Findings worth knowing before you touch anything
@@ -127,6 +127,7 @@ All are recorded in full in mods-gotchas.md or the plan; this is the index.
   - A last request answered with `usage: null` stamps nothing: `lastWarm` stays at the previous request, the safe side. Left on purpose.
   - **Fixed in `step-race` (2026-11-23): `beat()` claims `beatClaimed` at entry,** before its first await, and lets go at the fork's answer (before the answered branches schedule, as the retry fix needs) or at any earlier exit, a throw included (try/finally). Found 2026-11-23 porting to 0.9.3: `beat()` checked `if (beating)` before several awaits (`$.session.usage`, `isRewound`, `$.session.model`, the clock) but set `beating` only after them, so a timer beat and a `/cachebeat now` entering together both forked. On 0.9.3 too: the fix isn't carried there. `beating` itself is unchanged, since `turn.complete`, `turn.start` and the settings changes read it as "a fork is on its way"; see mods-gotchas, "A beat's claim".
 - **cache-tax** ([karanb192/cache-tax](https://github.com/karanb192/cache-tax), MIT, read at 2.4.2) is a mod the Stats page draws ideas from; the page is not named after it (the user, 2026-11-23). What it does that cachebeat could borrow, and what was taken, is in the plan, "From cache-tax" and "Decided from it". Credit it in the README only if what's taken is substantial (the user).
+- **The README doesn't offer asking Claude whether the cache is warm** (the user, 2026-11-26): asking sends a request that re-caches the conversation, so the answer is always warm. Status and the turn line show it without a request. A live test found Haiku doesn't search for the deferred `state` tool on such a question, while Sonnet does.
 - **The idle cost rise** (+$0.002 with nothing running, step 2's live check) touches no figure now. Leave it unless testing shows it again (the user).
 
 ## How the work is run
