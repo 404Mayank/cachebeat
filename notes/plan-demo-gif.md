@@ -288,6 +288,7 @@ Other folders' own settings weren't read: the `folders` key is the one to protec
   - Turn 2: `read demo.sh: what does it do?` This puts `demo.sh` in context, so the fork's setup question is answered without a tool call (§2). Its collapsed `Read 1 file` row stays in the tail. That's accepted: it reads as real work.
   - Check the tokens (the `/context` figure, or the transcript's last `usage`) and the tail. If the tail has a path or a long listing, one more short turn (`thanks, that's clear`) pushes it up.
   - Record the session id in this plan.
+  - **Made 2026-11-26:** `3c20ee7b-45e3-4161-b166-5297bc12c231`, 51.9k tokens on Sonnet 5.5, with three turns: the overview, `read demo.sh: what does it do?`, and `thanks, that's clear`. Turn 1 ran only read-only shell commands (`ls`, `cat README`, `git ls-files`), which `default` mode allowed without asking. No cachebeat line is in the transcript.
 
 **The other candidates, and why not:**
 - **niri-mcp `e724d215…`** (243k, Sonnet, 2026-10-03): the most striking figure (`243k cached`), and the second choice if the user prefers it. But its tail is unread, the topic (computer-use research) runs to links and long answers, and each take re-caches 243k.
