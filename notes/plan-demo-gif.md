@@ -394,6 +394,40 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
 
 Record F1–T2's results under this plan as "Results", as step 8 did. Put anything that took time to find out in mods-gotchas.md: the `store.get` pin, `showTurnDuration` and the turn line, transparency.
 
+## Results (2026-11-26, in progress)
+
+**F1, the VHS mock (passed).** It drew the §3 card with `dark`'s colors and the footer as §5's table gives it, and the turn line went 0, then ×1, then ×2.
+- `status()` read every count, and `plan()` found both beats.
+- Measured in the mock: the hint row at ≈590px, the prompt row ≈516, the turn line ≈466. That's §5's table. The turn line sits above the `BOTTOM` crop (563px).
+
+**F2, render only (passed).**
+- **The mask:** alpha matched the geometric mask in all 228 coalesced frames. The corners are clean on white and on `#0d1117`.
+- **The orange:** the turn line comes out `(187,125,106)`. yuv420p dulls thin text, but it stays orange under `stats_mode=full`.
+- **Size:** 0.25 MB masked and optimized, against 0.43 MB opaque.
+- **The captions:**
+  - `» 50 min idle` shows only on the two fast parts (8 and 20 frames).
+  - `back 1h 40m later · cache still warm` shows only on the last 32 frames (≈2.6s).
+  - Both sit right-aligned in the prompt row.
+- **The old raw** (1176×700, no margin) also renders: 2.96 MB, against the shipped GIF's 2.4 MB from the same raw.
+- `git status` showed no `assets/demo.gif` change.
+- **The caption is `» 50 min idle`,** not `▸▸`: FiraCode has no `▸`, and drawtext has no font fallback (the director agreed; mods-gotchas.md).
+
+**F3, the launch without a message (passed, with one finding).**
+- **Flags:** `--launch`'s printed flags match the tape's `Type` line.
+- **Plugins:** the debug log names `cachebeat-demo-clock@inline` and one `cachebeat@inline`, with no `@cachebeat` or `@synced`.
+- **Theme:** `dark`, with the user bar at 256-color 237.
+- **The pin works:** `/cachebeat settings` showed Animation Classic, Cold guard off, Stop at usage 100%, Skip small chats off, and the turn line's Color claude, Effect steady. Nothing was changed: arrow keys and tab numbers only.
+- **settings.json** was byte-identical after each of three launches.
+- **Footer:** `⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents`. The rows from the bottom are hint, blank, the box's bottom border, the prompt row, the top border, then the last answer line (plus tmux's own `focus-events` notice in tmux). §5's table stands.
+- **The tail** shows nothing private, and no welcome header. There was no Remote Control or away notice.
+- **Requests:** none sent, apart from Claude Code's own `quota_check` at startup.
+- **A fork file was written,** `3e592b42-4640-4831-b45d-850c5411f352.jsonl`: typing `/cachebeat settings` records a local command. Launches with nothing typed wrote none.
+- **The finding: the weekly-limit notice.** `You've used 76% of your weekly limit · resets 7:30am (Asia/Kolkata)` shows in the row above the prompt box.
+  - **Timing:** about 11s after launch, once `quota_check` answers. It stays about 8s, then clears.
+  - **No setting hides it.** It's the `rate-limit-warning` notification. In 2.1.332's binary it's skipped only during a rate-limit grace period, or by a server flag (`tengu_cosmic_lake`) for the five-hour window.
+  - **It shows again only when its text changes:** it's deduplicated by text, so a rise from 76% to 77% mid-take brings it back.
+  - **The mod API's `ui.notice`** covers tool-use notices only.
+
 ## 7. How the README embeds it
 
 On `main`, the README is for users. The image stays where it is (line 9, under the tagline), as plain Markdown, with no width attribute: GitHub scales it to the column.
