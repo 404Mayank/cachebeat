@@ -1,4 +1,4 @@
-# Handoff: 0.10.0 is built and waits on the user to ship (2026-11-23)
+# Handoff: 0.10.0 is built on `dev` and waits on the user to ship (2026-11-26)
 
 > Temporary handoff for the next agent: what's in progress and how to continue. Not project documentation. Delete it when 0.10.0 ships, or rewrite it at the next wrap-up.
 
@@ -7,7 +7,7 @@
 - [mods-gotchas.md](mods-gotchas.md) holds what took time to find out.
 - [README.md](README.md) covers branches and releases.
 
-**Why it stopped:** on 2026-11-23 the user asked the orchestrator (`cachebeat-cf`) to finish everything that didn't need them, write this file, and have `clear` close every session. Nothing is half done: no worktree, no session mid-task, and no unmerged branch except the release branch.
+**Where it stands:** on 2026-11-23 0.10.0 was built and its release PR opened. On 2026-11-25/26 a second round (orchestrator `cachebeat-9c`) added changes 1–5, the `state` description trim, the README's `/cachebeat on` table and a new demo GIF, all merged into `dev` and not pushed. The release branch `v0.10.0` doesn't have them yet: refresh it from `dev` before shipping (notes/README.md, "Releasing, step by step").
 
 ## Where things are
 
@@ -22,11 +22,11 @@
 
 The next agent raises these with the user before anything else. The user said on 2026-11-23: build everything up to the release, but **don't ship**; and the orchestrator decides as it understands, recording here what the user should know, look at, or weigh in on.
 
-- **Ship 0.10.0?** It's the user's call. Everything up to it is done:
-  - [PR #14](https://github.com/404Mayank/cachebeat/pull/14) (`v0.10.0` into `main`) is open, and CI is green: the floor job, 2.1.287 and latest. This is dev's `ci.yml`'s first run on GitHub.
-  - The release branch passes 326/0 and `validate --strict` on 2.1.287, 2.1.322, 2.1.329 and 2.1.330.
+- **Ship 0.10.0?** It's the user's call.
+  - [PR #14](https://github.com/404Mayank/cachebeat/pull/14) (`v0.10.0` into `main`) is open, but its branch predates the 2026-11-25/26 work. CI was green on it then, with the floor at 2.1.287.
+  - First refresh the branch: take the plugin files and `assets/demo.gif` from `dev` (notes/README.md, "Releasing, step by step", step 2), run step 3's checks, push, and let CI run with the floor at 2.1.332.
 
-  To ship, follow notes/README.md, "Releasing, step by step", from step 5:
+  Then, from step 5:
   1. Fast-forward `main` (`git push origin v0.10.0:main`). CI then tags and releases.
   2. Put the draft below on top of the release notes (`gh release edit v0.10.0`).
   3. Merge `main` into `dev`.
@@ -82,7 +82,7 @@ The next agent raises these with the user before anything else. The user said on
 
 ## 0.10.0 release notes (draft)
 
-Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. The rest of the notes follow the usual pattern (notes/README.md, "Releasing, step by step"). Each line was checked against `git diff main -- README.md` and the code at `c279dde`.
+Drafted on 2026-11-23 in step 9, revised on 2026-11-26 against `main` (0.9.3); nothing is published. This is the top section. The rest of the notes follow the usual pattern (notes/README.md, "Releasing, step by step"). Each line was checked against `git diff main -- README.md` and the code at `c279dde`.
 
 > [!IMPORTANT]
 > **`/cachebeat <time>` changed.** It now sets how long to keep the cache warm, and it needs a unit: `/cachebeat 2h` keeps the cache warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global 30`.
@@ -91,20 +91,18 @@ Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. 
 
 **Changed**
 
-- **The cold guard is on by default.** Before your message goes to a session whose cache has gone cold, cachebeat asks first. It says how long the cache has been cold and how many tokens sending the message caches again. It asks in chats of 20k tokens or more, whether beating is on or not. A question left unanswered doesn't send the message, and it closes after 5 minutes. To turn the guard off, run `/cachebeat guard off` for one session, or set **Cold guard** under Limits in `/cachebeat settings`. Messages from Remote Control, other sessions, scheduled tasks and `claude -p` are sent without asking.
 - **A resumed conversation keeps its on or off,** and any keep-alive time, for 30 days from its last change. A conversation with no record starts as **New sessions start** says, and that now includes `/resume`, which used to keep the on or off of the conversation you left.
-- **Bare `/cachebeat` opens the new Status page.** It still answers with its line, which now ends with whether the cache is warm or cold.
 - **The "Prompt heart" tab is now "Heart".** Its settings are the same.
 - **The prompt heart shows during a turn too.** It holds still while a request of the turn is on its way.
 - **Cache gone cold set to stop now stops in one more case.** On the auto interval, a beat that finds the cache lasts five minutes rather than an hour used to switch to beating every 4 minutes. With **Cache gone cold** set to stop, it now stops there instead. The default (start on your next message) still switches to 4 minutes.
-- **Status's Size row is the plain size,** in tokens.
-- **After `/model`, the cache reads as cold** (change 4, 2026-11-25). The new model has none of the conversation cached, so Status, bare `/cachebeat` and Claude's `state` (`coldBecause: model`) say cold until a message or a beat on the new model caches it, and switching back to the first model reads warm again. The cold guard asks before that first message ("The model changed, and this chat has no cache on it yet…"); **after /model** under Cold guard turns this off. Stats now counts that first message as a cold send, asked or not. Before, all of these read the cache as warm after a switch.
 
 **New**
 
+- **The cold guard, on by default.** Before your message goes to a session whose cache has gone cold, cachebeat asks first. It says how long the cache has been cold and how many tokens sending the message caches again. It asks in chats of 20k tokens or more, whether beating is on or not. A question left unanswered doesn't send the message, and it closes after 5 minutes. To turn the guard off, run `/cachebeat guard off` for one session, or set **Cold guard** under Limits in `/cachebeat settings`. Messages from Remote Control, other sessions, scheduled tasks and `claude -p` are sent without asking.
+- **After `/model`, the cache reads as cold** until a message or a beat on the new model caches it, since the new model has none of the conversation cached. The cold guard asks before that first message; **after /model** under Cold guard turns that off. Switching back to the first model reads warm again.
 - **Notices** under Alerts: log, toast, both or nothing for cachebeat's other lines (beats waiting for your next message, resuming, skipping or going on, a new model's cache, beats every 4 minutes on a five-minute cache, a message sent on a cold cache). The default, log, keeps them as they were.
 - **Keep-alive time:** `/cachebeat 2h`, `45m` or `1h30m` (5 minutes to 48 hours) keeps the cache warm for that long, then turns the session off. Your messages don't extend it, and the turn line shows the time left.
-- **The Status page** (`/cachebeat`) shows the cache as it stands: warm or cold, its size, the next beat, the cold guard and your usage limits.
+- **The Status page:** bare `/cachebeat` opens it, and still answers with its line, which now ends with whether the cache is warm or cold. It shows the cache as it stands: warm or cold, its size, the next beat, the cold guard and your usage limits.
 - **The Stats page** (`/cachebeat stats`) shows, for today, 7 days, 30 days and this session:
   - what beats cost
   - what they saved
@@ -152,15 +150,17 @@ The user's preferences are in the orchestrator's memory (`agent-fleet`, `one-cha
 - **Each step:**
   1. Build in its own worktree (`git worktree add ../cachebeat-<step> -b step-<name> dev`, then copy `.claude-plugin/types` in).
   2. Every change gets a test that fails without it, and builders mutation-check.
-  3. Run check.sh on a fresh clone. It runs the tests and `validate --strict` (the release files only) on the installed `claude`. Since 2026-11-25 the floor is the installed version and no old engines are tested (the user); before that, check.sh ran 2.1.287, 2.1.322, 2.1.329 and 2.1.330. check.sh lives in a session scratchpad: a fresh clone of the branch, `claude plugin test` failing unless `^ 0 fail`, and `validate --strict` on `.claude-plugin hooks types README.md LICENSE .github` and the marketplace.
+  3. Run check.sh on a fresh clone. It runs the tests and `validate --strict` (the release files only) on the installed `claude`. Since 2026-11-25 the floor is the installed version and no old engines are tested (the user); before that, check.sh ran 2.1.287, 2.1.322, 2.1.329 and 2.1.330. It is [check.sh](check.sh) (`notes/check.sh <branch>`, from anywhere in the repo): a fresh clone of the branch, `claude plugin test` failing unless `^ 0 fail`, and `validate --strict` on `.claude-plugin hooks types README.md LICENSE .github` and the marketplace.
   4. Run `tsc`.
   5. Have it reviewed: findings ranked, with file:line, a sequence of events and a fix.
   6. Fix, re-review by diff range, then merge `--no-ff`.
 - **Commits:** plugin files and notes go in separate commits, with no attribution lines. Name them `cachebeat 0.10.0 (<step>): …` and `dev notes: …`.
 
-## Fleet at close (2026-11-23)
+## The fleet
 
-`clear` closed every session at the end, `cachebeat-cf` and itself included. A new fleet is spawned fresh through a new `clear` session. The names used were `cachebeatOpusHigh01`, `cachebeatOpusMedium01` (once `cachebeatOpusXhigh01`), `cachebeatSonnetHigh01` and `cachebeatSonnetHigh02`. ListAgents also shows old offline Remote Control rows with the same names, so use the refs.
+On 2026-11-23 `clear` closed every session. In the 2026-11-25/26 round, `clear` spawned `cachebeatOpusHigh01` (the GIF's director), `cachebeatOpusMedium01` (changes 1–5) and `cachebeatSonnetHigh01` (the GIF's builder). Reviews were fresh Opus subagents. The two builders are closed. The names repeat across rounds, and ListAgents also shows old offline Remote Control rows with the same names, so address sessions by their live refs.
+
+**`clear` can interrupt a busy session:** on 2026-11-26 it sent the GIF builder an Escape while reading its status, which stopped a running render. Ask `clear` to read status lines only, and never send keys to a busy session.
 
 ## Traps
 
@@ -181,5 +181,5 @@ The user's preferences are in the orchestrator's memory (`agent-fleet`, `one-cha
 
 - notes/README.md, "How 0.7.0 went out, as a pattern": a line for 0.10.0 when it ships.
 - mods-gotchas.md, "0.10.0 probes": add G4, G5 and P6 when they're run.
-- plan-0.10.0.md: its status line when 0.10.0 ships.
+- plan-0.10.0.md and plan-demo-gif.md: their status lines when 0.10.0 ships.
 - This file: delete it when 0.10.0 ships.

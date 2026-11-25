@@ -110,7 +110,9 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 | [directory.md](directory.md) | The plugin directory, dropped on 2026-11-14 (verified organizations only): what its validation flagged, kept as a record |
 | [directory-report-0.7.0.md](directory-report-0.7.0.md) | The full reading of the directory's 0.7.0 validation: each finding, the lines behind it, and how to fix it |
 | [plan-0.8.0.md](plan-0.8.0.md) | 0.8.0: where settings apply (this session, this folder, all folders), as built, and the design it replaced |
-| [handoff.md](handoff.md) | Where 0.10.0 stands (built, release PR open, not shipped), the decisions taken and what to raise with the user, the release notes draft, and how the fleet is run: start here |
+| [handoff.md](handoff.md) | Where 0.10.0 stands (built on `dev`, the release branch to refresh, not shipped), the decisions taken and what to raise with the user, the release notes draft, and how the fleet is run: start here |
+| [plan-demo-gif.md](plan-demo-gif.md) | The README's demo GIF: the storyboard, the look, how `assets/demo.py` and `assets/demo.tape` record and render it, and each check and take's results |
+| [check.sh](check.sh) | `notes/check.sh <branch>`: a fresh clone of the branch, the suite on the installed `claude`, and `validate --strict` on the release files only |
 | [plan-0.10.0.md](plan-0.10.0.md) | 0.10.0, built: cache state and the sleep fix, dollars (built, then removed), `/cachebeat <time>` as a keep-alive, resume, the cold guard, the Status and Stats pages; what the API says for certain, the live checks still owed, and the steps in order |
 
 Add to them whenever something takes a while to work out.

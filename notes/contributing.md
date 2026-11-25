@@ -27,6 +27,8 @@ claude plugin test .                # runs the test suite
 npx -p typescript tsc -p .          # type-checks, once Claude Code has loaded the plugin
 ```
 
+`notes/check.sh <branch>` runs the tests and the strict validation on a fresh clone of a committed branch, leaving `CLAUDE.md` and `notes/` out, so it passes on `dev` too. Only the Claude Code you have installed is tested: each release requires the version current when it's made.
+
 ## Where things are
 
 | File | What's in it |
@@ -36,7 +38,12 @@ npx -p typescript tsc -p .          # type-checks, once Claude Code has loaded t
 | `hooks/settings.ts` | Settings, defaults, colors and effects |
 | `hooks/pane.tsx` | The settings menu |
 | `hooks/tools.ts` | The tools Claude calls |
+| `hooks/cache.ts` | Whether the cache is warm or cold, worked out from the facts in one pure place |
+| `hooks/status.ts` | The Status page's rows |
+| `hooks/stats.ts` | The Stats page's counts and rows |
+| `hooks/prices.ts` | Each model's cache-read and cache-write ratios to input, and `sameModel` |
 | `hooks/cachebeat.test.tsx` | Tests |
+| `assets/demo.py`, `assets/demo.tape` | Record and render the README's demo GIF; see [plan-demo-gif.md](plan-demo-gif.md) |
 
 ## The dev notes
 
