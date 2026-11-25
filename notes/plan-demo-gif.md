@@ -166,12 +166,12 @@ on('store.get', async ($, e, next) => {
   - The hint row's left holds the mode label and the heart, and its right end is empty (inferred from the old frames). F2 places it, and H1 confirms no overlap.
 - **Gone:** `rgbashift`, `drawgrid`, the pink box, and `~50 MIN LATER`.
 
-### Dark only, no light `<picture>` pair (recommended)
+### Dark only, no light `<picture>` pair (decided, §8)
 
 - **A light version is another recording, not a re-render.** Claude Code draws its own colors, so a light GIF needs a Claude Code `light` take, with its own timing, its own OCR pass, and real requests. Under the two-take cap, a pair spends both takes and leaves no retry.
 - **A dark terminal card on a light page is the norm** for terminal GIFs on GitHub. With transparent rounded corners it reads as a deliberate object on both page themes. The scout's still showed it on white.
 - **The wordmark already has an `-on-dark` variant** for that reason, while the badge row stays the same on both themes.
-- **Not foreclosed:** if the user wants a pair, it's one more take after the dark one ships. It's asked in §7.
+- **Not foreclosed:** if the user wants a pair, it's one more take after the dark one ships.
 
 ## 4. The source conversation
 
@@ -187,7 +187,7 @@ on('store.get', async ($, e, next) => {
 - **On Sonnet,** the takes' model, so the fork shares it (after a model switch cachebeat reads the cache differently; B0 found a Haiku source worked, but matching costs nothing).
 - **Made with no cachebeat loaded:** both installed copies off in `--settings`, and no `--plugin-dir`. That keeps no cachebeat line in its transcript.
 
-**Pick: a fresh source made in ProgLang-Influence-Graph** (recommended; the orchestrator confirms with the user before it's used):
+**Pick: a fresh source made in ProgLang-Influence-Graph** (confirmed by the user, §8):
 - **The project is neutral and readable:** a programming-language influence graph with Neo4j and Gephi views. Its `demo.sh` is 12 lines with nothing private in it, and the repo has no remote (checked).
 - **A fresh session controls the tail.** The existing `2b8312b3…` (75k, Sonnet, 2026-10-13) ends on `where are the ceckboxes, the ss if of n4j no?`, which would sit in every frame.
 - **How to make it:** in tmux, in that folder:
@@ -273,7 +273,7 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
   A second Haiku run is fine if H1 changes the tape. Haiku runs don't count toward the take cap, but say how many ran.
 
 **Real takes: Sonnet, two at most.**
-- **T1.** Before it: account usage under 90% (`clear` reports it), the fleet state as the user chose (§7), and the source untouched since F3. After: check every frame against §2's "On screen" column, and `git diff` the tape and demo.py against what H1 ran.
+- **T1.** Before it: account usage under 90% (`clear` reports it), the fleet closed (§8), and the source untouched since F3. After: check every frame against §2's "On screen" column, and `git diff` the tape and demo.py against what H1 ran.
 - **T2** only if T1 fails a frame check. Ask the orchestrator before a third.
 - **Each take** forks the source into a new session file under `~/.claude/projects/-home-zyrus-Desktop-Projects-ProgLang-Influence-Graph/`. List them in the results for the user to clear.
 
@@ -288,29 +288,23 @@ On `main`, the README is for users. The image stays where it is (line 9, under t
 ```
 
 - **If the payoff is cut,** the alt text ends at "while you're away".
-- **If the user chooses the light pair:**
+- **Commits:** the GIF and the README line are plugin files, committed on `dev` as `cachebeat 0.10.0 (gif): …` (§8). The tape, demo.py and this plan's results are `dev notes: …` and dev-only commits. They reach `main` only through a release branch (notes/README.md, "Branches and releases").
 
-  ```html
-  <picture>
-    <source media="(prefers-color-scheme: light)" srcset="assets/demo-light.gif">
-    <img alt="…the same alt…" src="assets/demo.gif">
-  </picture>
-  ```
+## 8. Decided (2026-11-25)
 
-  Then notes/README.md's list of shipped images gains `assets/demo-light.gif`.
-- **Commits:** the GIF and the README line are plugin files, committed on `dev` as `cachebeat <version> (gif): …`. The tape, demo.py and this plan's results are `dev notes: …` and dev-only commits. They reach `main` only through a release branch (notes/README.md, "Branches and releases").
+The user confirmed the source and the release, and told the orchestrator (`cachebeat-9c`) to improvise the rest, which it did with the plan's recommendations.
 
-## 8. Open questions for the user
-
-1. **The source:** a fresh session in ProgLang-Influence-Graph (recommended), niri-mcp's 243k one for the bigger figure, or another project?
-2. **Release timing:** PR #14 (0.10.0) is open and ships the old GIF. Should the new GIF replace it on `v0.10.0` before 0.10.0 ships, or go out in 0.10.1? 0.10.1 is less churn on a branch already checked green.
-3. **Dark only (recommended), or a dark and light pair?** The pair costs a third real take.
+1. **The source:** a fresh ProgLang-Influence-Graph session, made as §4 says (the user).
+2. **The new GIF rides 0.10.0** (the user):
+   - It goes on `v0.10.0` together with the builder's settings changes and the floor bump to 2.1.332.
+   - The release branch is refreshed after them. Commit the GIF and README line as `cachebeat 0.10.0 (gif): …`.
+3. **Dark only.** §7's `<picture>` variant isn't built.
 4. **Chrome from this machine:**
-   - `← 2 agents` shows while the fleet runs. Should T1 run with the fleet closed?
-   - The hint row's mode label (`⏸ manual mode on` under `--permission-mode default`): accept it, or run without the flag if F3 shows that's quieter and safe?
-5. **The payoff:** keep it if H1's gate passes (recommended)? Or end on the ×2 hold anyway, for a 13s GIF?
-6. **The caption `▸▸ 50 min idle`:** keep it, or let the racing countdown speak alone?
-7. **The typed lines** show in every frame: the setup question `in one line, what does demo.sh open?` and the payoff `back. where did we leave off, in one line?`. Do they read right, or should they be worded differently?
+   - **The fleet closes before T1:** the orchestrator and the builder's sessions are closed, so `← 2 agents` doesn't show. The builder asks the orchestrator to arrange this, and checks the footer at T1's first frame.
+   - **The mode label:** if F3 shows that the launch without `--permission-mode default` has a quieter hint row, and the mode it falls back to doesn't run tools unasked, drop the flag. Otherwise keep it and accept `⏸ manual mode on`.
+5. **The payoff stays if H1's gate passes;** otherwise it's cut, as §1 says.
+6. **The `▸▸ 50 min idle` caption stays.**
+7. **The typed lines stay as written:** `in one line, what does demo.sh open?` and `back. where did we leave off, in one line?`.
 
 ## What the scout found (2026-11-25, kept for reference)
 
