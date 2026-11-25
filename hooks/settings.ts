@@ -15,6 +15,7 @@ export const DEFAULTS: BeatSettings = {
   coldGuard: true,
   coldGuardTokens: SMALL_CHAT,
   coldGuardUnanswered: 'drop',
+  coldGuardModel: true,
   heartPlacement: 'tail',
   variant: 'classic',
   showCount: true,
@@ -347,6 +348,10 @@ export const TABS: readonly Tab[] = [
         fmt: v => (v === 'drop' ? "don't send (closes after 5m)" : `send after ${v}m`),
         help: "What happens to a held message when the question isn't answered: it isn't sent (the question closes after 5m, so other incoming messages wait at most 5m), or it's sent after this long.",
         custom: { placeholder: 'e.g. 3m', parse: parseWait },
+      },
+      {
+        key: 'coldGuardModel', label: '  after /model', values: [true, false], show: s => s.coldGuard, fmt: onOff,
+        help: 'Asks too after /model, while the new model has no cache of this chat: its first message caches it all again.',
       },
       {
         key: 'stopAtUsage', label: 'Stop at usage', values: [80, 90, 100], fmt: v => `${v}%`,

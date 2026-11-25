@@ -486,16 +486,21 @@ async function chatSize($: EngineInterface) {
 }
 
 /** What `viewOf` works the cache out from, as this session has it. */
-const cacheFacts = (contextTokens: number | null): CacheFacts => ({
-  lastWarm: s.lastWarm, ttl: s.isCacheShort ? '5m' : ttl, contextTokens,
+const cacheFacts = (contextTokens: number | null, isModelNew = false): CacheFacts => ({
+  lastWarm: s.lastWarm, ttl: s.isCacheShort ? '5m' : ttl, contextTokens, isModelNew,
 })
 
 /** Whether the cache is warm, cold or not yet cached, and what re-caching it would send: the one place this is read. */
 async function cacheNow($: EngineInterface): Promise<CacheView> {
   const now = await $.clock.now()
   const size = await chatSize($)
-  return viewOf(cacheFacts(size ?? null), now)
+  // after /model, a message goes to the new model, which has none of this chat cached until a request on it writes it
+  const isModelNew = s.warmModel !== null && (await $.session.model()) !== s.warmModel
+  return viewOf(cacheFacts(size ?? null, isModelNew), now)
 }
+
+/** Why a cold cache is cold, as a message says it: for how long, or the model changed. */
+const coldText = (view: CacheView) => (view.coldBecause === 'model' ? 'the model changed' : `cold for ${fmt(view.coldFor!)}`)
 
 /** Notes whether this chat is under the minimum, saying so in the log as it goes under. */
 async function checkSmall($: EngineInterface) {
@@ -1008,7 +1013,7 @@ async function cacheOf($: EngineInterface, view?: CacheView) {
     state: view.state, ttl: view.ttl,
     lastReadMinutesAgo: wholeMinutes(view.lastWarm === null ? null : view.at - view.lastWarm),
     minutesLeft: wholeMinutes(view.state === 'warm' ? view.expiresAt! - view.at : null),
-    coldForMinutes: wholeMinutes(view.coldFor), contextTokens: view.contextTokens,
+    coldForMinutes: wholeMinutes(view.coldFor), coldBecause: view.coldBecause, contextTokens: view.contextTokens,
     recacheInputTokens: view.contextTokens === null ? null : Math.round(view.contextTokens * write),
   }
 }
@@ -1245,7 +1250,7 @@ async function noteColdSend($: EngineInterface, how: string, isSaid = true) {
   if (view.state !== 'cold' || view.contextTokens === null) return
   await countDay($, { cold: 1, coldTokens: view.contextTokens })
   await save($)
-  if (isSaid) tell($, `sent on a cold cache${how}: cold for ${fmt(view.coldFor!)}, ${tokens(view.contextTokens)} tokens cached again`)
+  if (isSaid) tell($, `sent on a cold cache${how}: ${coldText(view)}, ${tokens(view.contextTokens)} tokens cached again`)
 }
 
 /** Asks the cold guard's question; resolves the answer, or null when it was dismissed, closed unanswered, or couldn't be asked. */
@@ -1372,11 +1377,12 @@ export const register: Register = on => {
     const view = await cacheNow($)
     if (view.state !== 'cold' || view.contextTokens === null) return next(e)
     // a cold send the guard doesn't ask about still re-caches the chat, and Stats counts it: quietly, as it isn't the guard's to say
-    if (!(s.guard ?? cfg.coldGuard) || view.contextTokens < cfg.coldGuardTokens) {
+    const isModelNew = view.coldBecause === 'model'
+    if (!(s.guard ?? cfg.coldGuard) || view.contextTokens < cfg.coldGuardTokens || (isModelNew && !cfg.coldGuardModel)) {
       await noteColdSend($, '', false)
       return next(e)
     }
-    const coldFor = fmt(view.coldFor!)
+    const why = isModelNew ? 'The model changed' : `The cache has been cold for ${fmt(view.coldFor!)}`
     const size = view.contextTokens
     if (!ASKED_ORIGINS.includes(e.origin.kind)) {
       await noteColdSend($, '')
@@ -1385,12 +1391,12 @@ export const register: Register = on => {
     // a second message can't wait on the open question: a hook waiting with no question of its own is cut at 10s and sent
     if (asking) return { drop: dropped('A question about the cold cache is open: answer it first.') }
     const wait = cfg.coldGuardUnanswered
-    const said = `The cache has been cold for ${coldFor}, so this message caches ${tokens(size)} tokens again. Send it?`
+    const said = `${isModelNew ? `${why}, and this chat has no cache on it yet` : why}, so this message caches ${tokens(size)} tokens again. Send it?`
     const { answer, closed } = await askCold($, said, wait)
     const then = coldOutcome(answer, closed)
     if (then === 'drop-unanswered') return { drop: dropped(`The question went unanswered for ${fmt(DROP_AFTER)}.`) }
     if (then === 'drop-left') return { drop: 'cachebeat: not sent. The conversation changed: send it again.' }
-    if (then === 'drop') return { drop: dropped(`The cache has been cold for ${coldFor}, and sending caches ${tokens(size)} tokens again.`) }
+    if (then === 'drop') return { drop: dropped(`${why}, and sending caches ${tokens(size)} tokens again.`) }
     await noteColdSend($, then === 'send' ? '' : ` after ${wait}m unanswered`)
     return next(e)
   })
@@ -1447,7 +1453,7 @@ export const register: Register = on => {
     if (!busy && e.origin.kind === 'composer') await openSettings($, 'summary')
     // the cache as it stands, on or off: what a message sent now would find
     const view = await cacheNow($)
-    const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache cold for ${fmt(view.coldFor!)}` : ''
+    const cache = view.state === 'warm' ? ` · cache warm, ${fmt(view.expiresAt! - view.at)} left` : view.state === 'cold' ? ` · cache ${view.coldBecause === 'model' ? 'cold: the model changed' : coldText(view)}` : ''
     if (!s.enabled) return { text: `off${cache}` }
     const now = await $.clock.now()
     const at = s.nextAt

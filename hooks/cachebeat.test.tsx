@@ -928,7 +928,7 @@ const call = ($: Engine, name: keyof typeof TOOL, args: Args = {}) =>
   $.tool.call({ tool: name === 'state' ? 'mcp__cachebeat__state' : 'mcp__cachebeat__set', ...args } as never)
 const stateNow = async ($: Engine, args: Args = {}) => JSON.parse((await call($, 'state', args)).result as string)
 const FRESH = { enabled: false, intervalMinutes: 50, intervalFrom: 'auto', keepAliveUntil: null, keepAliveUntilLocal: null, keepAliveMinutesLeft: null, beats: 0, lastBeatReadTokens: null, lastBeatWrittenTokens: null, nextBeat: null, skipping: null, paused: null, coldGuard: true, coldGuardFrom: 'settings', coldGuardAsked: 0, coldSends: 0, coldSendTokens: 0 }
-const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null }
+const FRESH_CACHE = { state: 'unknown', ttl: '1h', lastReadMinutesAgo: null, minutesLeft: null, coldForMinutes: null, coldBecause: null, contextTokens: null, recacheInputTokens: null }
 const LIMITS = [{ kind: 'five_hour', percentUsed: 10 }] // the stub's usage windows
 const FRESH_CONTEXT = { tokens: null, window: 200_000, percent: null, autoCompactAt: null, compactions: 0, lastCompactionMinutesAgo: null, lastMessageMinutesAgo: null }
 const props = (x: unknown) => (x as { properties: Record<string, unknown> }).properties
@@ -2599,9 +2599,9 @@ test('state says whether the cache is warm, with beating off too: unknown, warm,
   expect((await stateNow($)).cache).toEqual({ ...FRESH_CACHE, contextTokens: 120_000, recacheInputTokens: 240_000 })
   await $.turn.complete(turn)
   await clock.advance(10 * M)
-  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, contextTokens: 120_000, recacheInputTokens: 240_000 })
+  expect((await stateNow($)).cache).toEqual({ state: 'warm', ttl: '1h', lastReadMinutesAgo: 10, minutesLeft: 50, coldForMinutes: null, coldBecause: null, contextTokens: 120_000, recacheInputTokens: 240_000 })
   sleep(80 * M) // 90m since the last read
-  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, contextTokens: 120_000, recacheInputTokens: 240_000 })
+  expect((await stateNow($)).cache).toEqual({ state: 'cold', ttl: '1h', lastReadMinutesAgo: 90, minutesLeft: null, coldForMinutes: 30, coldBecause: 'time', contextTokens: 120_000, recacheInputTokens: 240_000 })
 })
 
 test('state judges a cache found short by its five minutes', async ($: Engine, on: On) => {
@@ -3420,6 +3420,77 @@ test('Notices on none: a send on a cold cache goes and is counted, unsaid', asyn
   expect((await stateNow($)).session.coldSends).toBe(1)
 })
 
+// ---- the cold guard after /model: the new model has none of the chat cached ----
+
+const ASK_MODEL = 'The model changed, and this chat has no cache on it yet, so this message caches 184k tokens again. Send it?'
+/** A 184k-token conversation read 10m ago on Opus, its cache still warm there, then /model to Sonnet while idle. */
+const switchedSetup = async ($: Engine, on: On, world: World = {}) => {
+  const kit = await setup($, on, { contextTokens: 184_000, ...world })
+  await $.turn.complete(turn)
+  await kit.clock.advance(10 * M)
+  kit.switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  return kit
+}
+
+test('after /model the guard asks once, saying the model changed; the first message on the new model makes it warm again', async ($: Engine, on: On) => {
+  const { questions, answers, sent, logs } = await switchedSetup($, on)
+  answers.push('Send')
+  expect((await submit($)).drop).toBe(undefined)
+  expect([questions, sent]).toEqual([[ASK_MODEL], ['go on']])
+  expect(logs.at(-1)).toBe('sent on a cold cache: the model changed, 184k tokens cached again')
+  await $.turn.complete(turn) // the message's turn, on the new model
+  expect((await stateNow($)).cache.state).toBe('warm')
+  expect((await submit($)).drop).toBe(undefined)
+  expect(questions).toHaveLength(1)
+})
+
+test('after /model, Don\'t send drops the message, saying the model changed', async ($: Engine, on: On) => {
+  const { answers } = await switchedSetup($, on)
+  answers.push("Don't send")
+  expect((await submit($)).drop).toBe('cachebeat: not sent. The model changed, and sending caches 184k tokens again. Send it again to be asked, or /cachebeat guard off.')
+})
+
+test('after /model with its toggle off, the guard doesn\'t ask, and the send is counted quietly', async ($: Engine, on: On) => {
+  const { questions, sent, logs } = await switchedSetup($, on, { settings: { coldGuardModel: false } })
+  const before = logs.length
+  expect((await submit($)).drop).toBe(undefined)
+  expect([questions, sent, logs.length]).toEqual([[], ['go on'], before])
+  expect((await stateNow($)).session.coldSends).toBe(1)
+})
+
+test('after /model set to warm, once a beat wrote the new model\'s cache the guard doesn\'t ask', async ($: Engine, on: On) => {
+  const { clock, questions, sent } = await switchedSetup($, on, { settings: { onModelSwitch: 'warm' }, fork: [{ ...ok, usage: usage(0, 184_000) }] })
+  await cmd($, 'on')
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'model' }) // before the beat
+  await clock.advance(IDLE)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+  expect((await submit($)).drop).toBe(undefined)
+  expect([questions, sent]).toEqual([[], ['go on']])
+})
+
+test('after /model, state, Status and /cachebeat say the cache is cold because the model changed; back on the first model it is warm', async ($: Engine, on: On) => {
+  const { switchTo } = await switchedSetup($, on)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'model', coldForMinutes: null, lastReadMinutesAgo: 10 })
+  expect(await cmd($, '')).toBe('off · cache cold: the model changed')
+  const ui = await $.ui.mount(SETTINGS_PANE)
+  expect((await statusOf(ui)).Cache).toBe('cold: the model changed (1h TTL, last read 10m ago)')
+  await ui.unmount()
+  switchTo(OPUS)
+  await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+})
+
+test('a cache known only from a resume hint, with no request seen on any model, is never cold for the model', async ($: Engine, on: On) => {
+  const { switchTo, questions } = await setup($, on, { chat: CHAT, stored: { 'session:s1': on2 }, contextTokens: 184_000 })
+  await $.classic.SessionStart(hintOf(10 * 60))
+  switchTo('claude-sonnet-5-5')
+  await $.classic.PostModelSwitch(SWITCH)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+  expect((await submit($)).drop).toBe(undefined)
+  expect(questions).toEqual([])
+})
+
 test('cold and big: the question says how long it has been cold and the tokens; Send sends it, saying so', async ($: Engine, on: On) => {
   const { questions, answers, sent, logs } = await coldSetup($, on)
   answers.push('Send')
@@ -3811,7 +3882,7 @@ test('Status hides the Usage row where no limits are reported', async ($: Engine
 
 test('Status rows for a cache never written, a beat or two, a session\'s own guard, and a pause', () => {
   const facts: StatusFacts = {
-    cache: { state: 'unknown', ttl: '5m', lastReadMinutesAgo: null, leftMs: null, coldForMinutes: null, contextTokens: null, recacheInputTokens: null },
+    cache: { state: 'unknown', ttl: '5m', lastReadMinutesAgo: null, leftMs: null, coldForMinutes: null, coldBecause: null, contextTokens: null, recacheInputTokens: null },
     session: {
       enabled: true, intervalMinutes: 4, intervalFrom: 'folder', keepAliveLeftMs: null, beats: 1, lastBeatReadTokens: 184_212, lastBeatWrittenTokens: 412,
       nextBeat: 'after the next turn', skipping: null, paused: null, coldGuard: false, coldGuardFrom: 'session', usageLimits: [],
