@@ -550,6 +550,24 @@ Record F1–T2's results under this plan as "Results", as step 8 did. Put anythi
 - **Captions:** the same frames as H1 (idle on frames 54–87 and 113–147, payoff on 229–259 of 260).
 - **Length and size:** 21.5s, from a 33.1s raw. 1.12 MB, once the frame optimizer runs lossless after `-coalesce`: about 1.6 MB without it, while 1% fuzz (0.86 MB) ghosted scrolled text (mods-gotchas.md).
 
+**The caption port (2026-11-26, `3335309`).** proto2.py is now in demo.py:
+- **The OCR pass:** `read()` runs it once; `status()` parses the counts from it, and `idle()` the minutes.
+- **The minutes:** interpolated over the filtered reads, as the corrected Revision says.
+- **The parts:** `plan()`'s parts carry a kind (lead, fast, hold, payoff, final) in place of a caption text. The `FINAL` split is always made.
+- **The frames:** `captions()` draws the Pillow frames, and `render()` pads and overlays them.
+
+Checks:
+- **The reference:** a `--skip-record` render of H1b's raw matches `demo-caption.gif`. Both have 260 frames, at 1100×704 and 1.21 MB, and no pixel of the card or the strip differs by more than 30.
+- **The mask:** the card's alpha matched it in every frame.
+- **The minutes:** the captions' minutes are within a minute of `180 − left` on frames 60, 100 (inside the hold after beat 1), 130, 165 and 255.
+- **The look:** frames flattened on white and on `#0d1117` at 830px read clearly.
+
+**F1b, flow against the OCR (passed).**
+- **The setup:** a VHS tape launched `--launch`'s command, at the take's font and colors but 1100×1200 tall, so the settings pane shows its preview, and with nothing typed but `/cachebeat settings`. Then `6` (Turn line), and `Down` to the last row, which scrolls the preview into view (at 640 tall, the pane clips it).
+- **The pin, as the pane shows it:** Effect flow, Color claude.
+- **The result:** all 56 frames, at 12 fps with `status()`'s crop and parse, read `kept warm ×3` and `next in 42m`. None read another count, and none went unread.
+- **Fork files:** `9bc732df-7b17-4057-b730-f3618c6e4563.jsonl` (a first attempt, without the scroll) and `21c495ec-6b0c-4beb-8491-c5ceb59f0960.jsonl`.
+
 ## 7. How the README embeds it
 
 On `main`, the README is for users. The image stays where it is (line 9, under the tagline), as plain Markdown, with no width attribute: GitHub scales it to the column.
