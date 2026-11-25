@@ -11,6 +11,46 @@
 >
 > **Inferred** marks anything not checked; each such point has a check in "Checks, cheapest first".
 
+## Builder's brief
+
+You're building the new README GIF from this plan. The orchestrator is `cachebeat-9c`; the planner who wrote this stays up for questions. Read the whole plan first. Each step names the section that holds its details.
+
+**Where:**
+- **A worktree:** `git worktree add ../cachebeat-gif -b step-gif dev`, then `cp -r .claude-plugin/types ../cachebeat-gif/.claude-plugin/`.
+- **demo.py loads a scratch copy** of the worktree's `HEAD` (`git archive`), never the folder itself. **Never `--plugin-dir` the repo or the worktree,** and use `--launch` (§5) for any launch by hand.
+- **Commits:**
+  - The tooling, and later the GIF and the README line, as `cachebeat 0.10.0 (gif): …` (step 8's names).
+  - The notes as `dev notes: …`.
+  - **Don't push or merge:** the orchestrator merges.
+
+**Never:**
+- type `/model` or `/effort`
+- change a setting in `/cachebeat settings` (look, then Escape)
+- let a test run write `assets/demo.gif`: set `CACHEBEAT_DEMO_GIF` to the scratchpad on every run but the final render
+- send requests beyond what's listed below
+
+**Steps, in order.** ⏸ marks a stop: message `cachebeat-9c` with what's asked, and wait for the go-ahead.
+
+1. **Tooling** (§5): the tape and demo.py changes, the demo mod's hooks (§3), `--launch`, the env vars, the caption and mask render (§3), `FINAL`, and `BOTTOM`. Free.
+2. **F1, then F2** (§6). Free. If the mask fails, take §3's fallback and say so at the next stop.
+3. **Make the source** (§4): a few Sonnet turns in ProgLang-Influence-Graph under `--permission-mode default`, in a 77×23 tmux window.
+   ⏸ Send the session id, its token count, and a capture of its last screenful. The tail goes public, so the orchestrator checks it.
+4. **F3** (§6). Free. If `/cachebeat settings` shows the ECG heart, the pin failed: ⏸ stop and report it. Correct §5's footer layout table from F3's capture, if it differs.
+5. **H1** (§6): one Haiku run, a second only if H1 changed the tape.
+   ⏸ Send:
+   - the gate's result (§1): payoff kept or cut
+   - demo.py's printed parts and the GIF's length
+   - frames of the opening, ×2, and the payoff's end
+   - every H1 check that failed, and what you changed
+6. **Before T1** ⏸: ask for the fleet to be closed (§8), and for the account's usage figure. Your own session counts as a running agent too, so the footer may still read `← 1 agent`. Say what H1's footer showed, and let the orchestrator decide: accept it, or have the user run T1's command with every session closed.
+7. **T1** (§6): Sonnet. Run the frame check and the payoff sanity check, then the final render with `CACHEBEAT_DEMO_BACK`. **T2 only if a frame check fails.** ⏸ Before any third take.
+8. **Wrap-up:**
+   - Write "Results" under §6: F1–T2, the forks' session files, and the Haiku runs' count.
+   - Add the gotchas to mods-gotchas.md: the `store.*` pin, `showTurnDuration`, the mask with ImageMagick, and `stats_mode`.
+   - Put the README line (§7) in its own commit.
+
+   ⏸ Send the commit list and the final GIF's path, size and length for review.
+
 **The floor is the installed Claude Code, 2.1.332** (the user, 2026-11-25). Record and check with the installed `claude` only, with no old binaries.
 
 **Build after the builder's current wording changes merge into `dev`:** "no beat needed", the Notices setting, and the guard after `/model`. Take every on-screen string below as an example of its shape, and read the real one from the dry run.
