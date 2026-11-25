@@ -77,6 +77,11 @@ export function normalize(stored: unknown): BeatSettings {
     if (k in DEFAULTS && (typeof v === typeof DEFAULTS[k as keyof BeatSettings] || isNumberFor('heartSpeed', 'lineSpeed', 'interval', 'coldGuardUnanswered'))) s[k] = v
   }
   const out = s as BeatSettings
+  // a setting with a fixed list (no typed value) takes only one of its choices: a value from a hand edit or a newer version falls back
+  for (const key of Object.keys(DEFAULTS) as (keyof BeatSettings)[]) {
+    const row = rowOf(key)?.row
+    if (row && !row.custom && !row.values.includes(out[key])) (out as Record<string, unknown>)[key] = DEFAULTS[key]
+  }
   if (!VARIANTS.some(v => v.id === out.variant)) out.variant = DEFAULTS.variant
   if (!STATUS_HEARTS.includes(out.statusHeart)) out.statusHeart = DEFAULTS.statusHeart
   if (!['below', 'spaced', 'off'].includes(out.statusLine)) out.statusLine = DEFAULTS.statusLine

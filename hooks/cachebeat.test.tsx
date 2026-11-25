@@ -290,6 +290,9 @@ test('smaller than takes a custom count', async ($: Engine, on: On) => {
 test('settings from an older store fall back to the defaults one by one', () => {
   expect(normalize({ interval: 5, variant: 'gone', speed: 3, extra: 1, statusLine: 'inline' })).toEqual({ ...DEFAULTS, interval: 5 })
   expect(normalize(undefined)).toEqual(DEFAULTS)
+  // a fixed list's setting takes only its choices; one with a typed value keeps its own checks
+  expect(normalize({ notices: 'loud', onBeat: 'toast', onStop: 'shout', lineTiming: 'swing', heartEffect: 'glow', heartPlacement: 'line' }))
+    .toEqual({ ...DEFAULTS, onBeat: 'toast', heartPlacement: 'line' })
 })
 
 test('flow sweeps a highlight across the text; flash lights it on a full heart', () => {
