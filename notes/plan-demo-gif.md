@@ -568,6 +568,15 @@ Checks:
 - **The result:** all 56 frames, at 12 fps with `status()`'s crop and parse, read `kept warm ×3` and `next in 42m`. None read another count, and none went unread.
 - **Fork files:** `9bc732df-7b17-4057-b730-f3618c6e4563.jsonl` (a first attempt, without the scroll) and `21c495ec-6b0c-4beb-8491-c5ceb59f0960.jsonl`.
 
+**H1c, the third Haiku run (2026-11-26: the ECG and flow pin, and the caption).** Fork `5579f610-fbb6-4bed-adc8-8a1721887e2f.jsonl`; Haiku runs in all: 3.
+- **The kill:** the recording finished (every wait matched, 33.1s raw), then Claude Code's low-memory reaper killed the render. ImageMagick took 9.5 GB (mods-gotchas.md). The render now peaks at 3.2 GB, and re-rendering the saved raw finished it.
+- **Passed:**
+  - Nothing unwanted in any frame (OCR at 2 fps).
+  - The ECG heart plays in the hint row, and the row fits 77 columns with `← 2 agents` and `×N`.
+  - The payoff: `We were looking at demo.sh, which opens the Neo4j Browser and the Gephi project for the live demo.`, with the line moved under it.
+  - The caption's minutes against `180 − left`: 18/17, 53/52 (inside the hold after beat 1), 79/79, 100/100 and 100/100.
+- **Length and size:** 21.5s, 1.59 MB. The ECG heart and the shimmer change every frame (inferred as the size's cause).
+
 ## 7. How the README embeds it
 
 On `main`, the README is for users. The image stays where it is (line 9, under the tagline), as plain Markdown, with no width attribute: GitHub scales it to the column.
