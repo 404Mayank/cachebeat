@@ -863,7 +863,7 @@ function beatNow($: EngineInterface) {
 const every = () => `every ${fmt(idle())} idle`
 const when = (ms: number | undefined) =>
   s.small ? `beats skip: ${s.small}`
-  : ms === undefined ? (stepping ? 'counts from when the request on its way was sent' : busy ? 'starts after this turn' : isCovered ? 'no more beats needed' : 'starts after your next turn')
+  : ms === undefined ? (stepping ? 'counts from when the request on its way was sent' : busy ? 'starts after this turn' : isCovered ? 'no beat needed' : 'starts after your next turn')
   : `next beat ${untilNext(ms)}`
 
 /** Where the interval comes from: this folder's own, or the settings for all folders. */

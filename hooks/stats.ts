@@ -129,17 +129,18 @@ export const statsText = (f: StatsFacts) =>
   `30 days: ${plural(f.month.beats, 'beat')} cost ${tokens(Math.round(f.month.beatCost))}, ${plural(f.month.kept, 'turn')} kept warm avoided ${tokens(Math.round(f.month.avoided))}, net ${signed(net(f.month))} input tokens · this session ${signed(net(f.session))}`
 
 const LABEL = 23
-const COL = 13
-const cell = (text: string) => text.padStart(COL)
+/** The columns' widths: the last one wider, so "This session" stands two cells clear of "30 days". */
+const COLS = [13, 13, 13, 14]
+const cells = (texts: readonly string[]) => texts.map((t, i) => t.padStart(COLS[i]!)).join('')
 const both = (n: number, figure: string) => (n === 0 ? '0' : `${n} · ${figure}`)
 
 /** The page's lines, each its own row: the spans as columns, in the order of use. The note says so when a figure used the common rates. */
 export function statsLines(f: StatsFacts): { header: string; rows: string[]; strip: string; note: string } {
   const spans = [f.today, f.week, f.month, f.session]
-  const row = (label: string, of: (d: Day) => string) => `${label.padEnd(LABEL)}${spans.map(d => cell(of(d))).join('')}`
+  const row = (label: string, of: (d: Day) => string) => `${label.padEnd(LABEL)}${cells(spans.map(of))}`
   const common = f.month.common || f.session.common
   return {
-    header: `${''.padEnd(LABEL)}${['Today', '7 days', '30 days', 'This session'].map(cell).join('')}`,
+    header: `${''.padEnd(LABEL)}${cells(['Today', '7 days', '30 days', 'This session'])}`,
     rows: [
       row('Beats · cost', d => both(d.beats, tokens(Math.round(d.beatCost)))),
       row('Kept warm · avoided', d => both(d.kept, tokens(Math.round(d.avoided)))),

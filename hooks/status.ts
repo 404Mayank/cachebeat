@@ -50,8 +50,7 @@ function cacheRow(c: StatusFacts['cache']) {
 
 function sizeRow(c: StatusFacts['cache']) {
   if (c.contextTokens === null) return 'not counted yet'
-  const weighed = c.recacheInputTokens === null ? '' : ` · as ${tokens(c.recacheInputTokens)} input tokens to cache again`
-  return `${tokens(c.contextTokens)} tokens${weighed}`
+  return `${tokens(c.contextTokens)} tokens`
 }
 
 function beatingRow(s: StatusFacts['session']) {
