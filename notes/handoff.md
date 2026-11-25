@@ -14,8 +14,8 @@
 | | State |
 | --- | --- |
 | `main` / `origin/main` | 0.9.3 (`740ae82`), released 2026-11-23. |
-| `v0.10.0` | The release branch, pushed, [PR #14](https://github.com/404Mayank/cachebeat/pull/14). It holds only the plugin files and the new GIF, taken from `dev` at `dbfeb15`, plus `version` 0.10.0. **Not merged: shipping is the user's call.** |
-| `dev` | Pushed and clean. 0.10.0's steps 0–9 are all merged: tokens only, request start, retry, compat, midturn, 3c, 4 (resume), the race fix, 5 (the cold guard), 6 (Status), 7 (Stats), 8 (the GIF) and 9 (the README). `version` is 0.10.0. 326/0 on all four engines. |
+| `v0.10.0` | The release branch, pushed, [PR #14](https://github.com/404Mayank/cachebeat/pull/14). It holds the plugin files from `dev` at `dbfeb15`, plus `version` 0.10.0. **Stale since 2026-11-25:** it needs refreshing from `dev`'s plugin files before shipping, which is the user's call. |
+| `dev` | Not pushed since 2026-11-23. 0.10.0's steps 0–9 are merged, plus, on 2026-11-25/26: <br>• changes 1–5: the UI fixes, Notices, the cold stop under auto, the guard after `/model`, and the 2.1.332 floor <br>• the `state` description trim <br>• the README's `/cachebeat on` table <br>• the new GIF <br>343/0 on 2.1.332, the only version tested now. |
 | `long-turn`, `v0.8.2`, `worktree-agent-…` | Older branches, not from this work. Leave them. |
 
 ## For the user: decisions taken, and what to raise (keep this list current)
@@ -52,23 +52,17 @@ The next agent raises these with the user before anything else. The user said on
   - **G5:** does `$.ui.ask` draw in the desktop app? Two outcomes would matter. If it rejects at once, every cold send there drops until the guard is turned off. If its ask doesn't go through the AskUserQuestion `tool.call`, the 5m close can't close it, and queued messages wait until it's answered.
   - **P6:** does dropping a skill's prompt undo its `command.run`?
 - **Resolved 2026-11-25 (change 4, the user's request): after `/model` the cache reads cold, and the cold guard asks.** It was read as warm (step 5 review), so the first message after a switch re-cached the whole conversation without asking. Now the guard asks once, until a message or a beat on the new model caches it; Status, bare `/cachebeat` and `state` say cold too. A new Limits sub-row, **after /model** (on), turns the asking off. Accepted gaps are in mods-gotchas.
-- **The demo GIF (step 8): the orchestrator took the storyboard's recommendations** (plan, item 8):
-  - the cold question first
-  - stop at the second beat
-  - Status alone, no flick to Stats
-  - the animation-picker scene dropped
-  - takes recorded with `--model sonnet`
-  - the old demo session as the source, refreshed
-
-  **Look at the GIF before shipping** (`assets/demo.gif`, 26.6s, on `dev` and the release branch). It becomes public once it's on `main`.
-  - It opens on the guard's question, with a hidden `/cachebeat` line above it. That hides the "Remote Control disconnected" notice, which would otherwise be in frame.
-  - Status shows four rows (Cache, Beating, Size, Cold guard), so no usage percentage appears.
-  - A Claude Code spinner tip shows for about 2s during the answer.
-- **The GIF shows two things the old one didn't:** `← 2 agents` in the footer, and "1 agent type / 1 skill available" under the first message. Both are probably from this machine's setup rather than the plugin (inferred). The orchestrator kept them, because the fleet can't be closed for the take. Look at them in the GIF before shipping.
-- **Leftover fork session files from the GIF work** are under ~/.claude/projects/-home-zyrus-Desktop-Projects/, all .jsonl from 2026-11-23:
-  - 12:31–12:43: `5fae1024-…`, `6d96bcd6-…`, `6bae1637-…`, `eae6b2e8-…`, `896b9994-…`
-  - 14:55–15:16 (previews and the final take, `adfad2a7-…`): `ad2bd4af-…`, `9fa1d4c3-…`, `9b494cdf-…`, `b9c9936f-…`, `7d30cd56-…`, `d3c854dc-…`, `3c65696e-…`, `d3894c45-…`, `adfad2a7-…` They were left in place; delete them if you like. The demo source `adb66a7d-…` was refreshed with one Sonnet turn at 12:51 ("ok, thanks").
-- **Your Remote Control session disconnected: "Trusted devices now required — run /remote-control to start a new session".** It showed while the demo source was being refreshed, 2026-11-23 12:51. It's an account change, not cachebeat's. It is now in the demo source's transcript, so the GIF's opening screenful may show it. The final take kept it out of frame.
+- **The demo GIF was redone on 2026-11-25/26 and the user approved it** (`assets/demo.gif`, 20.8s, 1.45 MB, merged into `dev` at `7e0fc69`). The design, the takes and the gotchas are in [plan-demo-gif.md](plan-demo-gif.md).
+  - **The concept is "away and back":** `/cachebeat 3h`, then two beats over a fast-forward, then a "back" message answered from a warm cache.
+  - **The look:** a GitHub-dark card with transparent rounded corners, and Claude Code's built-in `dark` theme. The user's ECG heart and flow effects are shown.
+  - **The caption is in a pill below the card,** never inside it (the user's call): `▶▶ fast-forward · +34m idle`, then `back after 1h 40m · cache still warm`.
+  - **The source** is a ProgLang-Influence-Graph session (`3c20ee7b-…`), made for it. Keep it until 0.10.0 ships, in case of a retake.
+  - **Accepted by the user:**
+    - `← 2 agents` in the footer
+    - auto mode's label
+    - a four-line payoff answer (T1 kept, no T2)
+  - **Runs:** 3 Haiku and 1 Sonnet.
+  - **Leftover session files in the ProgLang project folder:** `9bc732df-…`, `21c495ec-…`, `5579f610-…` and `b626a422-…`. The user may delete them. The 2026-11-23 GIF files are already deleted.
 - **Unverified on a real surface (step 6):** Status draws before the pane's `Input` check, so a surface without Input still shows it. It assumes such a surface has `Button`, and nothing at hand could check it. The desktop app hasn't been looked at for Status either.
 - **Step 7 decisions:**
   - The "Prompt heart" tab is renamed **Heart**, so seven tabs fit 76 cells. The settings keep their full names.
