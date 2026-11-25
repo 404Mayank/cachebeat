@@ -8,6 +8,7 @@ export type CacheFacts = {
   lastWarm: number | null // wall ms: the main conversation's last request or beat that read or wrote the cache
   ttl: Ttl // effective: '5m' when this session's cache was found short, else the lifetime read from Claude Code's settings
   contextTokens: number | null // what the next request re-sends
+  isModelNew?: boolean // the current model isn't the one the cache was last read on: it has none of this chat
 }
 
 export type CacheView = {
@@ -16,17 +17,23 @@ export type CacheView = {
   lastWarm: number | null
   expiresAt: number | null // lastWarm + the lifetime
   coldFor: number | null // ms since expiresAt, once now is at or past it; else null
+  coldBecause: 'time' | 'model' | null // while cold: its lifetime ran out, or the model changed since it was read
   ttl: Ttl
   contextTokens: number | null
 }
 
-/** Warm while `now` is before the last read plus the lifetime, as Claude Code judges it; cold from then on. */
+/**
+ * Warm while `now` is before the last read plus the lifetime, as Claude Code judges it; cold from then on, and cold too
+ * on a model other than the one it was read on, whose cache is empty.
+ */
 export function viewOf(f: CacheFacts, now: number): CacheView {
   const expiresAt = f.lastWarm === null ? null : f.lastWarm + TTL_MS[f.ttl]
-  const state = expiresAt === null ? 'unknown' : now < expiresAt ? 'warm' : 'cold'
+  const isLapsed = expiresAt !== null && now >= expiresAt
+  const state = expiresAt === null ? 'unknown' : isLapsed || f.isModelNew ? 'cold' : 'warm'
   return {
     at: now, state, lastWarm: f.lastWarm, expiresAt,
-    coldFor: state === 'cold' ? now - expiresAt! : null,
+    coldFor: isLapsed ? now - expiresAt! : null,
+    coldBecause: state !== 'cold' ? null : isLapsed ? 'time' : 'model',
     ttl: f.ttl, contextTokens: f.contextTokens,
   }
 }
