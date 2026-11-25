@@ -211,10 +211,10 @@ That pitch is the README's lead line ("You come back from lunch, type your next 
 
 | # | Typed (tape) | Wait for, then hold | On screen | GIF s |
 | --- | --- | --- | --- | --- |
-| 0 | `Hide`. The launch command (§5), `Sleep 9s`. Then the setup message: `in one line, what does demo.sh open?`, `Sleep 400ms`, `Enter`. | `Wait+Screen@60s /(?s)demo\.sh open\?.*●/`, then `Sleep 3s` so the line finishes and the prompt is idle. `Show`. | (hidden) | 0 |
+| 0 | `Hide`. The launch command (§5), `Sleep 22s` (the weekly-limit notice clears first; "Results", F3). Then the setup message: `in one line, what does demo.sh open?`, `Sleep 400ms`, `Enter`. | `Wait+Screen@60s /(?s)demo\.sh open\?.*●/`, then `Sleep 3s` so the line finishes and the prompt is idle. `Show`. | (hidden) | 0 |
 | 1 | nothing | `Sleep 1500ms` | Opening frame. Above: the source's tail (§4). Then `❯ in one line, what does demo.sh open?` and its one-line answer, e.g. `● Neo4j Browser and Gephi, the two live-demo views.` An empty prompt box, and the footer. No cachebeat line yet: it's off. | 1.5 |
 | 2 | `/cachebeat 3h`, `Sleep 400ms`, `Enter` | `Wait+Screen@10s /next beat in/`, then `Sleep 2s` | The reply, e.g. `cachebeat: this session: on until 6:16 PM (3h), every 50m idle · next beat in 50m`. Under the setup turn, the turn line, e.g. `♡ next beat in 49m · 2h 59m left`. The prompt heart in the hint row. | 3.4 |
-| 3 | nothing: the demo mod runs the clock | `Wait+Screen@90s /kept warm ×2/`, then `Sleep 1500ms` | The countdown races. The caption `▸▸ 50 min idle` (§3) shows in the empty prompt row during each sped-up part only. Beat 1 lands and holds at real speed: `♥ cache kept warm ×1 · 52k cached · next in 50m · 2h 9m left`. It races again, and beat 2 holds: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 19m left`. | ≈9.3 (2.5 + 2.1 + 2.5 + 2.1) |
+| 3 | nothing: the demo mod runs the clock | `Wait+Screen@90s /kept warm ×2/`, then `Sleep 1500ms` | The countdown races. The caption `» 50 min idle` (§3) shows in the empty prompt row during each sped-up part only. Beat 1 lands and holds at real speed: `♥ cache kept warm ×1 · 52k cached · next in 50m · 2h 9m left`. It races again, and beat 2 holds: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 19m left`. | ≈9.3 (2.5 + 2.1 + 2.5 + 2.1) |
 | 4 (payoff, if the gate passes) | `Sleep 500ms`, `back. where were we?`, `Sleep 400ms`, `Enter` | `Wait+Screen@40s /(?s)where were we\?.*kept warm ×2/`, then `Sleep 2500ms` | The message, a short spinner, the one-line answer picking up the demo.sh thread. Then cachebeat's line moves under the new answer: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 18m left`. It matches only once the turn has ended, because `turn.start` sets `s.row = null`, so no line shows while the answer is drawn. Through the final hold (the raw recording's last 2.5s, the tape's closing `Sleep 2500ms`), the caption `back 1h 40m later · cache still warm` shows in the empty prompt row (§3). | ≈9–11 |
 | | | | **Loop point:** the end of the payoff hold, cut straight back to the opening frame. Total ≈ 23–25s before trims, ≈22s after. | |
 
@@ -354,7 +354,7 @@ Other folders' own settings weren't read: the `folders` key is the one to protec
 ### The fast-forward, without the badge
 
 - **The countdown racing is the main signal.** `next beat in 49m` drops a minute every few frames, so it reads as sped up on its own.
-- **A caption,** only during the sped-up parts (`plan()`'s fast segments): `▸▸ 50 min idle`. The user keeps it, so it has to read on GitHub; the review found the first draft (16px, `#7d8590`) would show at about 13px of muted grey.
+- **A caption,** only during the sped-up parts (`plan()`'s fast segments): `» 50 min idle`. The user keeps it, so it has to read on GitHub; the review found the first draft (16px, `#7d8590`) would show at about 13px of muted grey.
   - **FiraCode Regular at the terminal's own size:** `fontsize=20` in native pixels, the tape's `FontSize`, not `px(20)`. `px()` scales by `h/560` for the old badge, which would give 23px on a 640-row frame. On GitHub it shows at about 15px, like the text around it. Color `#9198a1` (Primer's current muted foreground, about 5.7:1 on `#161b22`). No box.
   - **In the empty prompt row, right-aligned,** inside the input box (`x=w-tw-64`: margin 16, padding 20, and about two cells for the box's edge, in native pixels). It's the one row sure to be empty through the fast-forward: nothing is typed then.
   - **Not on the hint row:** under `--permission-mode auto` it reads `⏵⏵ auto mode on (shift+tab to cycle)`, plus the heart (P1). At 77 columns, that leaves no room on the right.
@@ -397,6 +397,7 @@ Other folders' own settings weren't read: the `folders` key is the one to protec
   - Turn 2: `read demo.sh: what does it do?` This puts `demo.sh` in context, so the fork's setup question is answered without a tool call (§2). Its collapsed `Read 1 file` row stays in the tail. That's accepted: it reads as real work.
   - Check the tokens (the `/context` figure, or the transcript's last `usage`) and the tail. If the tail has a path or a long listing, one more short turn (`thanks, that's clear`) pushes it up.
   - Record the session id in this plan.
+  - **Made 2026-11-26:** `3c20ee7b-45e3-4161-b166-5297bc12c231`, 51.9k tokens on Sonnet 5.5, with three turns: the overview, `read demo.sh: what does it do?`, and `thanks, that's clear`. Turn 1 ran only read-only shell commands (`ls`, `cat README`, `git ls-files`), which `default` mode allowed without asking. No cachebeat line is in the transcript.
 
 **The other candidates, and why not:**
 - **niri-mcp `e724d215…`** (243k, Sonnet, 2026-10-03): the most striking figure (`243k cached`), and the second choice if the user prefers it. But its tail is unread, the topic (computer-use research) runs to links and long answers, and each take re-caches 243k.
@@ -427,7 +428,7 @@ Every change, with its risk and the check that clears it. The check IDs are in t
 | --- | --- | --- |
 | `CLOCK_MOD`'s `register.ts` gains the `store.get`, `store.set` and `store.delete` hooks (§3) | an op hook on `store.get` isn't honoured, or takes another return shape: the frames show the user's ECG heart, and a source under 50k never beats. The set and delete no-ops are untested. | F3: `/cachebeat settings` shows the classic heart, Cold guard off, Skip small off; change nothing there |
 | `BEATS`, `SPEED`, `STEP` and the `model.fork` hook unchanged | the payoff turn arrives while `ahead` is set. With the guard off nothing reads it for a question. `countKept` counts the turn as kept (shown time), which lands in Stats only. | H1: the payoff draws no cachebeat log line |
-| `render()`: the glitch chain becomes the caption drawtext (§3). `0x1e1e2e` and `0xf5c2e7` go; the caption takes `0x9198a1` at `fontsize=20` (native pixels, not `px()`) in the prompt row. The payoff caption's part comes from `CACHEBEAT_DEMO_BACK` and the `FINAL` split (§2). `FONT` takes the Regular face (`FiraCode Nerd Font Mono:style=Regular`, checked installed). The flag becomes a caption text per part (None, `▸▸ 50 min idle`, or the payoff's), not a bool. | the caption overlaps typed text or sits off the row | F2, then H1 |
+| `render()`: the glitch chain becomes the caption drawtext (§3). `0x1e1e2e` and `0xf5c2e7` go; the caption takes `0x9198a1` at `fontsize=20` (native pixels, not `px()`) in the prompt row. The payoff caption's part comes from `CACHEBEAT_DEMO_BACK` and the `FINAL` split (§2). `FONT` takes the Regular face (`FiraCode Nerd Font Mono:style=Regular`, checked installed). The flag becomes a caption text per part (None, `» 50 min idle`, or the payoff's), not a bool. | the caption overlaps typed text or sits off the row | F2, then H1 |
 | `render()`: `palettegen` `stats_mode=diff` → `full` | none found: P2 measured it smaller, with the orange kept | F2 samples the turn line's pixels in the GIF for orange |
 | `render()`: the mask, `alphamerge`, and the `magick -layers Optimize` pass (§3) | the real take has something the mock didn't; ImageMagick's time on about 270 frames (inferred: seconds) | F2: composite frames on white and on `#0d1117`; compare the size with an opaque render |
 | `LEAD`/`HOLD`/`SETTLE`/`FF`: `LEAD 0.6`, `HOLD 1.5`, `SETTLE 2.0`, `FF 3`, then trim per §2 | timing only | H1's printed parts |
@@ -502,6 +503,116 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
 
 Record F1–T2's results under this plan as "Results", as step 8 did. Put anything that took time to find out in mods-gotchas.md: the `store.get` pin, `showTurnDuration` and the turn line, transparency.
 
+## Results (2026-11-26, in progress)
+
+**F1, the VHS mock (passed).** It drew the §3 card with `dark`'s colors and the footer as §5's table gives it, and the turn line went 0, then ×1, then ×2.
+- `status()` read every count, and `plan()` found both beats.
+- Measured in the mock: the hint row at ≈590px, the prompt row ≈516, the turn line ≈466. That's §5's table. The turn line sits above the `BOTTOM` crop (563px).
+
+**F2, render only (passed).**
+- **The mask:** alpha matched the geometric mask in all 228 coalesced frames. The corners are clean on white and on `#0d1117`.
+- **The orange:** the turn line comes out `(187,125,106)`. yuv420p dulls thin text, but it stays orange under `stats_mode=full`.
+- **Size:** 0.25 MB masked and optimized, against 0.43 MB opaque.
+- **The captions:**
+  - `» 50 min idle` shows only on the two fast parts (8 and 20 frames).
+  - `back 1h 40m later · cache still warm` shows only on the last 32 frames (≈2.6s).
+  - Both sit right-aligned in the prompt row.
+- **The old raw** (1176×700, no margin) also renders: 2.96 MB, against the shipped GIF's 2.4 MB from the same raw.
+- `git status` showed no `assets/demo.gif` change.
+- **The caption is `» 50 min idle`,** not `▸▸`: FiraCode has no `▸`, and drawtext has no font fallback (the director agreed; mods-gotchas.md).
+
+**F3, the launch without a message (passed, with one finding).**
+- **Flags:** `--launch`'s printed flags match the tape's `Type` line.
+- **Plugins:** the debug log names `cachebeat-demo-clock@inline` and one `cachebeat@inline`, with no `@cachebeat` or `@synced`.
+- **Theme:** `dark`, with the user bar at 256-color 237.
+- **The pin works:** `/cachebeat settings` showed Animation Classic, Cold guard off, Stop at usage 100%, Skip small chats off, and the turn line's Color claude, Effect steady. Nothing was changed: arrow keys and tab numbers only.
+- **settings.json** was byte-identical after each of three launches.
+- **Footer:** `⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents`. The rows from the bottom are hint, blank, the box's bottom border, the prompt row, the top border, then the last answer line (plus tmux's own `focus-events` notice in tmux). §5's table stands.
+- **The tail** shows nothing private, and no welcome header. There was no Remote Control or away notice.
+- **Requests:** none sent, apart from Claude Code's own `quota_check` at startup.
+- **A fork file was written,** `3e592b42-4640-4831-b45d-850c5411f352.jsonl`: typing `/cachebeat settings` records a local command. Launches with nothing typed wrote none.
+- **The finding: the weekly-limit notice.** `You've used 76% of your weekly limit · resets 7:30am (Asia/Kolkata)` shows in the row above the prompt box.
+  - **Timing:** about 11s after launch, once `quota_check` answers. It stays about 8s, then clears.
+  - **No setting hides it.** It's the `rate-limit-warning` notification. In 2.1.332's binary it's skipped only during a rate-limit grace period, or by a server flag (`tengu_cosmic_lake`) for the five-hour window.
+  - **It shows again only when its text changes:** it's deduplicated by text, so a rise from 76% to 77% mid-take brings it back.
+  - **The mod API's `ui.notice`** covers tool-use notices only.
+
+**H1, the Haiku dry run (2026-11-26, on step-gif after merging dev's 54a9b49).** Run once; a first attempt failed before launching, because VHS's headless browser won't start with `TMPDIR` set to a session scratchpad (run demo.py with the default `TMPDIR`). The fork is `c4dde58b-3545-401f-bb9b-234bf0043b05.jsonl`.
+- **The gate passed:** with `showTurnDuration: false`, the turn line drew under the live-ended setup turn (`♡ next beat in 46m · 2h 56m left`) and moved under the payoff's answer, with no `✻ … done` text. The payoff is kept.
+- **Passed:** the `●` wait fired after the whole answer, with no spinner at `Show`; no `∴`, tip, token readout or `agent type available`; two beats, `plan()` found both, no fast part before `/cachebeat 3h`; `next in 50m · 1h 20m left` kept after ×2 (`3h`); no tool line in either turn; no ghost suggestion in the prompt row; the idle caption only on the fast parts (34 and 35 frames), the payoff caption only on the last 31 frames, after the line moved; no weekly-limit notice in any frame (the 22s hidden wait).
+- **Length:** 21.5s, under the 24s cut. 1.60 MB, against the mock's 0.25 MB: h264 noise, kept by the palette, shows as faint specks beside the turn line and changes every frame (inferred as the size's cause).
+- **Failed: a cachebeat load line in every frame,** `cachebeat: $.tool.register: the description of state (4117 characters) reaches the model up to its first 4096 characters…`. Change 4 (`a0d3ff2`, the `coldBecause` sentence) took the `state` tool's description past 4096. A plugin bug, shown to every user at load, not the demo's.
+- **Failed: the payoff answer ran 7 lines,** and Haiku recited cachebeat's state from the `/cachebeat` reply. §2's rule: the payoff becomes `back. where were we, in one line?`, its wait `/(?s)in one line\?.*kept warm ×2/` (done after H1).
+
+**H1b, the second Haiku run (2026-11-26, step-gif after dev's ae52c5b, the state-description fix).** The fork is `30ce0154-3a51-42c6-b1c4-d37d6eafcf0d.jsonl`. Haiku runs in all: 2.
+- **Passed:** no cachebeat load line, and no `∴`, tip, token readout, tool line or weekly-limit notice in any frame (OCR at 2 fps).
+- **The payoff answered in two lines:** `We were summarizing demo.sh, which opens Neo4j Browser and the Gephi project. Cachebeat is on until 3:50 AM.` The turn line moved under it, at `×2 · next in 50m · 1h 20m left`.
+- **Captions:** the same frames as H1 (idle on frames 54–87 and 113–147, payoff on 229–259 of 260).
+- **Length and size:** 21.5s, from a 33.1s raw. 1.12 MB, once the frame optimizer runs lossless after `-coalesce`: about 1.6 MB without it, while 1% fuzz (0.86 MB) ghosted scrolled text (mods-gotchas.md).
+
+**The caption port (2026-11-26, `3335309`).** proto2.py is now in demo.py:
+- **The OCR pass:** `read()` runs it once; `status()` parses the counts from it, and `idle()` the minutes.
+- **The minutes:** interpolated over the filtered reads, as the corrected Revision says.
+- **The parts:** `plan()`'s parts carry a kind (lead, fast, hold, payoff, final) in place of a caption text. The `FINAL` split is always made.
+- **The frames:** `captions()` draws the Pillow frames, and `render()` pads and overlays them.
+
+Checks:
+- **The reference:** a `--skip-record` render of H1b's raw matches `demo-caption.gif`. Both have 260 frames, at 1100×704 and 1.21 MB, and no pixel of the card or the strip differs by more than 30.
+- **The mask:** the card's alpha matched it in every frame.
+- **The minutes:** the captions' minutes are within a minute of `180 − left` on frames 60, 100 (inside the hold after beat 1), 130, 165 and 255.
+- **The look:** frames flattened on white and on `#0d1117` at 830px read clearly.
+
+**F1b, flow against the OCR (passed).**
+- **The setup:** a VHS tape launched `--launch`'s command, at the take's font and colors but 1100×1200 tall, so the settings pane shows its preview, and with nothing typed but `/cachebeat settings`. Then `6` (Turn line), and `Down` to the last row, which scrolls the preview into view (at 640 tall, the pane clips it).
+- **The pin, as the pane shows it:** Effect flow, Color claude.
+- **The result:** all 56 frames, at 12 fps with `status()`'s crop and parse, read `kept warm ×3` and `next in 42m`. None read another count, and none went unread.
+- **Fork files:** `9bc732df-7b17-4057-b730-f3618c6e4563.jsonl` (a first attempt, without the scroll) and `21c495ec-6b0c-4beb-8491-c5ceb59f0960.jsonl`.
+
+**H1c, the third Haiku run (2026-11-26: the ECG and flow pin, and the caption).** Fork `5579f610-fbb6-4bed-adc8-8a1721887e2f.jsonl`; Haiku runs in all: 3.
+- **The kill:** the recording finished (every wait matched, 33.1s raw), then Claude Code's low-memory reaper killed the render. ImageMagick took 9.5 GB (mods-gotchas.md). The render now peaks at 3.2 GB, and re-rendering the saved raw finished it.
+- **Passed:**
+  - Nothing unwanted in any frame (OCR at 2 fps).
+  - The ECG heart plays in the hint row, and the row fits 77 columns with `← 2 agents` and `×N`.
+  - The payoff: `We were looking at demo.sh, which opens the Neo4j Browser and the Gephi project for the live demo.`, with the line moved under it.
+  - The caption's minutes against `180 − left`: 18/17, 53/52 (inside the hold after beat 1), 79/79, 100/100 and 100/100.
+- **Length and size:** 21.5s, 1.59 MB. The ECG heart and the shimmer change every frame (inferred as the size's cause).
+
+**T1, the Sonnet take (2026-11-26, 03:2x IST, at `444150c`; the tape and demo.py unchanged since H1c).** Fork `b626a422-2ef2-45e1-af07-d4fe1a4cac53.jsonl`. It ran in the foreground, which keeps the session busy so the reaper leaves it alone.
+- **Parts:**
+
+  | Raw seconds | Speed | Part |
+  | --- | --- | --- |
+  | 0–4.5 | ×1 | lead |
+  | 4.5–12.4 | ×3 | fast |
+  | 12.4–14.5 | ×1 | hold |
+  | 14.5–23.4 | ×3 | fast |
+  | 23.4–25.5 | ×1 | hold |
+  | 25.5–29.5 | ×1 | payoff |
+  | 29.5–32.0 | ×1 | final |
+
+  The GIF is 20.8s and 1.45 MB, with 251 frames.
+- **The frame check (§2):**
+  - The opening is the source's tail, then the setup answer in two lines (`It opens Neo4j Browser at localhost:7474, starting the Docker container first if needed, and opens Gephi Desktop with ProgLang_Influence.gephi.`), an empty prompt, and the footer.
+  - Two beats, the turn line at `×2 · 53k cached · next in 50m · 1h 20m left`.
+  - The ECG heart plays in the hint row.
+  - Nothing unwanted in any frame (OCR at 2 fps): only the payoff's own spinner.
+  - The caption's minutes against `180 − left`: 18/17, 54/53 (the hold after beat 1), 82/81, 100/100 and 100/100.
+- **The payoff answer ran four lines**, despite "in one line": `I walked through what demo.sh does, and two things are still open: …`. It's readable and picks up the thread, and the frame isn't crowded, so it was kept.
+- **The payoff sanity check:**
+  - The payoff turn's first response read 52,523 tokens from the cache and wrote 175.
+  - The setup turn wrote the 52,523: the cold source re-cached, out of frame, as planned.
+- **The final render:** `--skip-record` of T1's raw, with `CACHEBEAT_DEMO_GIF` unset. `assets/demo.gif` is byte-identical to the checked `t1.gif`. No T2.
+
+**Runs in all:** 3 Haiku (H1, H1b, H1c) and 1 Sonnet (T1).
+
+**Session files the runs left,** in `~/.claude/projects/-home-zyrus-Desktop-Projects-ProgLang-Influence-Graph/`. The user deleted the first three on 2026-11-26.
+- `3e592b42-…` (F3), `c4dde58b-…` (H1) and `30ce0154-…` (H1b): deleted
+- `9bc732df-7b17-4057-b730-f3618c6e4563` (F1b, first attempt)
+- `21c495ec-6b0c-4beb-8491-c5ceb59f0960` (F1b)
+- `5579f610-fbb6-4bed-adc8-8a1721887e2f` (H1c)
+- `b626a422-2ef2-45e1-af07-d4fe1a4cac53` (T1)
+- the source itself, `3c20ee7b-45e3-4161-b166-5297bc12c231`: keep it while the GIF might be retaken
+
 ## 7. How the README embeds it
 
 On `main`, the README is for users. The image stays where it is (line 9, under the tagline), as plain Markdown, with no width attribute: GitHub scales it to the column.
@@ -555,7 +666,7 @@ The user confirmed the source and the release, and told the orchestrator (`cache
    - **`← N agents` is accepted** (the user, 2026-11-26, replacing "close the fleet"). The builder runs T1 itself.
    - **The mode label:** the demo runs with `--permission-mode auto`, in place of `default` (the user, 2026-11-25). The hint row shows auto mode's label, and that's accepted. The tape's `--permission-mode` flag and §5 change together.
 5. **The payoff stays if H1's gate passes;** otherwise it's cut, as §1 says.
-6. **The `▸▸ 50 min idle` caption stays,** made legible (the orchestrator, from the review): the terminal's size, Primer's muted foreground, in the prompt row (§3).
+6. **The `» 50 min idle` caption stays,** made legible (the orchestrator, from the review): the terminal's size, Primer's muted foreground, in the prompt row (§3).
 7. **The typed lines:** `in one line, what does demo.sh open?` as written. The payoff became `back. where were we?` after the review's timing finding (§2). That changed an approved line; the orchestrator was told.
 
 ## What the scout found (2026-11-25, kept for reference)

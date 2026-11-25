@@ -594,3 +594,30 @@ How `/cachebeat 2h` came out, and what differs from the plan. Nothing here was r
 - **Running 2.1.287 in a cloud session:** `npm install @anthropic-ai/claude-code@2.1.287` in a scratch folder ran without the install-script approval step, and its `claude plugin test` and `validate` work there.
 - **Running 2.1.287 on a desktop with npm's install-script gate (2026-11-09):** `npm install` of the package added it and the platform package (`@anthropic-ai/claude-code-linux-x64`) but left `node_modules/.bin/claude` a stub ("claude native binary not installed"). `npm install-scripts approve @anthropic-ai/claude-code` and a rebuild didn't change that. The native binary is there to run directly: `node_modules/@anthropic-ai/claude-code-linux-x64/claude --version` printed `2.1.287 (Claude Code)`. The auto-mode classifier refused the first `npm install` ("Code from External") until the user approved it.
 - **CI already checks the oldest supported version.** It runs on 2.1.287 and latest, so a passing CI run means the API works on 2.1.287. That's how `$.tool.register` was confirmed there.
+
+## The demo GIF (`assets/demo.py`, 2026-11-26)
+
+- **ffmpeg's `drawtext` takes one font file and falls back to no other,** so a glyph that file lacks draws as a box. FiraCode Nerd Font Mono Regular has no `▸` (U+25B8), `⏵` or `⏩`; it has `»`, `›` and `▶`. Check every caption glyph before rendering: `python3 -c "from fontTools.ttLib import TTFont; print(ord('▸') in TTFont('<the fc-match file>').getBestCmap())"`. That's why the fast-forward caption is `» 50 min idle`.
+- **VHS can't start its headless browser with `TMPDIR` set to a Claude Code session's scratchpad** ("browser exited unexpectedly before its debugging endpoint was ready"). Run demo.py with the default `TMPDIR`; `--launch` can take a scratchpad `TMPDIR`, since it runs no VHS.
+- **A real take's GIF is 1.6 MB where the mock's was 0.25 MB:** h264 noise lands on other palette colors from frame to frame, so ImageMagick's frame optimizer rewrites most of the card every frame. A temporal denoise (`hqdn3d`, `atadenoise`) before the palette made it larger (1.9–2.0 MB). Any `-fuzz` in the optimizer, even 1%, leaves faint ghosts of text that scrolls away (H1b's last frame, seen with the contrast raised; a pixel-diff threshold of 60 missed them). `-coalesce` before `-layers Optimize`, lossless, brought H1b's GIF from about 1.6 to 1.12 MB with no drift. Check any size trick by eye at 2×, contrast raised, on a frame after a scroll.
+- **The render's memory (H1c, 2026-11-26).** Claude Code's low-memory reaper killed H1c's demo.py after the recording, during the render. Measured per child on H1b's raw (260 frames, 1100×704):
+  - `magick -coalesce -layers Optimize`: **9.5 GB.** ImageMagick holds every frame at 16 bits per channel.
+  - ffmpeg in one pass: 1.0 GB, because every frame waits for the palette made at the end.
+  - Fixed in demo.py, with the same GIF byte for byte:
+    - ImageMagick gets `-limit memory 1GiB -limit map 2GiB`, with `MAGICK_TEMPORARY_PATH` in a folder under `~/.cache`: 3.2 GB.
+    - The palette is made in a first ffmpeg pass: 0.2 GB per pass.
+    - The OCR pool runs four tesseracts at a time.
+    - The render takes about 108s.
+  - **Don't spill to `/tmp`:** it's a 7.3G tmpfs here, which is memory, and it ran out of quota.
+  - **Measuring needs Python:** GNU `time` isn't installed. Use `os.wait4` on each child, or `resource.getrusage(RUSAGE_CHILDREN)`.
+- **Another mod can pin cachebeat's settings through op hooks on `store.*`** (checked in F3 and every take, 2.1.332).
+  - **How:** the demo mod's `store.get` hook returns `{ value: PINNED }` for `settings` and `{ value: {} }` for `folders` when `next.origin.plugin === 'cachebeat'`, and `normalize` fills the rest from `DEFAULTS`.
+  - **Writes:** `store.set` and `store.delete` return `{ value: undefined }` for `settings`, `folders` and `customs`, so a change in the demo session can't reach the user's store. They type-check, but no change was made to exercise them.
+  - **The user's own values stay put:** the user's ECG heart showed as Classic under the first pin, and as ECG once it was pinned.
+- **`"showTurnDuration": false` hides `✻ Cooked for 2s · done 3:18 PM` but keeps the `TurnDuration` row,** so cachebeat's turn line, hung on that component, still draws.
+  - **Checked:** under a resumed turn (P1), and under live-ended turns in every take.
+  - **Why it's needed:** Claude Code's `done` time runs on real time, while the demo's cachebeat clock is sped up.
+- **Transparent corners need a geometric mask, not a colour key.** VHS writes yuv420p, so the margin decodes a shade off (`#0c0f16` for `#0d1117`), and h264 ringing keys out specks inside the card.
+  - **What works:** a mask image from the frame's geometry (`Margin`, `BorderRadius`), `alphamerge`, then `palettegen … reserve_transparent=1` and `paletteuse … alpha_threshold=128`.
+  - **ImageMagick is needed after ffmpeg:** once there's alpha, ffmpeg's GIF encoder writes whole frames (3 MB), and `magick -coalesce -layers Optimize` brings it back (render memory: above).
+- **`palettegen stats_mode=diff` greys a small static colour:** the orange turn line came out `#7b7e85`. Use `stats_mode=full`. `single` keeps it too, but at 3.8 MB.

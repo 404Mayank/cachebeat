@@ -6,7 +6,7 @@
 
 **Keep Claude Code's prompt cache warm while you're away.**
 
-![cachebeat asking before a message goes to a cold cache, keeping the cache warm for two hours as beats land on their own, then its Status page](assets/demo.gif)
+![cachebeat keeping an idle session's cache warm: /cachebeat 3h, two beats land on their own while you're away, and the next message picks up warm](assets/demo.gif)
 
 [![CI](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml/badge.svg)](https://github.com/404Mayank/cachebeat/actions/workflows/ci.yml)
 [![Claude Code 2.1.332+](https://img.shields.io/badge/Claude_Code-2.1.332%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)

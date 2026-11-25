@@ -1,44 +1,70 @@
-"""Records assets/demo.gif with VHS: a cold-cache question, then 50 idle minutes pass in seconds and beats land on their own.
+"""Records assets/demo.gif with VHS: /cachebeat 3h, then 50 idle minutes pass in seconds, twice, beats land on their own,
+and the next message picks up warm.
 
-Needs vhs, ffmpeg and tesseract. From the repo root, point it at a session of 20k tokens or more
-that last answered more than an hour ago (the guard asks on a cold cache), 2-6h ago to read well:
+Needs vhs, ffmpeg, tesseract and ImageMagick. From the repo root, point it at a session of 40-100k tokens whose
+last turns have read demo.sh (the hidden setup turn asks about it), of any age:
 
     CACHEBEAT_DEMO_DIR=<the session's folder> CACHEBEAT_DEMO_SESSION=<session id> python3 assets/demo.py
 
 The recording forks that session, so its transcript is left as it was. The fork loads this checkout's
 HEAD (a scratch copy of it, not the working tree) beside a small mod, written to a temporary folder,
 and both installed copies of cachebeat are switched off. The mod runs cachebeat's clock 300× faster from
-its first one-minute step after /cachebeat 2h until its second beat has been answered. Each beat is still
-a real request, run at real speed. The model is sonnet; CACHEBEAT_DEMO_MODEL overrides it, for a dry run.
-Pass --skip-record to re-render the GIF from the last recording.
+its first one-minute step after /cachebeat 3h until its second beat has been answered. Each beat is still
+a real request, run at real speed. The mod also pins cachebeat's settings: its defaults, with the cold guard
+off, the ECG heart and the flow effects, and keeps cachebeat from writing its settings to your store.
+
+The model is sonnet; CACHEBEAT_DEMO_MODEL overrides it, for a dry run. CACHEBEAT_DEMO_GIF overrides where the GIF
+is written.
+
+The GIF gets a caption in a pill below the card, in the transparent margin, with nothing drawn inside the card:
+"▶▶ fast-forward · +34m idle" on the fast parts, "+52m idle" on the beats' holds, "back after 1h 40m · cache still warm"
+over the closing hold. The minutes come from the turn line's "left", read in the same OCR pass as the beat count.
+
+Pass --skip-record to re-render the GIF from the last recording; CACHEBEAT_DEMO_RAW then reads another one.
+Pass --launch to build the two folders, keep them, and print the tape's claude command with them filled in.
 """
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
-RAW = Path('assets/demo-raw.mp4')
-GIF = Path('assets/demo.gif')
-FONT = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Bold'], capture_output=True, text=True).stdout
-BOTTOM = 0.18  # the share of the frame at the bottom, the hint line, left out of what is read
+
+TAPE = Path('assets/demo.tape')
+RAW = Path(os.environ.get('CACHEBEAT_DEMO_RAW') or 'assets/demo-raw.mp4')
+GIF = Path(os.environ.get('CACHEBEAT_DEMO_GIF') or 'assets/demo.gif')
+FONT = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Regular'], capture_output=True, text=True).stdout
+BOLD = subprocess.run(['fc-match', '-f', '%{file}', 'FiraCode Nerd Font Mono:style=Bold'], capture_output=True, text=True).stdout
+BOTTOM = 0.12  # the share of the frame at the bottom, the hint row, left out of what is read
 FPS = 2  # how often the status line is read
-LEAD, HOLD = 0.6, 3.0  # seconds each beat plays at full speed, before and after
-SETTLE = 2.5  # seconds the status line shows at full speed before the first fast-forward
+LEAD, HOLD = 0.6, 1.5  # seconds each beat plays at full speed, before and after
+SETTLE = 2.0  # seconds the status line shows at full speed before the first fast-forward
 FF = 3  # how much faster the idle stretches play
+FINAL = 2.5  # the tape's closing hold, in seconds, which carries the payoff caption
+OUT_FPS = 12
+KEEP = 180  # the tape's /cachebeat 3h, in minutes: idle minutes are this less the turn line's "left"
+MARGIN, RADIUS = 16, 10  # the tape's Margin and BorderRadius
+STRIP = 64  # transparent rows added below the card for the caption
+SIZE = 24  # the caption's font size in native pixels: about 18px in GitHub's 830px column
+PILL, TEXT, DIM = (48, 54, 61, 255), (240, 246, 252, 255), (183, 189, 200, 255)  # Primer #30363d, #f0f6fc, #b7bdc8
 
 CLOCK_MOD = {
-    '.claude-plugin/plugin.json': '{ "name": "cachebeat-demo-clock", "version": "0.0.0", "description": "Runs cachebeat\'s clock fast for the demo", "license": "MIT" }',
+    '.claude-plugin/plugin.json': '{ "name": "cachebeat-demo-clock", "version": "0.0.0", "description": "Runs cachebeat\'s clock fast and pins its settings for the demo", "license": "MIT" }',
     'hooks/hooks.json': '{ "modules": ["./register.ts"] }',
     'hooks/register.ts': """
 import type { EngineInterface, Register } from 'claude-code'
 
 const SPEED = 300
-const STEP = 60_000 // cachebeat's step timer: the first one after /cachebeat 2h starts the fast stretch
+const STEP = 60_000 // cachebeat's step timer: the first one after /cachebeat 3h starts the fast stretch
 const BEATS = 2 // once this many beats have been answered, the clock runs at real speed again
+const PINNED = { coldGuard: false, stopAtUsage: 100, variant: 'ecg', heartEffect: 'flow', lineEffect: 'flow' } // everything else: cachebeat's defaults
+const KEPT = ['settings', 'folders', 'customs'] // the person's own: read pinned, never written
 let from = 0 // real time the fast stretch last began
 let ahead = 0 // how far cachebeat's clock runs ahead of the real one
 let fast = false
@@ -52,7 +78,7 @@ export const register: Register = on => {
     const r = await next(e)
     return next.origin.plugin === 'cachebeat' && 'value' in r && r.value !== undefined ? { value: shown(r.value) } : r
   })
-  // only the short waits: the cold question's close (5m) and the keep-alive's long ones stay as they are
+  // only the short waits: the keep-alive's long ones stay as they are
   on('clock.after', async ($, e, next) => {
     if (next.origin.plugin !== 'cachebeat') return next(e)
     if (!started && e.ms === STEP && forks === 0) {
@@ -76,32 +102,65 @@ export const register: Register = on => {
       fast = forks < BEATS
     }
   })
+  on('store.get', async ($, e, next) => {
+    if (next.origin.plugin !== 'cachebeat') return next(e)
+    if (e.key === 'settings') return { value: PINNED }
+    if (e.key === 'folders') return { value: {} }
+    return next(e) // conversation records, customs, prunedAt and Stats pass through
+  })
+  // a settings change would write settings built from PINNED, and folders rebuilt from {}, over the person's own
+  on('store.set', async ($, e, next) => (next.origin.plugin === 'cachebeat' && KEPT.includes(e.key) ? { value: undefined } : next(e)))
+  on('store.delete', async ($, e, next) => (next.origin.plugin === 'cachebeat' && KEPT.includes(e.key) ? { value: undefined } : next(e)))
 }
 """,
 }
 
 
+def build(root: Path) -> dict[str, str]:
+    """Writes the mod and a copy of HEAD under root. Loading a plugin folder regenerates its types, so the checkout itself is never loaded."""
+    mod, plugin = root / 'clock', root / 'plugin'
+    for name, text in CLOCK_MOD.items():
+        (mod / name).parent.mkdir(parents=True, exist_ok=True)
+        (mod / name).write_text(text)
+    plugin.mkdir()
+    archive = subprocess.run(['git', 'archive', 'HEAD'], capture_output=True, check=True).stdout
+    subprocess.run(['tar', '-x', '-C', plugin], input=archive, check=True)
+    return {'CACHEBEAT_DEMO_CLOCK': str(mod), 'CACHEBEAT_DEMO_PLUGIN': str(plugin)}
+
+
 def record() -> None:
-    """Loading a plugin folder regenerates its types, so the checkout itself is never loaded: HEAD is extracted into a scratch folder."""
-    with tempfile.TemporaryDirectory() as mod, tempfile.TemporaryDirectory() as plugin:
-        for name, text in CLOCK_MOD.items():
-            (Path(mod) / name).parent.mkdir(parents=True, exist_ok=True)
-            (Path(mod) / name).write_text(text)
-        archive = subprocess.run(['git', 'archive', 'HEAD'], capture_output=True, check=True).stdout
-        subprocess.run(['tar', '-x', '-C', plugin], input=archive, check=True)
-        env = {**os.environ, 'CACHEBEAT_DEMO_CLOCK': mod, 'CACHEBEAT_DEMO_PLUGIN': plugin}
-        subprocess.run(['vhs', 'assets/demo.tape'], check=True, env=env)
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(['vhs', str(TAPE)], check=True, env={**os.environ, **build(Path(d))})
 
 
-def status() -> list[tuple[float, int | None]]:
-    """Reads the status line every half second: the highest beat count a matching line shows, or None while there is none.
-    The /cachebeat 2h reply is a matching line too, with no count: the highest is the turn line's."""
+def launch() -> None:
+    """For a launch by hand: the tape's own command, so the two can't drift. The folders are kept."""
+    folders = build(Path(tempfile.mkdtemp(prefix='cachebeat-demo-')))
+    line = next(l for l in TAPE.read_text().splitlines() if l.startswith('Type `') and 'claude --resume' in l)
+    command = line[len('Type `'):line.rindex('`')]
+    for name, path in folders.items():
+        command = command.replace(f'"${name}"', shlex.quote(path))
+    print(command)
+
+
+def probe(entry: str) -> str:
+    return subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v', '-show_entries', entry, '-of', 'csv=p=0', str(RAW)],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def read() -> list[str]:
+    """The text of the frame every half second, the hint row left out."""
     with tempfile.TemporaryDirectory() as d:
         subprocess.run(['ffmpeg', '-v', 'error', '-i', str(RAW), '-vf', f'fps={FPS},crop=iw:ih*{1 - BOTTOM}:0:0', f'{d}/%05d.png'], check=True)
         frames = sorted(Path(d).glob('*.png'))
         env = {**os.environ, 'OMP_THREAD_LIMIT': '1'}  # one thread each, as the pool runs them side by side
-        with ThreadPoolExecutor() as pool:
-            texts = list(pool.map(lambda f: subprocess.run(['tesseract', str(f), '-', '--psm', '6'], capture_output=True, text=True, env=env).stdout, frames))
+        with ThreadPoolExecutor(max_workers=4) as pool:  # a few at a time, to spare the machine's memory
+            return list(pool.map(lambda f: subprocess.run(['tesseract', str(f), '-', '--psm', '6'], capture_output=True, text=True, env=env).stdout, frames))
+
+
+def status(texts: list[str]) -> list[tuple[float, int | None]]:
+    """The highest beat count a matching line shows, or None while there is none.
+    The /cachebeat 3h reply is a matching line too, with no count: the highest is the turn line's."""
     out = []
     for i, text in enumerate(texts):
         lines = [l for l in text.splitlines() if ('next beat in' in l or 'kept warm' in l) and 'cachebeat' not in l]
@@ -110,9 +169,27 @@ def status() -> list[tuple[float, int | None]]:
     return out
 
 
-def plan(seen: list[tuple[float, int | None]]) -> list[tuple[float, float | None, float, bool]]:
-    """(start, end, speed, glitch) on the recording's clock: fast and glitched from the status line's
-    first appearance to the last beat, each beat at full speed."""
+def idle(texts: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Idle minutes on the recording's clock, KEEP less the turn line's "left", as (times, minutes) to interpolate.
+    They only grow, so a read more than 2 minutes off the median of it and its neighbours is a misread, dropped; the
+    rest is made monotone."""
+    reads = []
+    for i, text in enumerate(texts):
+        for l in text.splitlines():
+            if 'cachebeat' not in l and (m := re.search(r'(?:(\d+)h\s*)?(\d+)\D?m left', l)):
+                reads.append((i / FPS, KEEP - int(m.group(1) or 0) * 60 - int(m.group(2))))
+    t, v = np.array(reads).T
+    near = np.array([np.median(v[max(0, k - 1):k + 2]) for k in range(len(v))])
+    keep = np.abs(v - near) <= 2
+    return t[keep], np.maximum.accumulate(v[keep])
+
+
+Part = tuple[float, float, float, str]  # start and end on the recording's clock, speed, and what plays: lead, fast, hold, payoff, final
+
+
+def plan(seen: list[tuple[float, int | None]], duration: float) -> list[Part]:
+    """Fast from the status line's first appearance to the last beat, each beat at full speed, then the payoff,
+    with the tape's closing hold split off by time."""
     start = next(t for t, n in seen if n is not None) + SETTLE
     # the line is unreadable for a moment as a beat lands ("next beat due now" matches nothing), so a count is compared
     # with the last one read, not with the frame before it
@@ -124,40 +201,112 @@ def plan(seen: list[tuple[float, int | None]]) -> list[tuple[float, float | None
             beats.append(t)
         last = n
     beats = beats[:2]
-    parts, t = [(0.0, start, 1, False)], start
+    parts, t = [(0.0, start, 1, 'lead')], start
     for x in beats:
-        parts.append((t, x - LEAD, FF, True))
-        parts.append((x - LEAD, x + HOLD, 1, False))
+        parts.append((t, x - LEAD, FF, 'fast'))
+        parts.append((x - LEAD, x + HOLD, 1, 'hold'))
         t = x + HOLD
-    parts.append((t, None, 1, False))
+    # the payoff reads ×2 again, so no beat marks it
+    parts.append((t, duration - FINAL, 1, 'payoff'))
+    parts.append((duration - FINAL, duration, 1, 'final'))
     return parts
 
 
-def render(parts: list[tuple[float, float | None, float, bool]]) -> None:
-    h = int(subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=height', '-of', 'csv=p=0',
-                            str(RAW)], capture_output=True, text=True, check=True).stdout)
-    k = h / 560  # the badge is sized for a 560-row frame, and scales with it
-    px = lambda n: round(n * k)
-    glitch = (f"rgbashift=rh=-{px(6)}:bh={px(6)}:rv={px(2)},drawgrid=w=iw:h={px(4)}:t={px(1)}:c=black@0.35"
-              f",drawtext=fontfile='{FONT}':fontsize={px(44)}:fontcolor=0x1e1e2e:box=1:boxcolor=0xf5c2e7:boxborderw={px(14)}"
-              f":x=(w-tw)/2:y=h*0.18:text='▶▶ FAST-FORWARD'"
-              f",drawtext=fontfile='{FONT}':fontsize={px(24)}:fontcolor=0xf5c2e7:box=1:boxcolor=0x1e1e2e@0.9:boxborderw={px(8)}"
-              f":x=(w-tw)/2:y=h*0.18+{px(88)}:text='~50 MIN LATER'")
+def span(minutes: float) -> str:
+    """Minutes as cachebeat writes them, as in the turn line's "1h 20m left"."""
+    m = round(minutes)
+    return f'{m}m' if m < 60 else f'{m // 60}h {m % 60}m'
+
+
+def captions(parts: list[Part], at: tuple[np.ndarray, np.ndarray], d: Path, w: int, h: int) -> None:
+    """One transparent PNG per output frame, w by h + STRIP, holding the caption's pill under the card, or nothing."""
+    regular, bold = ImageFont.truetype(FONT, SIZE), ImageFont.truetype(BOLD, SIZE)
+    measure = ImageDraw.Draw(Image.new('RGBA', (1, 1)))
+    width = lambda segs: sum(measure.textlength(text, font=font) for text, font, _ in segs)
+
+    def caption(kind: str, raw: float) -> list | None:
+        m = span(float(np.interp(raw, *at)))
+        if kind == 'final':
+            return [(f'back after {m}', bold, TEXT), (' · cache still warm', regular, DIM)]
+        if kind in ('fast', 'hold'):
+            lead = [('▶▶ fast-forward', bold, TEXT), (' · ', regular, DIM)] if kind == 'fast' else []
+            return lead + [(f'+{m} idle', regular, TEXT)]
+        return None
+
+    # one pill for every caption, the widest's, so it doesn't jitter as the text changes
+    pw = max(width([('▶▶ fast-forward', bold, 0), (' · ', regular, 0), ('+1h 40m idle', regular, 0)]),
+             width([('back after 1h 40m', bold, 0), (' · cache still warm', regular, 0)])) + 2 * 22
+    ph = SIZE + 2 * 10
+    x0, y0 = (w - pw) / 2, h + (STRIP - ph) / 2 - 4
+    def raw(tau: float) -> tuple[str, float]:
+        """The part playing at tau, seconds into the GIF, and the recording's time it shows."""
+        o = 0.0
+        for a, b, speed, kind in parts:
+            if tau < o + (b - a) / speed:
+                return kind, a + (tau - o) * speed
+            o += (b - a) / speed
+        return parts[-1][3], parts[-1][1]
+
+    for k in range(int(sum((b - a) / s for a, b, s, _ in parts) * OUT_FPS) + 1):
+        im = Image.new('RGBA', (w, h + STRIP), (0, 0, 0, 0))
+        if segs := caption(*raw(k / OUT_FPS)):
+            draw = ImageDraw.Draw(im)
+            draw.rounded_rectangle([x0, y0, x0 + pw, y0 + ph], radius=8, fill=PILL)
+            x = (w - width(segs)) / 2
+            for text, font, color in segs:
+                draw.text((x, y0 + 9), text, font=font, fill=color)
+                x += draw.textlength(text, font=font)
+        im.save(d / f'{k:05d}.png')
+
+
+def render(parts: list[Part], at: tuple[np.ndarray, np.ndarray]) -> None:
+    w, h = map(int, probe('stream=width,height').split(','))
     graph = [f'[0:v]split={len(parts)}' + ''.join(f'[s{i}]' for i in range(len(parts)))]
-    for i, (a, b, speed, is_glitch) in enumerate(parts):
-        end = '' if b is None else f':end={b}'
-        graph.append(f'[s{i}]trim=start={a}{end},setpts=(PTS-STARTPTS)/{speed}' + (f',{glitch}' if is_glitch else '') + f'[p{i}]')
-    graph.append(''.join(f'[p{i}]' for i in range(len(parts))) + f'concat=n={len(parts)}:v=1:a=0,fps=12,split[x][y]')
-    graph.append('[x]palettegen=max_colors=128:stats_mode=diff[pal]')
-    graph.append('[y][pal]paletteuse=dither=none:diff_mode=rectangle')  # flat terminal colors: no dither keeps text crisp
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(RAW), '-filter_complex', ';'.join(graph), str(GIF)], check=True)
+    for i, (a, b, speed, _) in enumerate(parts):
+        graph.append(f'[s{i}]trim=start={a}:end={b},setpts=(PTS-STARTPTS)/{speed}[p{i}]')
+    graph.append(''.join(f'[p{i}]' for i in range(len(parts))) + f'concat=n={len(parts)}:v=1:a=0,fps={OUT_FPS},format=rgba[v]')
+    # the margin goes transparent by geometry, not by colour: yuv420p shifts the margin's colour and rings inside the card.
+    # The strip below starts transparent, and the caption brings its own alpha
+    graph.append(f'[1:v]format=gray[m];[v][m]alphamerge,pad=w=iw:h=ih+{STRIP}:x=0:y=0:color=black@0[card]')
+    graph.append('[2:v]format=rgba[c];[card][c]overlay=0:0:format=auto:alpha=straight,format=rgba')
+    # two passes, the palette first: in one, every frame waits in memory for the palette made at the end
+    palette = ';'.join(graph) + ',palettegen=max_colors=128:stats_mode=full:reserve_transparent=1'  # diff mode greys the orange line
+    use = ';'.join(graph) + '[f];[f][3:v]paletteuse=dither=none:diff_mode=rectangle:alpha_threshold=128'  # no dither keeps text crisp
+    length = sum((b - a) / speed for a, b, speed, _ in parts)
+    m, r, x1, y1 = MARGIN, RADIUS, w - MARGIN - 1, h - MARGIN - 1
+    inside = (f"if(between(X,{m},{x1})*between(Y,{m},{y1}),"
+              f"if(gt(hypot(max(0,max({m + r}-X,X-{x1 - r})),max(0,max({m + r}-Y,Y-{y1 - r}))),{r}),0,255),0)")
+    with tempfile.TemporaryDirectory() as d:
+        mask, full = f'{d}/mask.png', f'{d}/full.gif'
+        (Path(d) / 'c').mkdir()
+        captions(parts, at, Path(d) / 'c', w, h)
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f"color=black:s={w}x{h}:d=1,format=gray,geq=lum='{inside}'",
+                        '-frames:v', '1', mask], check=True)
+        # the mask is bounded: unbounded, palettegen never sees an end
+        inputs = ['-i', str(RAW), '-loop', '1', '-t', f'{length:.3f}', '-i', mask, '-framerate', str(OUT_FPS), '-i', f'{d}/c/%05d.png']
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', *inputs, '-filter_complex', palette, '-frames:v', '1', f'{d}/palette.png'], check=True)
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', *inputs, '-i', f'{d}/palette.png', '-filter_complex', use, full], check=True)
+        # ffmpeg writes whole frames once there is alpha: ImageMagick keeps only what changes. No -fuzz: any of it leaves
+        # faint ghosts of text that scrolls away. Unlimited, it held 9.5 GB for 260 frames: the limits spill the rest to a
+        # disk folder, not /tmp, which can be memory itself (tmpfs)
+        spill = Path.home() / '.cache'
+        spill.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=spill, prefix='cachebeat-demo-') as cache:
+            subprocess.run(['magick', '-limit', 'memory', '1GiB', '-limit', 'map', '2GiB', full, '-coalesce', '-layers', 'Optimize', str(GIF)],
+                           check=True, env={**os.environ, 'MAGICK_TEMPORARY_PATH': cache})
 
 
 if __name__ == '__main__':
+    if '--launch' in sys.argv:
+        launch()
+        sys.exit()
     if '--skip-record' not in sys.argv:
+        if 'CACHEBEAT_DEMO_RAW' in os.environ:
+            sys.exit('CACHEBEAT_DEMO_RAW is read with --skip-record only: a recording always writes assets/demo-raw.mp4')
         record()
-    parts = plan(status())
-    for a, b, speed, is_glitch in parts:
-        print(f'{a:6.1f}–{"end" if b is None else f"{b:.1f}":>6}s  ×{speed:.1f}{"  glitch" if is_glitch else ""}')
-    render(parts)
-    print(f'wrote {GIF} ({GIF.stat().st_size / 1e6:.1f} MB)')
+    texts = read()
+    parts = plan(status(texts), float(probe('format=duration')))
+    for a, b, speed, kind in parts:
+        print(f'{a:6.1f}–{b:6.1f}s  ×{speed:.1f}  {kind}')
+    render(parts, idle(texts))
+    print(f'wrote {GIF} ({GIF.stat().st_size / 1e6:.2f} MB, {sum((b - a) / s for a, b, s, _ in parts):.1f}s)')
