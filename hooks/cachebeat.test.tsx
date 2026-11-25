@@ -1317,6 +1317,16 @@ test('under auto, a cache gone before the hour beats every 4m from there, and st
   expect(logs.at(-1)).toContain('stopped: the cache was not served')
 })
 
+test('under auto with Cache gone cold set to stop, a cache gone before the hour stops beating there', async ($: Engine, on: On) => {
+  const { clock, forks, logs } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }, ok], settings: { onCold: 'stop' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE + 8 * M)
+  expect(forks).toEqual([IDLE])
+  expect(logs.at(-1)).toBe('stopped: the cache was not served (0 read, 90,000 written)')
+  expect((await stateNow($)).session.enabled).toBe(false)
+})
+
 const SWITCH = {
   from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5', requested_model: 'sonnet', source: 'command', context_tokens: 90_000,
   prompt_cache_warm: true, cache_ttl: '1h', estimated_cache_write_usd: 0.5, pricing: 'catalog',

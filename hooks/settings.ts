@@ -330,7 +330,7 @@ export const TABS: readonly Tab[] = [
       {
         key: 'onCold', label: 'Cache gone cold', values: ['wait', 'stop'],
         fmt: v => (v === 'wait' ? 'start on your next message' : 'stop'),
-        help: 'If the cache goes cold before a beat reaches it, as when your computer sleeps: start beating again on your next message, or stop.',
+        help: 'If the cache goes cold before a beat (your computer slept, or auto found it lasts 5m): start again on your next message, or every 4m on auto; or stop.',
       },
       {
         key: 'coldGuard', label: 'Cold guard', values: [true, false], fmt: onOff,

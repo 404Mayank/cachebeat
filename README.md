@@ -215,7 +215,7 @@ A folder is where the session started, or where `/cd` or a worktree move took it
 | Setting | What it does | Default |
 | --- | --- | --- |
 | Stop after idle | Stops beating after this long without a message from you. A session with a keep-alive time (`/cachebeat 2h`) keeps to that instead | 8 hours |
-| Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop | start on your next message |
+| Cache gone cold | If the cache goes cold before a beat reaches it (say, your computer slept): start beating again on your next message, or stop. On auto, a beat that finds the cache lasts five minutes: beat every 4 minutes from there, or stop | start on your next message |
 | Cold guard | Asks before sending a message to a session whose cache has gone cold, saying how long it's been cold and how many tokens sending it caches again. It asks about chats from a minimum size. A question left unanswered doesn't send the message and closes after 5 minutes, or sends it after a few minutes if you choose. While it's open, other incoming messages (from other sessions, say) wait for it | on, from 20k tokens, don't send (closes after 5m) |
 | Stop at usage | Stops once any of your usage limits reaches this percentage | 90% |
 | Skip small chats | Skips beating chats under a minimum size | off, 20k tokens |
@@ -289,7 +289,7 @@ cachebeat turns itself off for the session when:
 
 If the cache goes cold before a beat reaches it, as when your computer sleeps, cachebeat waits and starts beating again on your next message. Set **Cache gone cold** to stop to have it turn off instead.
 
-It tells you why, the way you chose under **Alerts**. On auto, a cache that's gone before a 50-minute beat lasts five minutes: instead of stopping, cachebeat says so and beats every 4 minutes from there.
+It tells you why, the way you chose under **Alerts**. On auto, a cache that's gone before a 50-minute beat lasts five minutes: instead of stopping, cachebeat says so and beats every 4 minutes from there, unless **Cache gone cold** is set to stop.
 
 ## Good to know
 
