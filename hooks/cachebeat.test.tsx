@@ -528,7 +528,7 @@ test('Notices on both: the new model\'s cache is told as a line and a toast, bef
   await clock.advance(IDLE)
   const said = ["the next beat writes the new model's cache", "♥ warmed the new model's cache (90,000 written)"]
   expect(logs).toEqual(said)
-  expect(toasts).toEqual(said.map(x => `cachebeat ${x}`))
+  expect(toasts).toEqual([`cachebeat ${said[0]}`, said[1]]) // the heart's line reads as a beat's toast
 })
 
 test('Notices on none: beats wait for a new model and go on after a switch back, and nothing says so', async ($: Engine, on: On) => {
@@ -544,6 +544,15 @@ test('Notices on none: beats wait for a new model and go on after a switch back,
   await clock.advance(2000)
   expect((await stateNow($)).session.paused).toBe(null)
   expect([...logs, ...toasts]).toEqual([])
+})
+
+test('Notices, not On stop, tells of beats every 4m once auto finds a five-minute cache', async ($: Engine, on: On) => {
+  const { clock, logs, toasts } = await setup($, on, { fork: [{ ...ok, usage: usage(0, 90_000) }, ok], settings: { onStop: 'none', notices: 'toast' } })
+  await cmd($, 'on')
+  await $.turn.complete(turn)
+  await clock.advance(IDLE)
+  expect(logs).toEqual([])
+  expect(toasts).toEqual(["cachebeat the cache was not served (0 read, 90,000 written): this session's cache lasts 5 minutes, so beats come every 4m"])
 })
 
 test('Notices on none: a resumed conversation comes back without its line', async ($: Engine, on: On) => {
@@ -3388,6 +3397,15 @@ const coldSetup = async ($: Engine, on: On, world: World = {}) => {
   await kit.clock.advance(3 * 60 * M + 14 * M)
   return kit
 }
+
+test('Notices on none: a send on a cold cache goes and is counted, unsaid', async ($: Engine, on: On) => {
+  const { answers, sent, logs, toasts } = await coldSetup($, on, { settings: { notices: 'none' } })
+  answers.push('Send')
+  await submit($)
+  expect(sent).toEqual(['go on'])
+  expect([...logs, ...toasts]).toEqual([])
+  expect((await stateNow($)).session.coldSends).toBe(1)
+})
 
 test('cold and big: the question says how long it has been cold and the tokens; Send sends it, saying so', async ($: Engine, on: On) => {
   const { questions, answers, sent, logs } = await coldSetup($, on)

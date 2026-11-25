@@ -613,7 +613,7 @@ function announce($: EngineInterface, text: string) {
 /** What cachebeat does along the way that is neither a beat nor a stop (a wait, a skip, a new model's cache), told as Notices says. */
 function tell($: EngineInterface, text: string) {
   if (logs(cfg.notices)) $.ui.log(text)
-  if (toasts(cfg.notices)) $.ui.toast(`cachebeat ${text}`)
+  if (toasts(cfg.notices)) $.ui.toast(text.startsWith('♥') ? text : `cachebeat ${text}`) // a heart's line reads as a beat's toast does
 }
 
 /** Beats wait for the next turn, which will cache what a beat would have to write: says why, once. */
@@ -836,7 +836,7 @@ async function beatChecked($: EngineInterface, release: () => void): Promise<str
     if (cfg.interval !== 'auto' || s.isCacheShort || ttl === '5m') return stop($, why)
     s.isCacheShort = true
     warmFrom(sentAt)
-    announce($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
+    tell($, `${why}: this session's cache lasts 5 minutes, so beats come every ${AUTO['5m']}m`)
     await schedule($)
     return `${why}; beating every ${AUTO['5m']}m`
   }
