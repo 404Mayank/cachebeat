@@ -2874,7 +2874,7 @@ test('beats keep the cache warm until the time is up, then this session turns of
   await clock.advance(2 * H - 1)
   expect(forks).toEqual([50 * M, 100 * M]) // the cache at 100m lasts to 160m: the beat that would follow is not needed
   expect((await stateNow($)).session).toMatchObject({ enabled: true, nextBeat: 'none needed' })
-  expect(await cmd($, '')).toBe('on, every 50m idle · 1m left · 2 beats · no more beats needed · cache warm, 41m left')
+  expect(await cmd($, '')).toBe('on, every 50m idle · 1m left · 2 beats · no beat needed · cache warm, 41m left')
   await clock.advance(1)
   expect(logs.filter(l => l.startsWith('stopped'))).toEqual([`stopped: kept warm until ${clockText(2 * H, 2 * H)}, as asked`])
   expect(await cmd($, '')).toBe('off · cache warm, 40m left')
@@ -2887,7 +2887,7 @@ test('beats keep the cache warm until the time is up, then this session turns of
 test('no beat is armed when the cache outlives the time without one', async ($: Engine, on: On) => {
   const { clock, forks, logs } = await setup($, on)
   await $.turn.complete(turn)
-  expect(await cmd($, '55m')).toEndWith('every 50m idle · no more beats needed') // the hour's cache read now lasts past 55m
+  expect(await cmd($, '55m')).toEndWith('every 50m idle · no beat needed') // the hour's cache read now lasts past 55m
   await clock.advance(54 * M)
   expect(forks).toEqual([])
   await clock.advance(1 * M)
@@ -3689,7 +3689,7 @@ test('Status after a sleep says cold for how long, with the conversation\'s size
   const ui = await $.ui.mount(SETTINGS_PANE)
   expect(await statusOf(ui)).toEqual({
     Cache: 'cold for 2h 14m (1h TTL, last read 3h 14m ago)',
-    Size: '184k tokens · as 368k input tokens to cache again',
+    Size: '184k tokens',
     Beating: 'off',
     'This session': 'no beats yet',
     'Cold guard': 'on · asks from 20k tokens',
@@ -3826,7 +3826,7 @@ test('Status counts on while beating is off and nothing else redraws it: the col
 const statsTexts = async (ui: { findAll: (q: { type: string }) => Promise<{ text?: string }[]> }) => (await ui.findAll({ type: 'Text' })).map(x => x.text ?? '')
 const columns = (texts: string[], label: string) => {
   const line = texts.find(x => x.startsWith(label))
-  return line === undefined ? undefined : (line.slice(23).match(/.{1,13}/g) ?? []).map(x => x.trim())
+  return line === undefined ? undefined : [[23, 36], [36, 49], [49, 62], [62, 76]].map(([a, b]) => line.slice(a, b).trim())
 }
 const STATS_PANE = SETTINGS_PANE
 const day = (more: Partial<ReturnType<typeof emptyDay>>) => ({ ...emptyDay(), ...more })
@@ -3975,7 +3975,7 @@ test('the Stats page adds up every session\'s days, by span, and this session\'s
   await cmd($, 'stats')
   const ui = await $.ui.mount(STATS_PANE)
   const texts = await statsTexts(ui)
-  expect((texts[1]!.slice(23).match(/.{1,13}/g) ?? []).map(x => x.trim())).toEqual(['Today', '7 days', '30 days', 'This session'])
+  expect(texts[1]).toBe(`${' '.repeat(23)}        Today       7 days      30 days  This session`) // the last column one wider: two cells between 30 days and This session
   expect(columns(texts, 'Beats · cost')).toEqual(['5 · 20k', '15 · 70k', '15 · 70k', '1 · 5k'])
   expect(columns(texts, 'Kept warm · avoided')).toEqual(['1 · 170k', '3 · 510k', '3 · 510k', '0'])
   expect(columns(texts, 'Net')).toEqual(['+150k', '+440k', '+440k', '−5k']) // this session paid for a beat and had no turn back
