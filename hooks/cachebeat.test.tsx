@@ -29,6 +29,7 @@ const OTHER = '/home/me/code/web'
 // from its start, durationMs before its end: these take no time
 const turn = { answer: 'ok', durationMs: 0, isAborted: false, turnId: 't', reason: 'answer', usage: { ...usage(90_000, 0), model: OPUS } } as const
 const ok = { isAnswered: true, text: '.', usage: usage(90_000, 0) }
+const onSonnet = { ...turn, usage: { ...turn.usage, model: 'claude-sonnet-5-5' } } // a turn after /model sonnet
 
 type World = {
   fork?: unknown[]; percentUsed?: number; contextTokens?: number; lastUsage?: unknown
@@ -1342,7 +1343,7 @@ test('after /model, beats wait for the next turn', async ($: Engine, on: On) => 
   expect((await stateNow($)).session).toMatchObject({ nextBeat: 'after the next turn', paused: 'the model changed' })
   await clock.advance(IDLE * 2)
   expect(forks.length).toBe(0)
-  await $.turn.complete(turn)
+  await $.turn.complete(onSonnet)
   expect((await stateNow($)).session.paused).toBe(null)
   await clock.advance(IDLE)
   expect(forks.length).toBe(1)
@@ -3438,8 +3439,8 @@ test('after /model the guard asks once, saying the model changed; the first mess
   answers.push('Send')
   expect((await submit($)).drop).toBe(undefined)
   expect([questions, sent]).toEqual([[ASK_MODEL], ['go on']])
-  expect(logs.at(-1)).toBe('sent on a cold cache: the model changed, 184k tokens cached again')
-  await $.turn.complete(turn) // the message's turn, on the new model
+  expect(logs.at(-1)).toBe('sent on a cold cache: cold since the model changed, 184k tokens cached again')
+  await $.turn.complete(onSonnet) // the message's turn, on the new model
   expect((await stateNow($)).cache.state).toBe('warm')
   expect((await submit($)).drop).toBe(undefined)
   expect(questions).toHaveLength(1)
@@ -3472,13 +3473,47 @@ test('after /model set to warm, once a beat wrote the new model\'s cache the gua
 test('after /model, state, Status and /cachebeat say the cache is cold because the model changed; back on the first model it is warm', async ($: Engine, on: On) => {
   const { switchTo } = await switchedSetup($, on)
   expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'model', coldForMinutes: null, lastReadMinutesAgo: 10 })
-  expect(await cmd($, '')).toBe('off · cache cold: the model changed')
+  expect(await cmd($, '')).toBe('off · cache cold since the model changed')
   const ui = await $.ui.mount(SETTINGS_PANE)
-  expect((await statusOf(ui)).Cache).toBe('cold: the model changed (1h TTL, last read 10m ago)')
+  expect((await statusOf(ui)).Cache).toBe('cold since the model changed (1h TTL, last read 10m ago)')
   await ui.unmount()
   switchTo(OPUS)
   await $.classic.PostModelSwitch({ ...SWITCH, from_model: 'claude-sonnet-5-5', to_model: OPUS })
   expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+})
+
+test('a /model landing while a request is on its way: the cache is the request\'s model\'s, so the guard asks after', async ($: Engine, on: On) => {
+  const { clock, questions, answers, switchTo } = await setup($, on, { contextTokens: 184_000 })
+  answers.push('Send')
+  await $.turn.complete(turn)
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  switchTo('claude-sonnet-5-5') // the session's model by the time the request on Opus is answered
+  await step($, 't2', 0)
+  await $.turn.complete({ ...turn, turnId: 't2' })
+  await clock.advance(10 * M)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'model' })
+  await submit($)
+  expect(questions).toEqual([ASK_MODEL])
+})
+
+test('a model id with a snapshot date or the 1M suffix is the same model: no ask', async ($: Engine, on: On) => {
+  const { clock, questions, switchTo } = await setup($, on, { contextTokens: 184_000 })
+  await $.turn.complete({ ...turn, usage: { ...turn.usage, model: `${OPUS}-20261001` } }) // the id the API reports
+  switchTo(`${OPUS}[1m]`)
+  await clock.advance(10 * M)
+  expect((await stateNow($)).cache).toMatchObject({ state: 'warm', coldBecause: null })
+  await submit($)
+  expect(questions).toEqual([])
+})
+
+test('after /model and past the lifetime, the cache is cold for the time: said so, and asked even with after /model off', async ($: Engine, on: On) => {
+  const { clock, questions, answers } = await switchedSetup($, on, { settings: { coldGuardModel: false } })
+  await clock.advance(3 * 60 * M + 4 * M) // read 3h 14m ago in all
+  expect((await stateNow($)).cache).toMatchObject({ state: 'cold', coldBecause: 'time', coldForMinutes: 134 })
+  expect(await cmd($, '')).toBe('off · cache cold for 2h 14m')
+  answers.push('Send')
+  await submit($)
+  expect(questions).toEqual([ASK_COLD])
 })
 
 test('a cache known only from a resume hint, with no request seen on any model, is never cold for the model', async ($: Engine, on: On) => {

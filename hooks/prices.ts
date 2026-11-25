@@ -40,6 +40,9 @@ const READ = 0.1 // the common ratio, for a model this table lacks
  */
 const keyOf = (model: string) => model.toLowerCase().replace(/\[[^\]]*\]$/, '').replace(/-\d{8}$/, '')
 
+/** Whether two ids name one model, as a request's id, the API's and `$.session.model()`'s may differ in suffix or date. */
+export const sameModel = (a: string, b: string) => keyOf(a) === keyOf(b)
+
 const find = (model: string): Rates | undefined => (Object.hasOwn(TABLE, keyOf(model)) ? TABLE[keyOf(model)] : undefined)
 
 /** What a cached token costs next to an input token: a read, a five-minute write and a one-hour write. */

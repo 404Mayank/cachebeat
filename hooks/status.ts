@@ -45,7 +45,7 @@ function cacheRow(c: StatusFacts['cache']) {
   const life = `${c.ttl === '1h' ? '1h' : '5m'} TTL`
   if (c.state === 'unknown') return `nothing cached yet (${life})`
   const read = `last read ${span(c.lastReadMinutesAgo ?? 0)} ago`
-  if (c.state === 'cold') return `${c.coldBecause === 'model' ? 'cold: the model changed' : `cold for ${span(c.coldForMinutes ?? 0)}`} (${life}, ${read})`
+  if (c.state === 'cold') return `${c.coldBecause === 'model' ? 'cold since the model changed' : `cold for ${span(c.coldForMinutes ?? 0)}`} (${life}, ${read})`
   return `warm (${life}, ${read}) · ${fmt(c.leftMs ?? 0)} left`
 }
 

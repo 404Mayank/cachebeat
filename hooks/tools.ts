@@ -16,7 +16,7 @@ const ABOUT: Record<keyof BeatSettings, string> = {
   onCold: "If the cache goes cold before a beat reaches it (the computer slept, or retries ran past its lifetime): wait, and beat again after the user's next message, or stop beating. Under interval auto, a beat the cache didn't serve (it lasts 5 minutes, not an hour) switches to beating every 4m under wait, and stops beating under stop.",
   skipSmall: 'Skips beating chats smaller than skipSmallTokens.',
   skipSmallTokens: "The smallest chat kept warm while skipSmall is on; setting it doesn't turn skipSmall on.",
-  coldGuard: "Asks the user before their message is sent to a session whose cache has gone cold, saying how long it's been cold and the tokens sending caches again. Only messages typed at the terminal are asked about; a session can override it (session.coldGuard).",
+  coldGuard: "Asks the user before their message is sent to a session whose cache has gone cold, saying how long it's been cold, or that the model changed, and the tokens sending caches again. Only messages typed at the terminal are asked about; a session can override it (session.coldGuard).",
   coldGuardTokens: 'The smallest chat the cold guard asks about, in tokens.',
   coldGuardUnanswered: "A cold guard question left unanswered: drop, the message isn't sent (the question closes after 5 minutes), or minutes after which it is sent. While it is open, other incoming messages wait for it.",
   coldGuardModel: "Whether the cold guard asks after /model too: the new model has none of the chat cached until a request on it writes it, so its first message caches the whole chat again. A beat that wrote the new model's cache (onModelSwitch warm) makes it warm, and the guard doesn't ask.",
