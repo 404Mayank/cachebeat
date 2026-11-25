@@ -433,7 +433,7 @@ Record F1–T2's results under this plan as "Results", as step 8 did. Put anythi
 - **Passed:** the `●` wait fired after the whole answer, with no spinner at `Show`; no `∴`, tip, token readout or `agent type available`; two beats, `plan()` found both, no fast part before `/cachebeat 3h`; `next in 50m · 1h 20m left` kept after ×2 (`3h`); no tool line in either turn; no ghost suggestion in the prompt row; the idle caption only on the fast parts (34 and 35 frames), the payoff caption only on the last 31 frames, after the line moved; no weekly-limit notice in any frame (the 22s hidden wait).
 - **Length:** 21.5s, under the 24s cut. 1.60 MB, against the mock's 0.25 MB: h264 noise, kept by the palette, shows as faint specks beside the turn line and changes every frame (inferred as the size's cause).
 - **Failed: a cachebeat load line in every frame,** `cachebeat: $.tool.register: the description of state (4117 characters) reaches the model up to its first 4096 characters…`. Change 4 (`a0d3ff2`, the `coldBecause` sentence) took the `state` tool's description past 4096. A plugin bug, shown to every user at load, not the demo's.
-- **Failed: the payoff answer ran 7 lines,** and Haiku recited cachebeat's state from the `/cachebeat` reply. §2's rule: the payoff becomes `back. where were we, in one line?`.
+- **Failed: the payoff answer ran 7 lines,** and Haiku recited cachebeat's state from the `/cachebeat` reply. §2's rule: the payoff becomes `back. where were we, in one line?`, its wait `/(?s)in one line\?.*kept warm ×2/` (done after H1).
 
 ## 7. How the README embeds it
 
