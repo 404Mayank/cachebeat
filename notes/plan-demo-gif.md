@@ -7,6 +7,7 @@
 > - `assets/demo.tape` and `assets/demo.py`.
 > - plan-0.10.0.md, "Item 8" and "Step 8: B0–B8 results".
 > - Live reads on 2026-11-25: the installed cachebeat's `state`, and strings in Claude Code 2.1.332's binary.
+> - The review (`plan-review.md`, 2026-11-25) and the free checks run on it: "Checked before building", near the end.
 >
 > **Inferred** marks anything not checked; each such point has a check in "Checks, cheapest first".
 
@@ -41,20 +42,22 @@ That pitch is the README's lead line ("You come back from lunch, type your next 
 
 **The payoff gate.** The only on-screen sign that the payoff went warm is cachebeat's turn line reappearing under the new answer: `♥ cache kept warm ×2 · … · next in 50m`. cachebeat logs nothing on a warm send (`countKept` only counts it for Stats). One more problem: Claude Code's own `✻ Cooked for 2s · done 3:18 PM` runs on real time, while cachebeat's clock is sped up. A payoff `done` a minute or two after the setup turn's `done`, under a caption saying 50 minutes passed twice, contradicts itself.
 - **Fix:** `"showTurnDuration": false` in `--settings`. It's a settings key ("Show "Cooked for Nm Ns" after each assistant turn", found in 2.1.332's binary). The render code drops the whole `X for Ns · done T` text when it's off.
-- **The risk:** cachebeat's turn line is drawn by a `ui.render` hook on the `TurnDuration` component (`hooks/register.tsx`, `on('ui.render', { component: 'TurnDuration' } …)`). If that component isn't raised once its text is off, the turn line vanishes with it, and with it the whole GIF. Check **H1** settles this first.
-- **If the turn line survives** with `showTurnDuration: false`: the payoff stays, and no `done` time shows anywhere.
-- **If it doesn't:** keep `showTurnDuration` on and cut the payoff. The GIF ends on the ×2 hold: the command plus C, about 13s. Don't try to keep the payoff with the times showing.
+- **The risk was** that cachebeat's turn line hangs on the `TurnDuration` component (`hooks/register.tsx`, `on('ui.render', { component: 'TurnDuration' } …)`), and might not be raised once its text is off.
+- **Checked free (P1, "Checked before building"):** with `showTurnDuration: false`, a scratch mod's `TurnDuration` hook still drew its marker under a resumed turn, and no `✻ … done` text showed. The binary agrees: the row's wrapper always renders, and only its inner text goes null.
+- **Still for H1 to confirm:** that this holds for a turn that ends live, not only for a resumed one (inferred: the same component).
+- **If H1 shows it doesn't:** keep `showTurnDuration` on and cut the payoff. The GIF ends on the ×2 hold: the command plus C, about 13s. Don't keep the payoff with the times showing.
 
 ## 2. The storyboard
 
 **Size and timing:**
-- 1100×640, about 85 columns by 23 rows.
+- 1100×640: **77 columns by 23 rows** (measured with `tput` inside VHS by the review). A cell is about 13.4×24.7px. The `/cachebeat 3h` reply (about 82 characters) wraps onto two lines.
 - Typing at 50ms.
 - One fast-forward, split by two beats.
-- **Target 19s; cut if it runs past 21s,** in this order:
+- **Target about 22s; cut if it runs past 24s,** in this order:
   1. `HOLD` 1.5s → 1.2s
   2. `FF` 3 → 4
   3. the opening hold 1.5s → 1s
+  4. the payoff's final hold 2.5s → 2s
 - Seconds below are GIF seconds, after demo.py's speed-up; the raw recording is longer.
 
 | # | Typed (tape) | Wait for, then hold | On screen | GIF s |
@@ -62,9 +65,9 @@ That pitch is the README's lead line ("You come back from lunch, type your next 
 | 0 | `Hide`. The launch command (§5), `Sleep 9s`. Then the setup message: `in one line, what does demo.sh open?`, `Sleep 400ms`, `Enter`. | `Wait+Screen@60s /(?s)demo\.sh open\?.*●/`, then `Sleep 3s` so the line finishes and the prompt is idle. `Show`. | (hidden) | 0 |
 | 1 | nothing | `Sleep 1500ms` | Opening frame. Above: the source's tail (§4). Then `❯ in one line, what does demo.sh open?` and its one-line answer, e.g. `● Neo4j Browser and Gephi, the two live-demo views.` An empty prompt box, and the footer. No cachebeat line yet: it's off. | 1.5 |
 | 2 | `/cachebeat 3h`, `Sleep 400ms`, `Enter` | `Wait+Screen@10s /next beat in/`, then `Sleep 2s` | The reply, e.g. `cachebeat: this session: on until 6:16 PM (3h), every 50m idle · next beat in 50m`. Under the setup turn, the turn line, e.g. `♡ next beat in 49m · 2h 59m left`. The prompt heart in the hint row. | 3.4 |
-| 3 | nothing: the demo mod runs the clock | `Wait+Screen@90s /kept warm ×2/`, then `Sleep 1500ms` | The countdown races, with the caption `▸▸ 50 min idle` (§3) during each sped-up part only. Beat 1 lands and holds at real speed: `♥ cache kept warm ×1 · 52k cached · next in 50m · 2h 9m left`. It races again, and beat 2 holds: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 19m left`. | ≈9.3 (2.5 + 2.1 + 2.5 + 2.1) |
-| 4 (payoff, if the gate passes) | `Sleep 500ms`, `back. where did we leave off, in one line?`, `Sleep 400ms`, `Enter` | `Wait+Screen@40s /(?s)leave off.*kept warm ×2/`, then `Sleep 2500ms` | The message, a short spinner, the one-line answer picking up the demo.sh thread. Then cachebeat's line moves under the new answer: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 18m left`. That line under the new answer is the receipt. It matches only once the turn has ended, because `turn.start` sets `s.row = null`, so no line shows while the answer is drawn. | ≈7 |
-| | | | **Loop point:** the end of the payoff hold, cut straight back to the opening frame. Total ≈ 21s before trims, ≈19s after. | |
+| 3 | nothing: the demo mod runs the clock | `Wait+Screen@90s /kept warm ×2/`, then `Sleep 1500ms` | The countdown races. The caption `▸▸ 50 min idle` (§3) shows in the empty prompt row during each sped-up part only. Beat 1 lands and holds at real speed: `♥ cache kept warm ×1 · 52k cached · next in 50m · 2h 9m left`. It races again, and beat 2 holds: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 19m left`. | ≈9.3 (2.5 + 2.1 + 2.5 + 2.1) |
+| 4 (payoff, if the gate passes) | `Sleep 500ms`, `back. where were we?`, `Sleep 400ms`, `Enter` | `Wait+Screen@40s /(?s)where were we\?.*kept warm ×2/`, then `Sleep 2500ms` | The message, a short spinner, the one-line answer picking up the demo.sh thread. Then cachebeat's line moves under the new answer: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 18m left`. It matches only once the turn has ended, because `turn.start` sets `s.row = null`, so no line shows while the answer is drawn. Through the final hold, the caption `back 1h 40m later · cache still warm` shows in the empty prompt row (§3). It goes in only if T1's transcript shows the turn read the cache (§6). | ≈9–11 |
+| | | | **Loop point:** the end of the payoff hold, cut straight back to the opening frame. Total ≈ 23–25s before trims, ≈22s after. | |
 
 **Notes on the scenes:**
 - **Why `3h`, not `2h`.** After two beats, `2h` leaves 20 minutes, which the cache outlasts, so the line drops its countdown (the "no beat needed" case). With `3h` the line keeps `next in 50m` through the payoff and the last frame, so the heartbeat is still going as the GIF loops. Inferred: the same code path as `2h`; the Haiku dry run shows it.
@@ -72,7 +75,11 @@ That pitch is the README's lead line ("You come back from lunch, type your next 
   - **The tape can't sleep a fixed time for it:** a `/cachebeat` typed mid-turn runs, but its reply draws only at the turn's end.
   - **It can't wait for `done` either,** because `showTurnDuration` is off. It waits for the first `●` after the typed question. The pattern is anchored on the typed text, because a bare `/● demo\.sh/` could match the source's own tail: the B5 trap.
   - **The source must already have read `demo.sh`** (§4). Otherwise the fork's first `●` is `● Read(demo.sh)`: the wait fires early, and the tool line and its `⎿` sit in every opening frame. VHS patterns are Go RE2, with no lookahead to skip tool lines, so reading it in the source is the fix.
-- **Payoff wording.** `back. where did we leave off, in one line?` is 43 characters, 2.2s at 50ms. Shorten it if timing runs long, e.g. `back. where were we?` (but then ask the setup turn's answer to stay one line).
+- **Payoff wording.** `back. where were we?` is 20 characters, 1s at 50ms. The review estimated the payoff at about 9–11s real with the longer line (inferred), so this one replaces `back. where did we leave off, in one line?`.
+  - **If the answer runs past two lines,** it pushes the source's tail up and the frame gets busy. Then add `in one line` back (`back. where were we, in one line?`) rather than cut the answer.
+- **The payoff's receipt.** cachebeat's line reappearing lower down is easy to miss, so the final hold adds a caption saying it outright: `back 1h 40m later · cache still warm`.
+  - **The time** is read from the take's own line: `3h` minus the `left` it shows.
+  - **It's honest only if the turn did read the cache.** T1's check reads that from the fork's transcript before the caption goes in (§6).
 
 ## 3. The look
 
@@ -98,13 +105,28 @@ Set Theme {"name":"cachebeat-gh","background":"#161b22","foreground":"#e6edf3","
 - **At 1100 wide,** GitHub's README column (about 830px, inferred) scales it to about 0.75, so text reads at about 15px.
 - **No `WindowBar`:** macOS dots would be one more borrowed look.
 
-### Transparent corners (render-only, free to test)
+### Transparent corners: a geometric mask, then ImageMagick (checked, P2)
 
-The margin is keyed out in demo.py's render, so the rounded card floats on any page:
-- **The filter chain:** `colorkey=0x0d1117:0.02:0` before the split, then `palettegen=max_colors=128:stats_mode=diff:reserve_transparent=1` and `paletteuse=dither=none:diff_mode=rectangle:alpha_threshold=128`.
-- **The corner fringe** blends `#161b22` into `#0d1117`. Both are dark, so on a light page it reads as the card's edge.
-- **The risk is holes:** any `#0d1117` pixel inside the card would key out too. Claude Code's `dark` theme isn't known to draw it (inferred). F2 checks this.
-- **The fallback,** if the fringe or holes show: `Margin 0`, no `BorderRadius`, no colorkey. That's a plain `#161b22` rectangle, which on GitHub reads like a code block.
+The margin is made transparent in demo.py's render, so the rounded card floats on any page. **Not by colorkey:** VHS writes yuv420p, so the margin decodes as `#0c0f16`, not `#0d1117`. Its h264 ringing keys out specks inside the card (3,539 at one frame of the review's mock), which show white on a light page. The keyed GIF was also 3.0 MB against 0.19 MB opaque.
+
+**The chain** (all measured on the review's 11s mock, `rv/m.mp4`; P2 below):
+1. **A mask image, made once per render,** from the frame's geometry: white inside the rounded card (`Margin` 16, `BorderRadius` 10), black outside.
+   ```sh
+   M=16; RA=10; W=1100; H=640
+   ffmpeg -f lavfi -i "color=black:s=${W}x${H}:d=1,format=gray,geq=lum='if(between(X,$M,$W-$M-1)*between(Y,$M,$H-$M-1), if(gt(hypot(max(0,max($M+$RA-X,X-($W-$M-1-$RA))),max(0,max($M+$RA-Y,Y-($H-$M-1-$RA)))),$RA),0,255),0)'" -frames:v 1 mask.png
+   ```
+   In demo.py, take `W`/`H` from `ffprobe` as `render()` already does for the height, and `M`/`RA` from constants that match the tape.
+2. **ffmpeg** merges it as alpha and writes a temporary GIF:
+   - **The mask input is bounded:** `-loop 1 -t <the concat's duration> -i mask.png`. Unbounded, palettegen never sees an end, and the run was killed for memory.
+   - **The filter chain:** `[1:v]format=gray[m];[cut]format=rgba[v];[v][m]alphamerge,split[x][y];[x]palettegen=max_colors=128:stats_mode=full:reserve_transparent=1[p];[y][p]paletteuse=dither=none:diff_mode=rectangle:alpha_threshold=128`. `[cut]` is the trimmed and concatenated stream at 12 fps.
+3. **`magick <tmp>.gif -layers Optimize assets/demo.gif`** (ImageMagick 7 is installed at `/usr/bin/magick`). ffmpeg's GIF encoder writes full frames once an alpha is involved, so its output is 3 MB. ImageMagick's frame optimization brings it to 0.16 MB, smaller than the opaque GIF.
+
+**Measured (P2):**
+- All 136 coalesced frames' alpha matched the mask exactly: no holes, no stray pixels.
+- The corner is clean on white at 2× zoom.
+- With `stats_mode=full` the orange turn line keeps its color. Under `stats_mode=diff` it came out grey (`#7b7e85`), opaque or masked, because diff mode drops small static colors.
+
+**The fallback,** if the real take shows a problem the mock didn't: `Margin 0`, no `BorderRadius`, no mask, still `stats_mode=full`. That's a plain `#161b22` rectangle, which on GitHub reads like a code block.
 
 ### Claude Code's theme: `dark`, pinned
 
@@ -120,9 +142,13 @@ Add `"theme":"dark"` to the tape's `--settings`. The user's `theme` lives in ~/.
 
 - **`"showTurnDuration": false`:** the payoff gate, §1.
 - **`"spinnerTipsEnabled": false`:** no rotating `Tip: …` under the spinner. It's a settings key ("Whether to show tips in the spinner").
-- **`verbose` off** (drop `"verbose":true`): the `72011 tokens` readout goes. Inferred: the `1 agent type available` / `1 skill available` lines go with it. F3 and H1 show.
-- **`"remoteControlAtStartup": false`:** the `Remote Control disconnected — Trusted devices now required` notice came from an account change. It may print live at the launch of every fork, at the bottom of the screen, which is the opening frame. The key sits in the same config-key list as `theme` and `showTurnDuration` in 2.1.332's binary, so it's inferred to be accepted from `--settings`. F3 checks it.
-- **`awaySummaryEnabled`:** in the same list. Set it `false` too if any resume or away summary shows at launch (F3).
+- **`"verbose": false`, explicitly.** The user's settings.json has `"verbose": true`, so leaving the key out keeps it on (the review). Off, the `72011 tokens` readout goes, and inferred, the `1 agent type available` / `1 skill available` lines with it. H1 shows.
+- **`"showThinkingSummaries": false`:** no `∴` rows from the user's `true`. A resumed transcript still shows collapsed rows such as `Thought for 10s, ran 1 shell command` with it off (P1). That's accepted in the source's tail.
+- **`"remoteControlAtStartup": false`:** the `Remote Control disconnected — Trusted devices now required` notice came from an account change. It may print live at the launch of every fork, at the bottom of the screen, which is the opening frame. The key accepts flag settings (the review). P1 launched with it and showed no notice, but whether it overrides the user's `true` is still open. F3 keeps the check.
+- **`"awaySummaryEnabled": false`, always.** The recap fires on return after 5 minutes or more, so F3 may not reproduce it.
+- **`"crossSessionInbound": "refuse"`:** a peer message landing mid-take as a turn would burn a paid take. It doesn't hide `← 2 agents` from the footer (P1), so the fleet still closes before T1 (§8).
+- **`"promptSuggestionEnabled": false`:** after a turn, Claude Code can draw a suggested next message as ghost text in the prompt row, which is where the captions go (§3, "The fast-forward"). The key is in 2.1.332's settings list; that it's this feature, and that `--settings` turns it off, is inferred. P1's prompt row was empty, but it had no fresh turn. H1 checks.
+- **All the keys above but the last** were in P1's launch together: no warning in the debug log, and ~/.claude/settings.json byte-identical after.
 - **Kept from the old tape:** `"advisorModel":""`, `"statusLine":{"type":"command","command":"true"}`, and `enabledPlugins` with both installed copies off.
 
 ### cachebeat's settings: pinned by the demo mod, not by touching the user's
@@ -135,16 +161,21 @@ Add `"theme":"dark"` to the tape's `--settings`. The user's `theme` lives in ~/.
 
 The `--plugin-dir` copy reads that same store (B2). Changing them through `set` or the menu touches user settings, which a live check must not do.
 
-**How:** the demo mod (the clock mod, extended; rename its `description` to "Runs cachebeat's clock fast and pins its settings for the demo") adds one op hook:
+**How:** the demo mod (the clock mod, extended; rename its `description` to "Runs cachebeat's clock fast and pins its settings for the demo") adds three op hooks:
 
 ```ts
 const PINNED = { coldGuard: false, stopAtUsage: 100 } // everything else: cachebeat's DEFAULTS, as a new install has them
+const KEPT = ['settings', 'folders', 'customs'] // the user's own: read pinned, never written
 on('store.get', async ($, e, next) => {
   if (next.origin.plugin !== 'cachebeat') return next(e)
   if (e.key === 'settings') return { value: PINNED }
   if (e.key === 'folders') return { value: {} }
   return next(e) // session:<id> records, customs, prunedAt and Stats pass through
 })
+// a change made in the demo session must not reach the user's store: changeSettings would write changed(global)
+// built from PINNED, and saveOwn would rebuild folders from {} and wipe the folders' own settings
+on('store.set', async ($, e, next) => (next.origin.plugin === 'cachebeat' && KEPT.includes(e.key) ? { value: undefined } : next(e)))
+on('store.delete', async ($, e, next) => (next.origin.plugin === 'cachebeat' && KEPT.includes(e.key) ? { value: undefined } : next(e)))
 ```
 
 **What this pins:**
@@ -153,17 +184,30 @@ on('store.get', async ($, e, next) => {
 - **`coldGuard: false`:** the guard never shows in this concept, and with it off the source's age doesn't matter (§4).
 - **`stopAtUsage: 100`:** a take near 90% of the five-hour window would otherwise stop beating mid-take. Still check account usage before each take.
 - **`customs` passes through:** it's read only for custom animations, and the classic heart uses none.
-- **`store.set` isn't hooked:** cachebeat writes `settings` only in `changeSettings`, on a change, and the tape changes none. Its `session:<forkid>` and Stats records still land in the real store, as in every take before; they're pruned after 30 days.
+- **`store.set` and `store.delete` are no-ops for those three keys** (the review). Any change in `/cachebeat settings` runs `changeSettings` (`register.tsx` 318–325), which writes `changed(global)` built from `PINNED` over the user's real settings. `saveOwn` (304–308) rebuilds `folders` from the pinned `{}`, which wipes every folder's own settings. The tape changes no setting, and F3 changes none either: these hooks are a safety net, and they're untested.
+- **cachebeat's other records** (`session:<forkid>`, Stats) still land in the real store, as in every take before. They're pruned after 30 days.
 
-**The unproven part:** an op hook on `store.get` from another plugin. `clock.now`, `clock.after` and `model.fork` are proven (B3, B4); `store.get` isn't (the types list it, `index.d.ts` `'store.get': { key }`). The return shape `{ value }` is copied from the `clock.now` hook. F3 checks it for free.
+**The unproven part:** op hooks on `store.*` from another plugin. `clock.now`, `clock.after` and `model.fork` are proven (B3, B4). `store.get` isn't: the types list it (`index.d.ts` `'store.get': { key }`), and `next.origin` names the caller. The return shape `{ value }` is copied from the `clock.now` hook. F3 checks the read for free.
+
+**If the user's settings are ever overwritten anyway,** these are the values to put back. They're the installed copy's, read 2026-11-25 through `state`, under all folders, where the cachebeat folder had none of its own:
+- `stopAtUsage: 100`
+- `skipSmall: true`, `skipSmallTokens: 50000`
+- `variant: "ecg"`
+- `heartEffect: "flow"`, `lineEffect: "flow"`
+- `onStop: "both"`
+- every other key at its default
+
+Other folders' own settings weren't read: the `folders` key is the one to protect.
 
 ### The fast-forward, without the badge
 
 - **The countdown racing is the main signal.** `next beat in 49m` drops a minute every few frames, so it reads as sped up on its own.
-- **A quiet caption,** only during the sped-up parts (`plan()`'s fast segments): `▸▸ 50 min idle`.
-  - FiraCode Regular at 16px (scaled `px(16)` on a 640-row frame), color `#7d8590` (Primer's muted text), no box.
-  - Placed bottom-right inside the card, on the hint row: `x=w-tw-px(36)`, `y=h-th-px(40)`.
-  - The hint row's left holds the mode label and the heart, and its right end is empty (inferred from the old frames). F2 places it, and H1 confirms no overlap.
+- **A caption,** only during the sped-up parts (`plan()`'s fast segments): `▸▸ 50 min idle`. The user keeps it, so it has to read on GitHub; the review found the first draft (16px, `#7d8590`) would show at about 13px of muted grey.
+  - **FiraCode Regular at the terminal's own size,** `px(20)`, so it shows at about 15px like the text around it. Color `#9198a1` (Primer's current muted foreground, about 5.7:1 on `#161b22`). No box.
+  - **In the empty prompt row, right-aligned,** inside the input box (`x=w-tw-px(16+20+28)`). It's the one row sure to be empty through the fast-forward: nothing is typed then.
+  - **Not on the hint row:** under `--permission-mode auto` it reads `⏵⏵ auto mode on (shift+tab to cycle)`, plus the heart (P1). At 77 columns, that leaves no room on the right.
+  - **The row's `y`** is measured from a real frame, H1's or F3's: in P1's layout the prompt row is the 4th from the bottom (border, prompt, border, blank, hint). In pixels that's about `604 - 4 × 24.7`, so `y ≈ 506`, taking 604 as the card's bottom edge inside the padding.
+- **The payoff's caption** sits in the same place and size, through the payoff's final hold only: `back 1h 40m later · cache still warm` (§2).
 - **Gone:** `rgbashift`, `drawgrid`, the pink box, and `~50 MIN LATER`.
 
 ### Dark only, no light `<picture>` pair (decided, §8)
@@ -191,9 +235,14 @@ on('store.get', async ($, e, next) => {
 - **The project is neutral and readable:** a programming-language influence graph with Neo4j and Gephi views. Its `demo.sh` is 12 lines with nothing private in it, and the repo has no remote (checked).
 - **A fresh session controls the tail.** The existing `2b8312b3…` (75k, Sonnet, 2026-10-13) ends on `where are the ceckboxes, the ss if of n4j no?`, which would sit in every frame.
 - **How to make it:** in tmux, in that folder:
-  - `claude --model sonnet --settings '{"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false},"theme":"dark","showTurnDuration":false,"spinnerTipsEnabled":false}'`
+  - `claude --model sonnet --permission-mode default --settings '<the takes' full --settings, §3>'`. The takes' settings, because the user's own would leak into the source's transcript (the review):
+    - `remoteControlAtStartup: true` caused the notice that ruled out the old source
+    - `showThinkingSummaries: true` puts `∴` rows in the tail
+    - `crossSessionInbound` accepting, plus the peer hooks, lets fleet messages land as turns
+  - **`--permission-mode default`,** not the takes' `auto` (the orchestrator): the source's turns read files, and a tool shouldn't run without the builder's OK. The takes stay on `auto` (§8).
+  - In a 77×23 tmux window, the takes' size. A tmux-only `tmux focus-events off` notice shows above the prompt (P1); VHS runs no tmux, so ignore it.
   - Turn 1: `give me a short overview of this project: what it builds and how`. It reads the README and scripts, which builds the size.
-  - Turn 2: `read demo.sh: what does it do?` This puts `demo.sh` in context, so the fork's setup question is answered without a tool call (§2).
+  - Turn 2: `read demo.sh: what does it do?` This puts `demo.sh` in context, so the fork's setup question is answered without a tool call (§2). Its collapsed `Read 1 file` row stays in the tail. That's accepted: it reads as real work.
   - Check the tokens (the `/context` figure, or the transcript's last `usage`) and the tail. If the tail has a path or a long listing, one more short turn (`thanks, that's clear`) pushes it up.
   - Record the session id in this plan.
 
@@ -213,27 +262,27 @@ Every change, with its risk and the check that clears it. The check IDs are in t
 | Change | Risk | Check |
 | --- | --- | --- |
 | The `Set` block (§3) replaces size, padding, theme and typing | OCR misses the new colors or size; the bottom crop (`BOTTOM`) eats the turn line at 640 rows | F1 (mock), H1 |
-| `--settings`: drop `"verbose":true`; add `"theme":"dark"`, `"showTurnDuration":false`, `"spinnerTipsEnabled":false` | `theme` doesn't override from `--settings`; a value is written back to ~/.claude/settings.json; the turn line dies with `showTurnDuration` | F3, H1 |
+| `--settings`: `"verbose":false` (explicitly); add `"theme":"dark"`, `"showTurnDuration":false`, `"spinnerTipsEnabled":false`, `"showThinkingSummaries":false`, `"awaySummaryEnabled":false`, `"remoteControlAtStartup":false`, `"crossSessionInbound":"refuse"`, `"promptSuggestionEnabled":false` | `remoteControlAtStartup` may not override the user's `true`. P1 checked that `theme` overrides (the 256-color capture showed `dark`'s grey user bar, not niri's), that nothing is written back, and that the turn line survives `showTurnDuration` on a resumed row. | F3, H1 |
 | `--permission-mode default` becomes `--permission-mode auto` (the user, §8) | The hint row shows auto mode's label in place of `⏸ manual mode on`; that's accepted. Auto mode runs tools without asking, so a turn that reaches for a tool shows it in frame. The setup and payoff turns must answer from context: the source reads `demo.sh` first (§4). | F3 (how the hint row looks), H1 (no tool line in either turn) |
 | `cd "$CACHEBEAT_DEMO_DIR"` points at the ProgLang folder; `CACHEBEAT_DEMO_SESSION` is the new source | none new | F3 |
-| `--settings` also gains `"remoteControlAtStartup":false` (and `"awaySummaryEnabled":false` if F3 shows a summary) | the keys aren't honoured from `--settings`; a notice prints at the bottom of the opening frame | F3 |
-| Scene 0 rewritten: no `/cachebeat` + Escape trick, no guard question; the setup message and its `● demo\.sh` wait | the answer doesn't start with `demo.sh`, and the wait times out | H1 (Haiku follows it too, or rephrase) |
-| Scenes 1–4 as §2; scene 4 of the old tape (Status) removed | `/(?s)leave off.*kept warm ×2/` needs both on one screen: at 23 rows the message, the answer and the line fit (inferred) | H1 |
+| Scene 0 rewritten: no `/cachebeat` + Escape trick, no guard question; the setup message and its `/(?s)demo\.sh open\?.*●/` wait | the first `●` after the question is a tool line, not the answer (the source didn't read `demo.sh`); the wait fires early | H1 |
+| Scenes 1–4 as §2; scene 4 of the old tape (Status) removed | `/(?s)where were we\?.*kept warm ×2/` needs both on one screen: at 23 rows the message, the answer and the line fit (inferred) | H1 |
 | The header comment: "and hides your status line and the advisor…" reworded for the new flags | none | review |
 
 ### `assets/demo.py`
 
 | Change | Risk | Check |
 | --- | --- | --- |
-| `CLOCK_MOD`'s `register.ts` gains the `store.get` hook (§3) | an op hook on `store.get` isn't honoured, or takes another return shape: the frames show the user's ECG heart, and a source under 50k never beats | F3: `/cachebeat settings` shows the classic heart, Cold guard off, Skip small off |
+| `CLOCK_MOD`'s `register.ts` gains the `store.get`, `store.set` and `store.delete` hooks (§3) | an op hook on `store.get` isn't honoured, or takes another return shape: the frames show the user's ECG heart, and a source under 50k never beats. The set and delete no-ops are untested. | F3: `/cachebeat settings` shows the classic heart, Cold guard off, Skip small off; change nothing there |
 | `BEATS`, `SPEED`, `STEP` and the `model.fork` hook unchanged | the payoff turn arrives while `ahead` is set. With the guard off nothing reads it for a question. `countKept` counts the turn as kept (shown time), which lands in Stats only. | H1: the payoff draws no cachebeat log line |
-| `render()`: the glitch chain becomes the caption drawtext (§3). `0x1e1e2e` and `0xf5c2e7` go; the caption takes `0x7d8590`. `FONT` takes the Regular face (`FiraCode Nerd Font Mono:style=Regular`). Rename the `glitch`/`is_glitch` flag to `caption`. | the caption overlaps the hint row's text | F2, then H1 |
-| `render()`: colorkey and transparency (§3) | holes inside the card; fringe; GIF transparency with `diff_mode=rectangle` leaves smears between frames | F2: composite frames on white and on `#0d1117` |
+| `render()`: the glitch chain becomes the caption drawtext (§3). `0x1e1e2e` and `0xf5c2e7` go; the caption takes `0x9198a1` at `px(20)` in the prompt row. `FONT` takes the Regular face (`FiraCode Nerd Font Mono:style=Regular`, checked installed). The flag becomes a caption text per part (None, `▸▸ 50 min idle`, or the payoff's), not a bool. | the caption overlaps typed text or sits off the row | F2, then H1 |
+| `render()`: `palettegen` `stats_mode=diff` → `full` | none found: P2 measured it smaller, with the orange kept | F2 samples the turn line's pixels in the GIF for orange |
+| `render()`: the mask, `alphamerge`, and the `magick -layers Optimize` pass (§3) | the real take has something the mock didn't; ImageMagick's time on about 270 frames (inferred: seconds) | F2: composite frames on white and on `#0d1117`; compare the size with an opaque render |
 | `LEAD`/`HOLD`/`SETTLE`/`FF`: `LEAD 0.6`, `HOLD 1.5`, `SETTLE 2.0`, `FF 3`, then trim per §2 | timing only | H1's printed parts |
-| `BOTTOM` re-measured for 640 rows: the crop must take the hint row and prompt box, and never the turn line | too large a crop drops the turn line once it sits just above the prompt (after beat 2 and in the payoff), and `plan()` finds one beat | F1 on a mock frame, then H1: `plan()` prints exactly two beats |
+| `BOTTOM` 0.18 → 0.15, re-measured for 640 rows | **Untested** (the review): 0.18 of 640 is 115px, and 36px of that is margin and padding, so it covers only about 3.2 rows. Once the turn line sits just above the prompt, it's the 5th row from the bottom (hint, blank, border, prompt, border), at about 75–79% of the height. A crop at 0.15 (from 544px down) keeps it, and still drops the hint row and most of the prompt box. | F1 must put the mock line exactly 5 rows from the bottom with that footer under it; then H1: `plan()` prints exactly two beats |
 | `plan()`: the beat count must not double-count the payoff | the payoff line reads `×2` again, not more, so `n > last` doesn't fire (checked by reading `plan()`) | H1 |
 | **A `--launch` mode:** extracts `git archive HEAD` and writes `CLOCK_MOD` into folders under the scratchpad that it keeps, then prints the tape's full `claude …` command with `CACHEBEAT_DEMO_PLUGIN` and `CACHEBEAT_DEMO_CLOCK` filled in. `record()` and `--launch` share one helper that builds the two folders. F3 needs this: the tape's command names folders only `record()` creates, and it deletes them afterwards. Never stand in for them with `--plugin-dir .` or a worktree. | the printed command drifts from the tape's | F3: diff the printed flags against the tape's `Type` line |
-| **`RAW` and `GIF` overridable** (`CACHEBEAT_DEMO_RAW`, `CACHEBEAT_DEMO_GIF`, defaulting to today's paths). Test renders go to the scratchpad. A test render is never committed: only a final take's `assets/demo.gif` is. | a test overwrites the tracked `assets/demo.gif` | `git status` after F1/F2 shows no `assets/demo.gif` change |
+| **`GIF` overridable** (`CACHEBEAT_DEMO_GIF`, defaulting to `assets/demo.gif`): **set it for every run before the final take, H1 included.** `RAW` stays `assets/demo-raw.mp4` for recording, because the tape's `Output` line names it and it's gitignored (checked). `CACHEBEAT_DEMO_RAW` overrides what's *read*, and only with `--skip-record` (demo.py refuses it otherwise), for F1 and F2. A test render is never committed: only the final take's `assets/demo.gif` is. | a test overwrites the tracked `assets/demo.gif` | `git status` after F1, F2 and H1 shows no `assets/demo.gif` change |
 | The docstring: the new story, the pinned settings, no guard, any-age source | none | review |
 
 Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not `'cachebeat'`): the `/cachebeat 3h` reply carries `cachebeat` and is skipped. If the reply wraps so that `next beat in` falls on its second line, that line counts 0, which is harmless (the highest count wins).
@@ -244,19 +293,20 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
 - **F1: VHS mock.** A throwaway tape with the §3 `Set` block `printf`s the frame's lines in `dark`'s colors:
   - the turn line in `rgb(215,119,87)`, at `×1` then `×2`
   - a user line on `rgb(55,55,55)`
-  - a hint row at the bottom
+  - under it, the real footer's shape: a blank row, a border, a prompt row, a border, a blank row, and a hint row. That puts the turn line 5 rows from the bottom, where it sits after beat 2 and in the payoff.
 
-  The scout's `t.tape` shape works (its folder is in "What the scout found"). Run demo.py's `status()` and `plan()` on its mp4 (`CACHEBEAT_DEMO_RAW=<the mock's mp4>`; output to the scratchpad). Both counts must be read, and the turn line must sit above the `BOTTOM` crop.
+  The review's `rv/m.mp4` is a start, but its line sits near the top, so it doesn't test `BOTTOM`. The scout's `t.tape` shape works (its folder is in "What the scout found"). Run demo.py's `status()` and `plan()` on its mp4 (`CACHEBEAT_DEMO_RAW=<the mock's mp4>`; output to the scratchpad). Both counts must be read, and the turn line must sit above the `BOTTOM` crop.
 - **F2: render only.** Run `python3 assets/demo.py --skip-record`, with `CACHEBEAT_DEMO_RAW` set to F1's mp4 and then to the existing `assets/demo-raw.mp4`, and `CACHEBEAT_DEMO_GIF` set to the scratchpad each time. Check:
   - the caption's place and color
   - no glitch left
-  - the GIF's size
-  - transparency: extract three frames and composite each on white and on `#0d1117` (`ffmpeg … -filter_complex "color=white:s=1100x640[bg];[bg][1:v]overlay"`). Look for holes and corner fringe. If either shows, take the §3 fallback.
-- **F3: launch without a message.** Run `python3 assets/demo.py --launch` and run the command it prints in tmux (not VHS), from the ProgLang folder, forking the source. Do this before and after: `cp ~/.claude/settings.json <scratch>/before.json`, then `diff` after quitting; it must be empty. Then check:
+  - the GIF's size, against an opaque render of the same input (P2: 0.16 MB masked against 0.17 MB opaque)
+  - the turn line's pixels in the GIF are orange (`stats_mode=full`)
+  - transparency: `magick <gif> -coalesce`, then check that each frame's alpha matches the mask (P2's numpy check), and flatten a few on white and on `#0d1117` (`magick f.png -background white -flatten`). If holes or fringe show, take the §3 fallback.
+- **F3: launch without a message.** Run `python3 assets/demo.py --launch` and run the command it prints in a **77×23** tmux window (not VHS), from the ProgLang folder, forking the source. Start it from a script file that `cd`s first: tmux's `-c` didn't take in P1, and Claude Code then asked to trust `/home/zyrus` (Escape cancels). Do this before and after: `cp ~/.claude/settings.json <scratch>/before.json`, then `diff` after quitting; it must be empty. Then check:
   - the theme is `dark` (orange accent, grey user-message bars)
   - the debug log (`--debug-file`) names `cachebeat-demo-clock@inline` first and one `cachebeat@inline`, with no `@cachebeat` or `@synced`
-  - `/cachebeat settings` (local, sends nothing) shows the pinned values: Classic heart, Steady effects, Cold guard off, Skip small off, Stop at usage 100%. Escape, then quit with no message. **If it shows ECG, the `store.get` pin failed: stop and report it.**
-  - the footer under `--permission-mode auto`: auto's label, and where the heart sits beside it, for the caption's place (§3)
+  - `/cachebeat settings` (local, sends nothing) shows the pinned values: Classic heart, Steady effects, Cold guard off, Skip small off, Stop at usage 100%. **Change nothing there:** Escape, then quit with no message (Ctrl+C twice). **If it shows ECG, the `store.get` pin failed: stop and report it.**
+  - the footer under `--permission-mode auto`: P1 showed `⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents`. Note the prompt row's place for the caption (§3).
   - the source's tail on screen: nothing private, no welcome header
   - no notice at the launch (Remote Control, an away summary, an update): the bottom of the screen is the opening frame
 
@@ -267,13 +317,20 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
   3. no `∴` thinking line, no tip, no token readout, no `agent type available`
   4. both beats, the `3h` countdown kept after ×2, and `plan()` printing two beats with no fast-forward before `/cachebeat 3h`
   5. the payoff: no tool line in it or in the setup turn (auto mode would run one unasked), no cachebeat log line, the line moving under the new answer, and the wait matching only after the answer
-  6. the caption only on fast parts, not overlapping
+  6. no ghost suggestion in the prompt row after the setup turn or the payoff; the caption only on fast parts, legible and in the prompt row, not overlapping; and the payoff's caption only in its final hold
   7. the length, trimmed per §2
 
   A second Haiku run is fine if H1 changes the tape. Haiku runs don't count toward the take cap, but say how many ran.
 
+**For the builder, from the review:**
+- **The hint-row heart draws dim grey on purpose** (`heartPlacement: 'tail'`). Don't "fix" it: that adds a row and moves the crop.
+- **VHS 0.12.1 does honour `Margin`, `MarginFill` and `BorderRadius`** (checked), though `vhs manual` doesn't list them.
+
 **Real takes: Sonnet, two at most.**
-- **T1.** Before it: account usage under 90% (`clear` reports it), the fleet closed (§8), and the source untouched since F3. After: check every frame against §2's "On screen" column, and `git diff` the tape and demo.py against what H1 ran.
+- **T1.** Before it: account usage under 90% (`clear` reports it), the fleet closed (§8), and the source untouched since F3. After:
+  - Check every frame against §2's "On screen" column, and `git diff` the tape and demo.py against what H1 ran.
+  - **Before the payoff caption goes in,** read the fork's transcript (the newest `.jsonl` in the ProgLang project folder): the payoff turn's first assistant `usage` must show `cache_read_input_tokens` near the conversation's size, and `cache_creation_input_tokens` small (the turn's own new text). If it doesn't, the payoff went cold: drop the caption, and report it. That would be a finding about the clock mod, not the GIF.
+  - Then re-render with `--skip-record` and the caption's time read from the take (§2).
 - **T2** only if T1 fails a frame check. Ask the orchestrator before a third.
 - **Each take** forks the source into a new session file under `~/.claude/projects/-home-zyrus-Desktop-Projects-ProgLang-Influence-Graph/`. List them in the results for the user to clear.
 
@@ -290,6 +347,35 @@ On `main`, the README is for users. The image stays where it is (line 9, under t
 - **If the payoff is cut,** the alt text ends at "while you're away".
 - **Commits:** the GIF and the README line are plugin files, committed on `dev` as `cachebeat 0.10.0 (gif): …` (§8). The tape, demo.py and this plan's results are `dev notes: …` and dev-only commits. They reach `main` only through a release branch (notes/README.md, "Branches and releases").
 
+## Checked before building (2026-11-25)
+
+**Free checks run by the planner on the review's findings.** No request was sent.
+
+**P1: the `TurnDuration` marker, and the takes' settings.**
+- **The setup:**
+  - A scratch mod (`hooks/register.tsx`: a `ui.render` hook on `TurnDuration` that draws `TD-MARKER` under `await next(e)`) was loaded with `--plugin-dir` from the scratchpad.
+  - It was launched in a 77×23 tmux window, forking the Trellis session `788fe026…` on Haiku.
+  - `--permission-mode auto`, and the takes' full `--settings` (§3).
+  - No message was typed, and Ctrl+C twice quit.
+- **Results:**
+  - `TD-MARKER` drew under the resumed turn, with no `✻ … done` text.
+  - The footer read `⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents`.
+  - No Remote Control notice showed. A tmux-only `tmux focus-events off` notice did.
+  - The colors were `dark`'s: the user bar at 256-color 237, against niri's brown, which would map near 236 (inferred from the mapping).
+  - ~/.claude/settings.json was byte-identical after.
+  - The debug log has no settings warning, and no model request, only MCP connection setup.
+  - No fork file was written: the Trellis folder still holds only the source.
+
+**P2: the render** (on the review's `rv/m.mp4`, 11.2s, 1100×640 yuv420p; files in this session's scratchpad, `rv2/`):
+
+| Render | Size | Orange pixels in the last frame | Alpha off the mask |
+| --- | --- | --- | --- |
+| opaque, `stats_mode=diff` (today's) | 0.19 MB | 0 (grey) | n/a |
+| opaque, `stats_mode=full` | 0.17 MB | 809 | n/a |
+| opaque, `stats_mode=single` | 3.76 MB | 1418 | n/a |
+| masked, `full`, ffmpeg only | 3.01 MB | 896 | 0 |
+| masked, `full`, then `magick -layers Optimize` | **0.16 MB** | kept | **0 px in all 136 frames** |
+
 ## 8. Decided (2026-11-25)
 
 The user confirmed the source and the release, and told the orchestrator (`cachebeat-9c`) to improvise the rest, which it did with the plan's recommendations.
@@ -303,8 +389,8 @@ The user confirmed the source and the release, and told the orchestrator (`cache
    - **The fleet closes before T1:** the orchestrator and the builder's sessions are closed, so `← 2 agents` doesn't show. The builder asks the orchestrator to arrange this, and checks the footer at T1's first frame.
    - **The mode label:** the demo runs with `--permission-mode auto`, in place of `default` (the user, 2026-11-25). The hint row shows auto mode's label, and that's accepted. The tape's `--permission-mode` flag and §5 change together.
 5. **The payoff stays if H1's gate passes;** otherwise it's cut, as §1 says.
-6. **The `▸▸ 50 min idle` caption stays.**
-7. **The typed lines stay as written:** `in one line, what does demo.sh open?` and `back. where did we leave off, in one line?`.
+6. **The `▸▸ 50 min idle` caption stays,** made legible (the orchestrator, from the review): the terminal's size, Primer's muted foreground, in the prompt row (§3).
+7. **The typed lines:** `in one line, what does demo.sh open?` as written. The payoff became `back. where were we?` after the review's timing finding (§2). That changed an approved line; the orchestrator was told.
 
 ## What the scout found (2026-11-25, kept for reference)
 
