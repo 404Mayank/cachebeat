@@ -66,7 +66,7 @@ That pitch is the README's lead line ("You come back from lunch, type your next 
 | 1 | nothing | `Sleep 1500ms` | Opening frame. Above: the source's tail (§4). Then `❯ in one line, what does demo.sh open?` and its one-line answer, e.g. `● Neo4j Browser and Gephi, the two live-demo views.` An empty prompt box, and the footer. No cachebeat line yet: it's off. | 1.5 |
 | 2 | `/cachebeat 3h`, `Sleep 400ms`, `Enter` | `Wait+Screen@10s /next beat in/`, then `Sleep 2s` | The reply, e.g. `cachebeat: this session: on until 6:16 PM (3h), every 50m idle · next beat in 50m`. Under the setup turn, the turn line, e.g. `♡ next beat in 49m · 2h 59m left`. The prompt heart in the hint row. | 3.4 |
 | 3 | nothing: the demo mod runs the clock | `Wait+Screen@90s /kept warm ×2/`, then `Sleep 1500ms` | The countdown races. The caption `▸▸ 50 min idle` (§3) shows in the empty prompt row during each sped-up part only. Beat 1 lands and holds at real speed: `♥ cache kept warm ×1 · 52k cached · next in 50m · 2h 9m left`. It races again, and beat 2 holds: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 19m left`. | ≈9.3 (2.5 + 2.1 + 2.5 + 2.1) |
-| 4 (payoff, if the gate passes) | `Sleep 500ms`, `back. where were we?`, `Sleep 400ms`, `Enter` | `Wait+Screen@40s /(?s)where were we\?.*kept warm ×2/`, then `Sleep 2500ms` | The message, a short spinner, the one-line answer picking up the demo.sh thread. Then cachebeat's line moves under the new answer: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 18m left`. It matches only once the turn has ended, because `turn.start` sets `s.row = null`, so no line shows while the answer is drawn. Through the final hold, the caption `back 1h 40m later · cache still warm` shows in the empty prompt row (§3). It goes in only if T1's transcript shows the turn read the cache (§6). | ≈9–11 |
+| 4 (payoff, if the gate passes) | `Sleep 500ms`, `back. where were we?`, `Sleep 400ms`, `Enter` | `Wait+Screen@40s /(?s)where were we\?.*kept warm ×2/`, then `Sleep 2500ms` | The message, a short spinner, the one-line answer picking up the demo.sh thread. Then cachebeat's line moves under the new answer: `♥ cache kept warm ×2 · 52k cached · next in 50m · 1h 18m left`. It matches only once the turn has ended, because `turn.start` sets `s.row = null`, so no line shows while the answer is drawn. Through the final hold (the raw recording's last 2.5s, the tape's closing `Sleep 2500ms`), the caption `back 1h 40m later · cache still warm` shows in the empty prompt row (§3). | ≈9–11 |
 | | | | **Loop point:** the end of the payoff hold, cut straight back to the opening frame. Total ≈ 23–25s before trims, ≈22s after. | |
 
 **Notes on the scenes:**
@@ -78,8 +78,11 @@ That pitch is the README's lead line ("You come back from lunch, type your next 
 - **Payoff wording.** `back. where were we?` is 20 characters, 1s at 50ms. The review estimated the payoff at about 9–11s real with the longer line (inferred), so this one replaces `back. where did we leave off, in one line?`.
   - **If the answer runs past two lines,** it pushes the source's tail up and the frame gets busy. Then add `in one line` back (`back. where were we, in one line?`) rather than cut the answer.
 - **The payoff's receipt.** cachebeat's line reappearing lower down is easy to miss, so the final hold adds a caption saying it outright: `back 1h 40m later · cache still warm`.
-  - **The time** is read from the take's own line: `3h` minus the `left` it shows.
-  - **It's honest only if the turn did read the cache.** T1's check reads that from the fork's transcript before the caption goes in (§6).
+  - **When it shows:** the last `FINAL = 2.5` seconds of the raw recording, which is the tape's closing `Sleep 2500ms`. `plan()` can't find it: it marks parts only where the beat count rises, and the payoff reads `×2` again. So `render()` splits the last part at `raw duration − FINAL`, using `ffprobe`'s duration, and gives the new part the caption.
+  - **Its text comes from an env var:** `CACHEBEAT_DEMO_BACK="1h 41m"` renders `back 1h 41m later · cache still warm`. Unset, there's no payoff caption: the payoff-cut fallback, and every render whose time isn't known yet.
+  - **The time** is read by hand from the take's last frame: `3h` minus the `left` its line shows (for `1h 19m left`, that's `1h 41m`).
+  - **H1 renders it with a placeholder,** `CACHEBEAT_DEMO_BACK="1h 40m"`, only to check its place and timing. The real time goes into the final render after T1 (§6).
+  - **A sanity check, not proof:** T1 reads the fork's transcript to confirm the payoff turn read the cache (§6). It can't prove the beats kept it warm: the payoff comes about a minute of real time after the setup turn, well inside the real one-hour cache, so the read passes either way (the re-review). What the caption claims rests on the demo as a whole: two real beats, each a real cache read, over the shown 1h 40m.
 
 ## 3. The look
 
@@ -119,7 +122,7 @@ The margin is made transparent in demo.py's render, so the rounded card floats o
 2. **ffmpeg** merges it as alpha and writes a temporary GIF:
    - **The mask input is bounded:** `-loop 1 -t <the concat's duration> -i mask.png`. Unbounded, palettegen never sees an end, and the run was killed for memory.
    - **The filter chain:** `[1:v]format=gray[m];[cut]format=rgba[v];[v][m]alphamerge,split[x][y];[x]palettegen=max_colors=128:stats_mode=full:reserve_transparent=1[p];[y][p]paletteuse=dither=none:diff_mode=rectangle:alpha_threshold=128`. `[cut]` is the trimmed and concatenated stream at 12 fps.
-3. **`magick <tmp>.gif -layers Optimize assets/demo.gif`** (ImageMagick 7 is installed at `/usr/bin/magick`). ffmpeg's GIF encoder writes full frames once an alpha is involved, so its output is 3 MB. ImageMagick's frame optimization brings it to 0.16 MB, smaller than the opaque GIF.
+3. **`magick <tmp>.gif -layers Optimize "$GIF"`**, where `GIF` is demo.py's output path (`CACHEBEAT_DEMO_GIF`, §5), never `assets/demo.gif` by name (ImageMagick 7 is installed at `/usr/bin/magick`). ffmpeg's GIF encoder writes full frames once an alpha is involved, so its output is 3 MB. ImageMagick's frame optimization brings it to 0.16 MB, smaller than the opaque GIF.
 
 **Measured (P2):**
 - All 136 coalesced frames' alpha matched the mask exactly: no holes, no stray pixels.
@@ -203,10 +206,10 @@ Other folders' own settings weren't read: the `folders` key is the one to protec
 
 - **The countdown racing is the main signal.** `next beat in 49m` drops a minute every few frames, so it reads as sped up on its own.
 - **A caption,** only during the sped-up parts (`plan()`'s fast segments): `▸▸ 50 min idle`. The user keeps it, so it has to read on GitHub; the review found the first draft (16px, `#7d8590`) would show at about 13px of muted grey.
-  - **FiraCode Regular at the terminal's own size,** `px(20)`, so it shows at about 15px like the text around it. Color `#9198a1` (Primer's current muted foreground, about 5.7:1 on `#161b22`). No box.
-  - **In the empty prompt row, right-aligned,** inside the input box (`x=w-tw-px(16+20+28)`). It's the one row sure to be empty through the fast-forward: nothing is typed then.
+  - **FiraCode Regular at the terminal's own size:** `fontsize=20` in native pixels, the tape's `FontSize`, not `px(20)`. `px()` scales by `h/560` for the old badge, which would give 23px on a 640-row frame. On GitHub it shows at about 15px, like the text around it. Color `#9198a1` (Primer's current muted foreground, about 5.7:1 on `#161b22`). No box.
+  - **In the empty prompt row, right-aligned,** inside the input box (`x=w-tw-64`: margin 16, padding 20, and about two cells for the box's edge, in native pixels). It's the one row sure to be empty through the fast-forward: nothing is typed then.
   - **Not on the hint row:** under `--permission-mode auto` it reads `⏵⏵ auto mode on (shift+tab to cycle)`, plus the heart (P1). At 77 columns, that leaves no room on the right.
-  - **The row's `y`** is measured from a real frame, H1's or F3's: in P1's layout the prompt row is the 4th from the bottom (border, prompt, border, blank, hint). In pixels that's about `604 - 4 × 24.7`, so `y ≈ 506`, taking 604 as the card's bottom edge inside the padding.
+  - **The row's `y`:** in the footer layout (§5, `BOTTOM`) the prompt row is the 4th from the bottom, about 505–530px. Center the caption on it: `y=505+(25-th)/2`. Check it against a real frame, F3's or H1's.
 - **The payoff's caption** sits in the same place and size, through the payoff's final hold only: `back 1h 40m later · cache still warm` (§2).
 - **Gone:** `rgbashift`, `drawgrid`, the pink box, and `~50 MIN LATER`.
 
@@ -275,15 +278,29 @@ Every change, with its risk and the check that clears it. The check IDs are in t
 | --- | --- | --- |
 | `CLOCK_MOD`'s `register.ts` gains the `store.get`, `store.set` and `store.delete` hooks (§3) | an op hook on `store.get` isn't honoured, or takes another return shape: the frames show the user's ECG heart, and a source under 50k never beats. The set and delete no-ops are untested. | F3: `/cachebeat settings` shows the classic heart, Cold guard off, Skip small off; change nothing there |
 | `BEATS`, `SPEED`, `STEP` and the `model.fork` hook unchanged | the payoff turn arrives while `ahead` is set. With the guard off nothing reads it for a question. `countKept` counts the turn as kept (shown time), which lands in Stats only. | H1: the payoff draws no cachebeat log line |
-| `render()`: the glitch chain becomes the caption drawtext (§3). `0x1e1e2e` and `0xf5c2e7` go; the caption takes `0x9198a1` at `px(20)` in the prompt row. `FONT` takes the Regular face (`FiraCode Nerd Font Mono:style=Regular`, checked installed). The flag becomes a caption text per part (None, `▸▸ 50 min idle`, or the payoff's), not a bool. | the caption overlaps typed text or sits off the row | F2, then H1 |
+| `render()`: the glitch chain becomes the caption drawtext (§3). `0x1e1e2e` and `0xf5c2e7` go; the caption takes `0x9198a1` at `fontsize=20` (native pixels, not `px()`) in the prompt row. The payoff caption's part comes from `CACHEBEAT_DEMO_BACK` and the `FINAL` split (§2). `FONT` takes the Regular face (`FiraCode Nerd Font Mono:style=Regular`, checked installed). The flag becomes a caption text per part (None, `▸▸ 50 min idle`, or the payoff's), not a bool. | the caption overlaps typed text or sits off the row | F2, then H1 |
 | `render()`: `palettegen` `stats_mode=diff` → `full` | none found: P2 measured it smaller, with the orange kept | F2 samples the turn line's pixels in the GIF for orange |
 | `render()`: the mask, `alphamerge`, and the `magick -layers Optimize` pass (§3) | the real take has something the mock didn't; ImageMagick's time on about 270 frames (inferred: seconds) | F2: composite frames on white and on `#0d1117`; compare the size with an opaque render |
 | `LEAD`/`HOLD`/`SETTLE`/`FF`: `LEAD 0.6`, `HOLD 1.5`, `SETTLE 2.0`, `FF 3`, then trim per §2 | timing only | H1's printed parts |
-| `BOTTOM` 0.18 → 0.15, re-measured for 640 rows | **Untested** (the review): 0.18 of 640 is 115px, and 36px of that is margin and padding, so it covers only about 3.2 rows. Once the turn line sits just above the prompt, it's the 5th row from the bottom (hint, blank, border, prompt, border), at about 75–79% of the height. A crop at 0.15 (from 544px down) keeps it, and still drops the hint row and most of the prompt box. | F1 must put the mock line exactly 5 rows from the bottom with that footer under it; then H1: `plan()` prints exactly two beats |
+| `BOTTOM` 0.18 → 0.12, re-measured for 640 rows | **Untested.** The crop only has to clear the hint row: the prompt and its borders hold nothing the `status()` filter matches. |  F1 must reproduce the footer layout below; then H1: `plan()` prints exactly two beats |
 | `plan()`: the beat count must not double-count the payoff | the payoff line reads `×2` again, not more, so `n > last` doesn't fire (checked by reading `plan()`) | H1 |
 | **A `--launch` mode:** extracts `git archive HEAD` and writes `CLOCK_MOD` into folders under the scratchpad that it keeps, then prints the tape's full `claude …` command with `CACHEBEAT_DEMO_PLUGIN` and `CACHEBEAT_DEMO_CLOCK` filled in. `record()` and `--launch` share one helper that builds the two folders. F3 needs this: the tape's command names folders only `record()` creates, and it deletes them afterwards. Never stand in for them with `--plugin-dir .` or a worktree. | the printed command drifts from the tape's | F3: diff the printed flags against the tape's `Type` line |
 | **`GIF` overridable** (`CACHEBEAT_DEMO_GIF`, defaulting to `assets/demo.gif`): **set it for every run before the final take, H1 included.** `RAW` stays `assets/demo-raw.mp4` for recording, because the tape's `Output` line names it and it's gitignored (checked). `CACHEBEAT_DEMO_RAW` overrides what's *read*, and only with `--skip-record` (demo.py refuses it otherwise), for F1 and F2. A test render is never committed: only the final take's `assets/demo.gif` is. | a test overwrites the tracked `assets/demo.gif` | `git status` after F1, F2 and H1 shows no `assets/demo.gif` change |
 | The docstring: the new story, the pinned settings, no guard, any-age source | none | review |
+
+**The footer layout, the one reference for `BOTTOM`, the caption's row and F1.** Rows are counted from the bottom, with 604px as the card's bottom edge inside the padding and 24.7px per row:
+
+| Row from bottom | What | px |
+| --- | --- | --- |
+| 1 | hint row: `⏵⏵ auto mode on (shift+tab to cycle)`, the heart, `×N` | 579–604 |
+| 2 | blank | 555–579 |
+| 3 | prompt box, bottom border | 530–555 |
+| 4 | prompt row (the captions' row) | 505–530 |
+| 5 | prompt box, top border | 481–505 |
+| 6 | the turn line, after beat 2 and in the payoff: lowest place, inferred | 456–481 |
+
+- **How this was read:** from P1's tmux capture, which had one more row (tmux's `focus-events` notice) between the turn line and the top border. Without it, the turn line is assumed to sit directly on the border. F3's capture settles the real layout. If it differs, correct this table first, and everything that cites it follows.
+- **What the crop needs:** `BOTTOM = 0.12` crops from 563px down. That takes the hint row and half the blank row, and keeps the prompt box and the turn line. The prompt box holds nothing the filter matches, so keeping it is harmless.
 
 Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not `'cachebeat'`): the `/cachebeat 3h` reply carries `cachebeat` and is skipped. If the reply wraps so that `next beat in` falls on its second line, that line counts 0, which is harmless (the highest count wins).
 
@@ -293,11 +310,11 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
 - **F1: VHS mock.** A throwaway tape with the §3 `Set` block `printf`s the frame's lines in `dark`'s colors:
   - the turn line in `rgb(215,119,87)`, at `×1` then `×2`
   - a user line on `rgb(55,55,55)`
-  - under it, the real footer's shape: a blank row, a border, a prompt row, a border, a blank row, and a hint row. That puts the turn line 5 rows from the bottom, where it sits after beat 2 and in the payoff.
+  - under it, the footer exactly as §5's layout table gives it: the top border, the prompt row, the bottom border, a blank row, and the hint row. That puts the turn line 6th from the bottom, where it sits after beat 2 and in the payoff.
 
   The review's `rv/m.mp4` is a start, but its line sits near the top, so it doesn't test `BOTTOM`. The scout's `t.tape` shape works (its folder is in "What the scout found"). Run demo.py's `status()` and `plan()` on its mp4 (`CACHEBEAT_DEMO_RAW=<the mock's mp4>`; output to the scratchpad). Both counts must be read, and the turn line must sit above the `BOTTOM` crop.
 - **F2: render only.** Run `python3 assets/demo.py --skip-record`, with `CACHEBEAT_DEMO_RAW` set to F1's mp4 and then to the existing `assets/demo-raw.mp4`, and `CACHEBEAT_DEMO_GIF` set to the scratchpad each time. Check:
-  - the caption's place and color
+  - the caption's place and color, and the payoff caption's split: render once more with `CACHEBEAT_DEMO_BACK="1h 40m"`, and it shows in the last 2.5s only
   - no glitch left
   - the GIF's size, against an opaque render of the same input (P2: 0.16 MB masked against 0.17 MB opaque)
   - the turn line's pixels in the GIF are orange (`stats_mode=full`)
@@ -311,13 +328,13 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
   - no notice at the launch (Remote Control, an away summary, an update): the bottom of the screen is the opening frame
 
 **Paid but cheap: Haiku.**
-- **H1: one Haiku dry run** (`CACHEBEAT_DEMO_MODEL=haiku python3 assets/demo.py`). The source stays Sonnet; B0 showed a model mismatch on a fork works. Read `assets/demo-raw.mp4` frame by frame:
+- **H1: one Haiku dry run:** `CACHEBEAT_DEMO_MODEL=haiku CACHEBEAT_DEMO_GIF=<scratch>/h1.gif CACHEBEAT_DEMO_BACK="1h 40m" python3 assets/demo.py`. The payoff time is a placeholder (§2). The source stays Sonnet; B0 showed a model mismatch on a fork works. Read `assets/demo-raw.mp4` frame by frame:
   1. **The gate:** after the setup turn and `/cachebeat 3h`, the turn line shows under the setup answer with `showTurnDuration: false`. If it doesn't, rerun with `showTurnDuration` on and the payoff cut (§1).
   2. the `● demo\.sh` wait fired after the answer, with no spinner at `Show`
   3. no `∴` thinking line, no tip, no token readout, no `agent type available`
   4. both beats, the `3h` countdown kept after ×2, and `plan()` printing two beats with no fast-forward before `/cachebeat 3h`
   5. the payoff: no tool line in it or in the setup turn (auto mode would run one unasked), no cachebeat log line, the line moving under the new answer, and the wait matching only after the answer
-  6. no ghost suggestion in the prompt row after the setup turn or the payoff; the caption only on fast parts, legible and in the prompt row, not overlapping; and the payoff's caption only in its final hold
+  6. no ghost suggestion in the prompt row after the setup turn or the payoff; the caption only on fast parts, legible and in the prompt row, not overlapping; and the placeholder payoff caption only in the last 2.5s, after the line has moved under the answer
   7. the length, trimmed per §2
 
   A second Haiku run is fine if H1 changes the tape. Haiku runs don't count toward the take cap, but say how many ran.
@@ -327,10 +344,10 @@ Leave the `status()` filter as it is (`'next beat in'` or `'kept warm'`, and not
 - **VHS 0.12.1 does honour `Margin`, `MarginFill` and `BorderRadius`** (checked), though `vhs manual` doesn't list them.
 
 **Real takes: Sonnet, two at most.**
-- **T1.** Before it: account usage under 90% (`clear` reports it), the fleet closed (§8), and the source untouched since F3. After:
+- **T1:** `CACHEBEAT_DEMO_GIF=<scratch>/t1.gif python3 assets/demo.py`, with no `CACHEBEAT_DEMO_BACK`. Before it: account usage under 90% (`clear` reports it), the fleet closed (§8), and the source untouched since F3. After:
   - Check every frame against §2's "On screen" column, and `git diff` the tape and demo.py against what H1 ran.
-  - **Before the payoff caption goes in,** read the fork's transcript (the newest `.jsonl` in the ProgLang project folder): the payoff turn's first assistant `usage` must show `cache_read_input_tokens` near the conversation's size, and `cache_creation_input_tokens` small (the turn's own new text). If it doesn't, the payoff went cold: drop the caption, and report it. That would be a finding about the clock mod, not the GIF.
-  - Then re-render with `--skip-record` and the caption's time read from the take (§2).
+  - **A sanity check on the payoff** (§2: it can't prove the beats worked). Read the fork's transcript, the newest `.jsonl` in the ProgLang project folder. The payoff turn's first assistant `usage` should show `cache_read_input_tokens` near the conversation's size, and `cache_creation_input_tokens` small (the turn's own new text). If it doesn't, something is badly off: drop the payoff caption and report it.
+  - **The final render,** the only one that writes the tracked GIF: `CACHEBEAT_DEMO_BACK="<3h minus the last frame's left>" python3 assets/demo.py --skip-record`, with `CACHEBEAT_DEMO_GIF` unset.
 - **T2** only if T1 fails a frame check. Ask the orchestrator before a third.
 - **Each take** forks the source into a new session file under `~/.claude/projects/-home-zyrus-Desktop-Projects-ProgLang-Influence-Graph/`. List them in the results for the user to clear.
 
