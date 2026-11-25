@@ -100,6 +100,7 @@ Drafted on 2026-11-23 in step 9; nothing is published. This is the top section. 
 - **Bare `/cachebeat` opens the new Status page.** It still answers with its line, which now ends with whether the cache is warm or cold.
 - **The "Prompt heart" tab is now "Heart".** Its settings are the same.
 - **The prompt heart shows during a turn too.** It holds still while a request of the turn is on its way.
+- **After `/model`, the cache reads as cold** (change 4, 2026-11-25). The new model has none of the conversation cached, so Status, bare `/cachebeat` and Claude's `state` (`coldBecause: model`) say cold until a message or a beat on the new model caches it, and switching back to the first model reads warm again. The cold guard asks before that first message ("The model changed, and this chat has no cache on it yet…"); **after /model** under Cold guard turns this off. Stats now counts that first message as a cold send, asked or not. Before, all of these read the cache as warm after a switch.
 
 **New**
 
