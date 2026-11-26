@@ -1,6 +1,8 @@
 # 0.10.0: cache state, keep-alive time, resume, cold guard, Status and Stats
 
-Status (2026-11-23): steps 0–7 are built, reviewed and merged into `dev`: 0, 1, 2, 2b, 3, 3b, tokens-only, the request-start fix, the retry fix, compat, midturn, 3c, 4, the race fix, 5, 6 and 7. 0.9.3 (step 1 with the request-start, compat and retry fixes) shipped on 2026-11-23. Step 8's GIF tooling is merged; the final take is still to run. Then step 9 (the README sweep and the release branch). Where to start: notes/handoff.md.
+**Shipped as 0.10.0 on 2026-11-26** ([PR #14](https://github.com/404Mayank/cachebeat/pull/14)), with changes 1–5 of 2026-11-25 (the UI fixes, Notices, the cold stop under auto, the guard after `/model`, the 2.1.332 floor) and the new GIF ([plan-demo-gif.md](plan-demo-gif.md)). What's still owed is in [handoff.md](handoff.md).
+
+Status (2026-11-23, kept as written): steps 0–7 are built, reviewed and merged into `dev`: 0, 1, 2, 2b, 3, 3b, tokens-only, the request-start fix, the retry fix, compat, midturn, 3c, 4, the race fix, 5, 6 and 7. 0.9.3 (step 1 with the request-start, compat and retry fixes) shipped on 2026-11-23. Step 8's GIF tooling is merged; the final take is still to run. Then step 9 (the README sweep and the release branch). Where to start: notes/handoff.md.
 
 **Step 0 ran 2026-11-09:** P2–P7 are answered ("0.10.0 probes" in mods-gotchas.md, which says what was observed and what's inferred). P1 passed on 2026-11-23, and P8 ran in step 4 the same day.
 

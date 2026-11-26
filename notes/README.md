@@ -93,6 +93,8 @@ Every README on `main` is for users and their agents: what cachebeat does, how t
 
 0.9.3 ([PR #13](https://github.com/404Mayank/cachebeat/pull/13)) was step 1 of 0.10.0, cut from its own merge commit because `dev` already held later work. Three fixes were carried onto it from `dev` before release: the request-start fix, the 2.1.329 test fix with 2b's type fix, and the retry fix. It shipped on 2026-11-23 after the live sleep check (P1) passed. Merging `main` back conflicted in five plugin files, as expected: every plugin file took `dev`'s side, with `version` set to 0.9.3.
 
+0.10.0 ([PR #14](https://github.com/404Mayank/cachebeat/pull/14)) shipped on 2026-11-26. Its branch was cut on 2026-11-23, then refreshed with a second commit, taking `dev`'s plugin files and the new GIF after a second round of changes. CI ran on the new floor (2.1.332, the first release under "the floor is the installed Claude Code"), and `main` was fast-forwarded (`git push origin v0.10.0:main`). Merging `main` back into `dev` was clean, since the plugin files matched.
+
 ### Where a release goes
 
 - **GitHub:** the `v<version>` tag and release, created by CI.

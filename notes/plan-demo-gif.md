@@ -1,6 +1,8 @@
 # Plan: a new README demo GIF (2026-11-25)
 
-> Planning only. Nothing here has been recorded. Written for the builder (a Sonnet session) who hasn't seen the planning conversation. Read it whole before touching the tape.
+> **Done: shipped in 0.10.0 on 2026-11-26** from T1, the one Sonnet take. The Revision section has the final caption design, and Results has every check and take.
+>
+> Planning only, as first written. Nothing here has been recorded. Written for the builder (a Sonnet session) who hasn't seen the planning conversation. Read it whole before touching the tape.
 >
 > **Inputs:**
 > - The scout's report, kept here under "What the scout found".

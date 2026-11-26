@@ -1,115 +1,32 @@
-# Handoff: 0.10.0 is built on `dev` and waits on the user to ship (2026-11-26)
+# Handoff: 0.10.0 shipped; what's still owed (2026-11-26)
 
-> Temporary handoff for the next agent: what's in progress and how to continue. Not project documentation. Delete it when 0.10.0 ships, or rewrite it at the next wrap-up.
+> Temporary handoff for the next agent: what's open and how the work is run. Not project documentation. Rewrite it at the next wrap-up, and delete it once the open items are done or moved.
 
-**Start here.** The next agent raises the "For the user" list below with the user before anything else.
-- [plan-0.10.0.md](plan-0.10.0.md) holds the design and every decision.
+**Start here.** Raise the "Open, for the user" list with the user before anything else.
+- [plan-0.10.0.md](plan-0.10.0.md) holds 0.10.0's design and every decision; [plan-demo-gif.md](plan-demo-gif.md) the demo GIF's.
 - [mods-gotchas.md](mods-gotchas.md) holds what took time to find out.
 - [README.md](README.md) covers branches and releases.
-
-**Where it stands:** on 2026-11-23 0.10.0 was built and its release PR opened. On 2026-11-25/26 a second round (orchestrator `cachebeat-9c`) added changes 1–5, the `state` description trim, the README's `/cachebeat on` table and a new demo GIF, all merged into `dev` and not pushed. The release branch `v0.10.0` doesn't have them yet: refresh it from `dev` before shipping (notes/README.md, "Releasing, step by step").
 
 ## Where things are
 
 | | State |
 | --- | --- |
-| `main` / `origin/main` | 0.9.3 (`740ae82`), released 2026-11-23. |
-| `v0.10.0` | The release branch, pushed, [PR #14](https://github.com/404Mayank/cachebeat/pull/14). It holds the plugin files from `dev` at `dbfeb15`, plus `version` 0.10.0. **Stale since 2026-11-25:** it needs refreshing from `dev`'s plugin files before shipping, which is the user's call. |
-| `dev` | Not pushed since 2026-11-23. 0.10.0's steps 0–9 are merged, plus, on 2026-11-25/26: <br>• changes 1–5: the UI fixes, Notices, the cold stop under auto, the guard after `/model`, and the 2.1.332 floor <br>• the `state` description trim <br>• the README's `/cachebeat on` table <br>• the new GIF <br>343/0 on 2.1.332, the only version tested now. |
+| `main` / `origin/main` | 0.10.0, shipped 2026-11-26 ([PR #14](https://github.com/404Mayank/cachebeat/pull/14)); CI tags and releases it. |
+| `dev` / `origin/dev` | `main` merged back in; the plugin files match `main`. |
 | `long-turn`, `v0.8.2`, `worktree-agent-…` | Older branches, not from this work. Leave them. |
 
-## For the user: decisions taken, and what to raise (keep this list current)
+## Open, for the user
 
-The next agent raises these with the user before anything else. The user said on 2026-11-23: build everything up to the release, but **don't ship**; and the orchestrator decides as it understands, recording here what the user should know, look at, or weigh in on.
-
-- **Ship 0.10.0?** It's the user's call.
-  - [PR #14](https://github.com/404Mayank/cachebeat/pull/14) (`v0.10.0` into `main`) is open, but its branch predates the 2026-11-25/26 work. CI was green on it then, with the floor at 2.1.287.
-  - First refresh the branch: take the plugin files and `assets/demo.gif` from `dev` (notes/README.md, "Releasing, step by step", step 2), run step 3's checks, push, and let CI run with the floor at 2.1.332.
-
-  Then, from step 5:
-  1. Fast-forward `main` (`git push origin v0.10.0:main`). CI then tags and releases.
-  2. Put the draft below on top of the release notes (`gh release edit v0.10.0`).
-  3. Merge `main` into `dev`.
-  4. Delete the local `v0.10.0` branch.
-  5. Delete this file, or rewrite it.
-- **The Status and Stats mock-ups** (plan items 5 and 7, redrawn in tokens on 2026-11-23) were approved by the orchestrator, which took the recommended option on all eight choices under "What steps 6 and 7 wait on":
-  1. the Cache row in `/usage`'s form
-  2. ~~the weighted size kept~~ **reversed by the user on 2026-11-25:** Status's Size row shows the plain size (`184k tokens`); `state` still reports `recacheInputTokens`
-  3. the Usage row hidden when no limits are reported
-  4. the last beat's figures on Status
-  5. columns, not a range switch
-  6. a This session column
-  7. a one-row strip of beats by day
-  8. "kept warm" counting only a turn after the cache would have lapsed without beats
-
-  The user may want to tweak any of them. The mock-ups are in the plan.
-- **Step 4 changed one behaviour (accepted by the orchestrator and the reviewer):** `/resume` into a conversation with no record follows **New sessions start**. Before, it kept the on/off of the conversation left behind. When that turns beating off, a line says so.
-- **Owed live check (step 4):** that a resumed conversation's first turn reads a cache that beats kept warm. It needs a wait of over an hour. Both the resume line's "likely warm" and Claude Code's own `prompt_cache_likely_expired` assume it does.
-- **The beat race** (a timer beat and `/cachebeat now` both sending) is fixed on `dev` (2026-11-23) and ships with 0.10.0. 0.9.3 still has it; it's rare and costs one extra beat. No 0.9.4 was cut for it.
-- **Decision changed from the user's answer (2026-11-23): "don't send" now closes the question after 5 minutes.** A live check showed Claude Code runs one prompt at a time, so an open cold question holds every queued message, peer messages from the fleet included, until it's answered. With "stays open" as chosen, that could stall the fleet for hours. Under the default "don't send", the question now closes after 5m unanswered and the message is dropped; it stays in the composer, nothing is sent. The README says that other incoming messages wait while a question is open. The alternatives were: keep it open and only document it, make a timed send the default, or close it when another message is queued (no API for that). Ask the user whether 5m is right.
-- **Owed live checks for the guard, which need the user's devices:**
-  - **G4:** does the question reach a Remote Control client, and can it be answered there? Until then, `bridge` messages pass unasked.
-  - **G5:** does `$.ui.ask` draw in the desktop app? Two outcomes would matter. If it rejects at once, every cold send there drops until the guard is turned off. If its ask doesn't go through the AskUserQuestion `tool.call`, the 5m close can't close it, and queued messages wait until it's answered.
+- **Owed live checks, which need the user's devices:**
+  - **G4:** does the cold guard's question reach a Remote Control client, and can it be answered there? Until then, `bridge` messages pass unasked.
+  - **G5:** does `$.ui.ask` draw in the desktop app? If it rejects at once, every cold send there drops until the guard is turned off. If its ask doesn't go through the AskUserQuestion `tool.call`, the 5m close can't close it, and queued messages wait until it's answered.
   - **P6:** does dropping a skill's prompt undo its `command.run`?
-- **Resolved 2026-11-25 (change 4, the user's request): after `/model` the cache reads cold, and the cold guard asks.** It was read as warm (step 5 review), so the first message after a switch re-cached the whole conversation without asking. Now the guard asks once, until a message or a beat on the new model caches it; Status, bare `/cachebeat` and `state` say cold too. A new Limits sub-row, **after /model** (on), turns the asking off. Accepted gaps are in mods-gotchas.
-- **The demo GIF was redone on 2026-11-25/26 and the user approved it** (`assets/demo.gif`, 20.8s, 1.45 MB, merged into `dev` at `7e0fc69`). The design, the takes and the gotchas are in [plan-demo-gif.md](plan-demo-gif.md).
-  - **The concept is "away and back":** `/cachebeat 3h`, then two beats over a fast-forward, then a "back" message answered from a warm cache.
-  - **The look:** a GitHub-dark card with transparent rounded corners, and Claude Code's built-in `dark` theme. The user's ECG heart and flow effects are shown.
-  - **The caption is in a pill below the card,** never inside it (the user's call): `▶▶ fast-forward · +34m idle`, then `back after 1h 40m · cache still warm`.
-  - **The source** is a ProgLang-Influence-Graph session (`3c20ee7b-…`), made for it. Keep it until 0.10.0 ships, in case of a retake.
-  - **Accepted by the user:**
-    - `← 2 agents` in the footer
-    - auto mode's label
-    - a four-line payoff answer (T1 kept, no T2)
-  - **Runs:** 3 Haiku and 1 Sonnet.
-  - **Leftover session files in the ProgLang project folder:** `9bc732df-…`, `21c495ec-…`, `5579f610-…` and `b626a422-…`. The user may delete them. The 2026-11-23 GIF files are already deleted.
-- **Unverified on a real surface (step 6):** Status draws before the pane's `Input` check, so a surface without Input still shows it. It assumes such a surface has `Button`, and nothing at hand could check it. The desktop app hasn't been looked at for Status either.
-- **Step 7 decisions:**
-  - The "Prompt heart" tab is renamed **Heart**, so seven tabs fit 76 cells. The settings keep their full names.
-  - A cold send is counted whether or not the guard asked, but the "sent on a cold cache" line is logged only where the guard logs it today. With the guard off it counts silently.
-  - A full plugin store costs only records and Stats; beating goes on.
-- **Live checks left probe `session:<id>` records in the real plugin store** (steps 4 and 7). They are pruned 30 days after their last write.
-- **Fable 5.2 and Mythos 5.2 have rows in hooks/prices.ts** (step 7): input $8, cache read $0.20, 5m write $10, 1h write $16 per million tokens. Checked against the claude-api skill's model table, citing https://platform.claude.com/docs/en/about-claude/pricing. Mythos 5.2 is for verified organizations only, priced the same.
-- **Step 9's README sweep (`step-readme`, 2026-11-23)** checked the README against the code:
-  - Features gained the cold guard (on from the start, even with beating off) and the Status and Stats pages.
-  - Privacy now lists everything the conversation record keeps. It had missed the time the cache was last read, and the turns kept warm and guard questions in the day counts.
-  - Good to know gained "don't run another keep-warm plugin beside cachebeat".
-  - The GIF has its new alt text.
-  - "Beat after idle" was left as it is, because the Good to know bullet on the request start reads true against the code.
-  - No shipped text was wrong. Every field `state` returns (`sessionOf`, `cacheOf`, `contextOf`, `whole`) is described in `STATE`, and every field described is returned.
-- **Closed 2026-11-25 (change 1):** the wording mismatch seen in the GIF. Bare `/cachebeat` said `no more beats needed` where Status's Beating row said `no beat needed`; both now say `no beat needed`, in 0.10.0.
-- **The tsc check:** every engine's type-check ran through `validate --strict`. `tsc -p .` ran against the main checkout's types.
-
-## 0.10.0 release notes (draft)
-
-Drafted on 2026-11-23 in step 9, revised on 2026-11-26 against `main` (0.9.3); nothing is published. This is the top section. The rest of the notes follow the usual pattern (notes/README.md, "Releasing, step by step"). Each line was checked against `git diff main -- README.md` and the code at `c279dde`.
-
-> [!IMPORTANT]
-> **`/cachebeat <time>` changed.** It now sets how long to keep the cache warm, and it needs a unit: `/cachebeat 2h` keeps the cache warm for two hours, then turns this session off. It used to set the beat interval in minutes (`/cachebeat 30`). A bare number now changes nothing and says so. The interval is a setting: **Beat after idle** in `/cachebeat settings`, or `/cachebeat global 30`.
->
-> **Claude Code 2.1.332 or later is now required.** Update with `claude update`. From this release, each release requires the Claude Code current when it's made.
-
-**Changed**
-
-- **A resumed conversation keeps its on or off,** and any keep-alive time, for 30 days from its last change. A conversation with no record starts as **New sessions start** says, and that now includes `/resume`, which used to keep the on or off of the conversation you left.
-- **The "Prompt heart" tab is now "Heart".** Its settings are the same.
-- **The prompt heart shows during a turn too.** It holds still while a request of the turn is on its way.
-- **Cache gone cold set to stop now stops in one more case.** On the auto interval, a beat that finds the cache lasts five minutes rather than an hour used to switch to beating every 4 minutes. With **Cache gone cold** set to stop, it now stops there instead. The default (start on your next message) still switches to 4 minutes.
-
-**New**
-
-- **The cold guard, on by default.** Before your message goes to a session whose cache has gone cold, cachebeat asks first. It says how long the cache has been cold and how many tokens sending the message caches again. It asks in chats of 20k tokens or more, whether beating is on or not. A question left unanswered doesn't send the message, and it closes after 5 minutes. To turn the guard off, run `/cachebeat guard off` for one session, or set **Cold guard** under Limits in `/cachebeat settings`. Messages from Remote Control, other sessions, scheduled tasks and `claude -p` are sent without asking.
-- **After `/model`, the cache reads as cold** until a message or a beat on the new model caches it, since the new model has none of the conversation cached. The cold guard asks before that first message; **after /model** under Cold guard turns that off. Switching back to the first model reads warm again.
-- **Notices** under Alerts: log, toast, both or nothing for cachebeat's other lines (beats waiting for your next message, resuming, skipping or going on, a new model's cache, beats every 4 minutes on a five-minute cache, a message sent on a cold cache). The default, log, keeps them as they were.
-- **Keep-alive time:** `/cachebeat 2h`, `45m` or `1h30m` (5 minutes to 48 hours) keeps the cache warm for that long, then turns the session off. Your messages don't extend it, and the turn line shows the time left.
-- **The Status page:** bare `/cachebeat` opens it, and still answers with its line, which now ends with whether the cache is warm or cold. It shows the cache as it stands: warm or cold, its size, the next beat, the cold guard and your usage limits.
-- **The Stats page** (`/cachebeat stats`) shows, for today, 7 days, 30 days and this session:
-  - what beats cost
-  - what they saved
-  - the net, in input tokens
-  - cold sends
-- **Claude can read its context:** ask it how full the context window is and when it will compact.
-- **A command typed while Claude is working** answers at once in a toast.
+  - **Resume (step 4):** that a resumed conversation's first turn reads a cache that beats kept warm. It needs a wait of over an hour. The resume line's "likely warm" and Claude Code's own `prompt_cache_likely_expired` both assume it does.
+- **Is 5 minutes right for closing an unanswered cold question?** Decided 2026-11-23 against the user's first answer ("stays open"): an open question holds every queued message, peer messages included, so it could stall the fleet for hours. Unanswered, the message isn't sent and stays in the composer. The alternatives were: keep it open and only document it, make a timed send the default, or close it when another message is queued (no API for that).
+- **The Status and Stats choices** (plan, item 5, "What steps 6 and 7 wait on") were taken by the orchestrator, except the Size row, which the user changed on 2026-11-25. The user may still want to tweak any of them.
+- **A progress bar filling toward the next beat** (in the turn line, recommended; or a row above the prompt; or the hint row) was discussed on 2026-11-26 and deferred by the user.
+- **Unverified on a real surface (step 6):** Status draws before the pane's `Input` check, so a surface without Input still shows it, assuming it has `Button`. The desktop app hasn't been looked at for Status.
+- **Leftover session files from the GIF and the live tests** may be deleted by the user. They're in the ProgLang project folder (`3c20ee7b-…`, the GIF's source, plus `9bc732df-…`, `21c495ec-…`, `5579f610-…`, `b626a422-…`), and under `clear`'s scratch test folder (`631776a3-…` and the Sonnet test's). Probe `session:<id>` records in the plugin store are pruned 30 days after their last write.
 
 ## Findings worth knowing before you touch anything
 
@@ -134,7 +51,7 @@ All are recorded in full in mods-gotchas.md or the plan; this is the index.
 
 The user's preferences are in the orchestrator's memory (`agent-fleet`, `one-change-at-a-time`, `no-plugin-directory`, `dev-branch-notes`, `readme-user-facing`).
 
-- **The main session orchestrates and decides.** The user said "you are orchestrating so take decisions as per your understanding". It records each decision, and anything the user should see, in "For the user" above. It doesn't ship without the user.
+- **The main session orchestrates and decides.** The user said "you are orchestrating so take decisions as per your understanding". It records each decision, and anything the user should see, in "Open, for the user" above. It doesn't ship without the user.
 - **The fleet is peer sessions** named `cachebeat<Model><Effort><NN>`, spawned by the `clear` session with `--model` and `--effort` on the command line, and reached with SendMessage. `clear` also clears, renames, retunes, closes and reports context fill and account usage.
   - **Effort by job** (the user's experience):
     - high: reviews and planning
@@ -166,11 +83,12 @@ On 2026-11-23 `clear` closed every session. In the 2026-11-25/26 round, `clear` 
 ## Traps
 
 - **Two installed copies of cachebeat, and `--settings` must name both** (found 2026-11-23, step 5). The account also has a synced copy (`~/.claude/plugins/synced/…/cachebeat`, loaded as `cachebeat@synced`), so `"cachebeat@cachebeat": false` alone leaves it running. In a probe that loads no copy of ours, pass `--settings '{"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false}}'`, and check the debug log for "hooks module cachebeat@". A `--plugin-dir` copy shadows both. The G1–G3 probe ran with the synced copy loaded; its probe hooks weren't affected.
+- **`/model` in any session saves that model as the user's default** (`model` in ~/.claude/settings.json; the notice says so). On 2026-11-26 a live test's `/model sonnet` and `/model haiku` left the user's default on haiku. Launch test sessions with `--model`, and tell the user if a test changes it.
 - **Retuning a session with `/effort` also saves that effort as the user's default for its model** (`modelSettings` in ~/.claude/settings.json). Found 2026-11-23, when `claude-opus-5-5` was saved as medium. Spawn sessions with `--effort` on the command line, and tell the user when a retune changes their default.
 - **Chain a merge's follow-ups only after it succeeds.** On 2026-11-14 a `git merge` that conflicted in the plan was followed in the same command by tests, a push, and a worktree removal, which all ran. Nothing was lost (the branch still held the commits), but the suite's result was for the wrong tree. Merge first, look, then run the rest.
 - **Two sessions editing the same notes file conflict at merge.** The orchestrator and a builder both edited the plan's "Still open". While a builder's branch is open, leave the files it was told to edit, or expect to resolve by hand.
 - **Loading the plugin from a folder regenerates its `.claude-plugin/types`** for the engine that loaded it. Never `--plugin-dir` a step's worktree: probe from a scratch copy.
-- **A live check must not touch user settings.** No `/model`, no `/effort`. To keep the installed cachebeat out of a test session: `--settings '{"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false}}'`.
+- **A live check must not touch user settings.** No `/model`, no `/effort`, and sandbox cachebeat's store: a mod answering cachebeat's `store.*` ops from memory, loaded before it (as on 2026-11-26), so settings changed in the test never reach the user's store. To keep the installed cachebeat out of a test session: `--settings '{"enabledPlugins":{"cachebeat@cachebeat":false,"cachebeat@synced":false}}'`.
 - **A beat right after a conversation's first turn pauses** ("out of a beat's reach"). Every live test needs two turns before it means anything.
 - **`claude -p` waits 3 seconds for stdin** unless given `< /dev/null`, and its `--output-format json` is an array: the entry with `type: "result"` holds `usage`.
 - **Check `origin/main` and `origin/dev` before cutting a release.** Cloud sessions release and push notes too; a version number was nearly reused.
@@ -180,7 +98,5 @@ On 2026-11-23 `clear` closed every session. In the 2026-11-25/26 round, `clear` 
 
 ## Docs to update when things land
 
-- notes/README.md, "How 0.7.0 went out, as a pattern": a line for 0.10.0 when it ships.
 - mods-gotchas.md, "0.10.0 probes": add G4, G5 and P6 when they're run.
-- plan-0.10.0.md and plan-demo-gif.md: their status lines when 0.10.0 ships.
-- This file: delete it when 0.10.0 ships.
+- notes/README.md, "How 0.7.0 went out, as a pattern": a line for each release.
