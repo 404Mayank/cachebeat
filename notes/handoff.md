@@ -26,7 +26,7 @@
 - **The Status and Stats choices** (plan, item 5, "What steps 6 and 7 wait on") were taken by the orchestrator, except the Size row, which the user changed on 2026-11-25. The user may still want to tweak any of them.
 - **A progress bar filling toward the next beat** (in the turn line, recommended; or a row above the prompt; or the hint row) was discussed on 2026-11-26 and deferred by the user.
 - **Unverified on a real surface (step 6):** Status draws before the pane's `Input` check, so a surface without Input still shows it, assuming it has `Button`. The desktop app hasn't been looked at for Status.
-- **Leftover session files from the GIF and the live tests** may be deleted by the user. They're in the ProgLang project folder (`3c20ee7b-…`, the GIF's source, plus `9bc732df-…`, `21c495ec-…`, `5579f610-…`, `b626a422-…`), and under `clear`'s scratch test folder (`631776a3-…` and the Sonnet test's). Probe `session:<id>` records in the plugin store are pruned 30 days after their last write.
+- **Probe `session:<id>` records** from the live checks are in the plugin store; they're pruned 30 days after their last write. The session files the GIF and the live tests left were deleted by the user on 2026-11-26.
 
 ## Findings worth knowing before you touch anything
 
